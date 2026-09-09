@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mongo-store-py"
+version = "0.1.0"
+description = "Lightweight MongoDB data layer: pure JSON schemas, GQL tree queries compiled to a single $lookup, computed columns, soft-delete and role-based access control"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["mongodb", "asyncio", "data-layer", "query-builder", "odm", "pymongo", "acl"]
+authors = [
+    { name = "leo", email = "coen_ddt@qq.com" },
+]
+dependencies = [
+    "pymongo>=4.9",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: AsyncIO",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/coenddt/mongo-store-py"
+Repository = "https://github.com/coenddt/mongo-store-py"
+Issues = "https://github.com/coenddt/mongo-store-py/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
