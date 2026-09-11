@@ -1,5 +1,12 @@
 """
-Schema 管理 — 注册、解析、查询
+Schema 管理 — 薄适配层
+
+职责（其余全部在 Rust core）：
+  1. 把 Python schema 定义同步注册到 Rust core Registry（fn/asyncFn 以占位声明传递）；
+  2. 同步 `fn` 计算列回调（core 经 FnRegistry 跨 FFI 回调）；
+  3. 保留 asyncFn 原生函数映射（闭包无法跨 FFI，由 Host 在读路径尾处理执行）；
+  4. 保留 Host 必需的元数据镜像（collection / idPrefix / indexes / relations），
+     供 ID 生成与索引创建使用。
 
 示例:
     register({
@@ -25,95 +32,93 @@ Schema 管理 — 注册、解析、查询
     })
 """
 
-# 已注册的 schema 映射
+from .core import core
+
+# 缓存内置 list 类型（本模块的 list() 函数会遮蔽内置名）
+_LIST_TYPES = (list, tuple)
+
+# Host 侧元数据镜像
 _schemas: dict = {}
+
+# asyncFn 计算列回调映射（fnRef → 原生异步函数）
+_async_fns: dict = {}
+
+# 内部标记：表示「该键需剔除」（对齐 JS JSON round-trip 中函数型 default 被移除）
+_DROP = object()
+
+
+def _to_core_defn(defn):
+    """生成可跨 FFI 的 schema 定义：fn/asyncFn → True 占位；函数型值剔除"""
+
+    def walk(value, key=None):
+        if callable(value):
+            # fn/asyncFn 声明占位（core 按 `fn: True` 识别）；函数型 default 无法跨 FFI，剔除
+            return True if key in ('fn', 'asyncFn') else _DROP
+        if isinstance(value, dict):
+            out = {}
+            for k, v in value.items():
+                w = walk(v, k)
+                if w is not _DROP:
+                    out[k] = w
+            return out
+        if isinstance(value, _LIST_TYPES):
+            # 对齐 JS：数组内被剔除的函数值变成 null
+            out = []
+            for v in value:
+                w = walk(v)
+                out.append(None if w is _DROP else w)
+            return out
+        return value
+
+    return walk(defn)
 
 
 def register(defn):
-    """注册一个 schema，返回规范化后的 schema 对象"""
-    # 规范化 fields
-    fields = {}
-    for key, val in (defn.get('fields') or {}).items():
-        if isinstance(val, str):
-            # 简写: 'string' → {'type': 'string'}
-            fields[key] = {'type': val, 'required': False}
-        else:
-            fields[key] = {
-                'type': val.get('type'),
-                'required': val.get('required', False),
-                'default': val.get('default'),
-                'read': val.get('read'),
-                'write': val.get('write'),
-                'fields': val.get('fields'),
-            }
+    """注册一个 schema（自动派生 `<Name>Deleted` 归档表镜像），返回 Host 侧元数据"""
+    core.register(_to_core_defn(defn))
 
-    # 自动注册时间戳字段（timestamps: True 时，createdAt/updatedAt 由框架自动管理）
-    timestamps_enabled = defn.get('timestamps') is not False
-    if timestamps_enabled:
-        if 'createdAt' not in fields:
-            fields['createdAt'] = {'type': 'number'}
-        if 'updatedAt' not in fields:
-            fields['updatedAt'] = {'type': 'number'}
-
-    # 规范化 relations
-    relations = {}
-    for key, val in (defn.get('relations') or {}).items():
-        relations[key] = {
-            'model': val.get('model'),
-            'type': val.get('type', 'many'),
-            'localField': val.get('localField', '_id'),
-            'foreignField': val.get('foreignField', key),
-            'read': val.get('read'),
-        }
-
-    # 规范化 computes
+    # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
     for key, val in (defn.get('computes') or {}).items():
-        computes[key] = {
-            'type': val.get('type', 'any'),
-            'fn': val.get('fn'),
-            'lookup': val.get('lookup'),
-            'asyncFn': val.get('asyncFn'),
-            'depends': val.get('depends', []),
-            'read': val.get('read'),
-        }
+        fn_ref = val.get('fnRef') or key
+        if val.get('fn'):
+            core.set_fn(fn_ref, val['fn'])
+        if val.get('asyncFn'):
+            _async_fns[fn_ref] = val['asyncFn']
+        computes[key] = {'fnRef': fn_ref}
 
-    schema = {
+    _schemas[defn['name']] = {
         'name': defn['name'],
-        'collection': defn.get('collection', defn['name']),
-        'idPrefix': defn.get('idPrefix', ''),
+        'collection': defn.get('collection') or defn['name'],
+        'idPrefix': defn.get('idPrefix') or '',
         'timestamps': defn.get('timestamps') is not False,
-        'fields': fields,
-        'relations': relations,
+        'fields': defn.get('fields') or {},
+        'relations': defn.get('relations') or {},
         'computes': computes,
-        'indexes': defn.get('indexes', []),
+        'indexes': defn.get('indexes') or [],
         'read': defn.get('read'),
         'write': defn.get('write'),
+        # 数据源绑定（缺省视为 default，见 datasource.py）— Phase 3/4 多后端路由
+        'datasource': defn.get('datasource'),
     }
 
-    _schemas[schema['name']] = schema
-
-    # 自动注册删除附表 schema —— 每个业务表对应一个 `<collection>_deleted` 归档表
-    # 删除时原表数据先完整写入附表（附 deletedAt），再物理删除原表数据
-    if not defn.get('_isArchive') and not schema['name'].endswith('Deleted'):
+    # 归档表镜像（与 core register 的自动派生保持一致，供 Host 查询元数据）
+    if not defn.get('_isArchive') and not defn['name'].endswith('Deleted'):
         register({
-            'name': f"{schema['name']}Deleted",
-            'collection': f"{schema['collection']}_deleted",
+            'name': f"{defn['name']}Deleted",
+            'collection': f"{defn.get('collection') or defn['name']}_deleted",
             'idPrefix': '',
             '_isArchive': True,
-            # 归档表保留原表全部字段 + deletedAt（删除时间，毫秒），不做关联/计算列
-            'fields': {
-                **(defn.get('fields') or {}),
-                'deletedAt': {'type': 'number'},
-            },
+            'datasource': defn.get('datasource'),
+            'fields': {**(defn.get('fields') or {}), 'deletedAt': {'type': 'number'}},
             'indexes': defn.get('indexes') or [],
         })
 
-    return schema
+    return _schemas[defn['name']]
 
 
 def get(name):
-    """按名称获取 schema"""
+    """按名称获取 Host 侧元数据"""
     s = _schemas.get(name)
     if not s:
         raise KeyError(f'Schema 未注册: {name}')
@@ -121,10 +126,15 @@ def get(name):
 
 
 def has(name):
-    """检查 schema 是否已注册"""
-    return name in _schemas
+    """检查 schema 是否已注册（core 侧判定，含归档表）"""
+    return core.has(name)
 
 
 def list():
-    """获取所有已注册 schema 名称"""
-    return [*_schemas.keys()]
+    """所有已注册 schema 名称（core 侧，含归档表，按注册顺序）"""
+    return core.list()
+
+
+def get_async_fn(fn_ref):
+    """取 asyncFn 计算列实现（fnRef 缺省 = 计算列 key 名）"""
+    return _async_fns.get(fn_ref)

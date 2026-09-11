@@ -1,29 +1,37 @@
 """
-py-store — 轻量多后端数据层（Python 版；支持 MongoDB / MySQL / SQLite / PostgreSQL）
+py-store — 轻量多后端数据层（Python 版，Rust 单核心架构；支持 MongoDB / MySQL / SQLite / PostgreSQL）
 
 核心理念:
   1. 纯 JSON schema 定义，零代码
-  2. 读取时自动补默认值 + 执行计算列
-  3. GQL 树形查询 → 一次原生查询
-  4. 写入只存用户数据，不补默认值
+  2. Rust core 统一实现 GQL 解析 / 权限 / 计算列 / 命令规划（core-py 绑定）
+  3. src/py_store/*.py 为薄 Host 适配层：驱动 IO + 回调 + 占位符替换
+  4. Node 侧（core-node）复用同一 Rust core，双端语义天然一致
 
 用法:
     from py_store import init, store
 
-    await init(db)
+    await init(db)                       # 单库简写（Mongo db 实例）
+    await init({                         # 多数据源（schema 的 datasource 绑定路由）
+        'default': mongo_db,
+        'mysql_a': executors.create_connection('mysql', mysql_pool),
+    })
+
     items = await store.query(`Model($condition:@c0) { field1, field2 }`, {'c0': {...}})
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 from pymongo.errors import PyMongoError
 
-from . import crud, permission, pipeline, schema
+from . import crud, datasource, executors, introspect, permission, schema
+from .sync import sync_schema
 
 
-async def aggregate(schema_name: str, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """对指定 schema 执行 MongoDB 原生聚合查询"""
-    return await crud.aggregate(schema_name, pipeline)
+def _build_pipeline(gql, params=None):
+    """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
+    return schema.core.build_pipeline(
+        gql, params if params is not None else {}, permission.get_context())
 
 
 _store_map = {
@@ -36,6 +44,7 @@ _store_map = {
     'query': crud.query,
     'queryOne': crud.query_one,
     'queryWithCount': crud.query_with_count,
+    'queryFederated': crud.query_federated,
     'exists': crud.exists,
     'count': crud.count,
     'insert': crud.insert,
@@ -48,10 +57,16 @@ _store_map = {
     # Upsert — 显式条件 upsert（不处理父子关系）
     'upsert': crud.upsert,
     # 底层工具（调试/高级用法）
-    'parseGQL': pipeline.parse_gql,
-    'buildPipeline': pipeline.build_pipeline,
+    'buildPipeline': _build_pipeline,
+    'build_pipeline': _build_pipeline,
     # 原生聚合查询
-    'aggregate': aggregate,
+    'aggregate': crud.aggregate,
+    # 结构同步（SQL 数据源：introspect → schemaFromRows → mergeSchema → register）
+    'syncSchema': sync_schema,
+    'sync_schema': sync_schema,
+    # 数据源连接（多后端路由）
+    'setConnections': crud.set_connections,
+    'set_connections': crud.set_connections,
     # 权限控制（ContextVar 上下文）
     'setContext': permission.set_context,
     'getContext': permission.get_context,
@@ -65,10 +80,9 @@ _store_map = {
     # 蛇形命名别名（Python 风格调用）
     'query_one': crud.query_one,
     'query_with_count': crud.query_with_count,
+    'query_federated': crud.query_federated,
     'insert_many': crud.insert_many,
     'update_many': crud.update_many,
-    'parse_gql': pipeline.parse_gql,
-    'build_pipeline': pipeline.build_pipeline,
 }
 
 
@@ -83,6 +97,10 @@ class Store:
 
     async def query_with_count(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return await crud.query_with_count(gql, params)
+
+    async def query_federated(self, gql: str, params: dict | None = None) -> list[dict[str, Any]]:
+        """跨库联邦查询（一条 GQL 跨多数据源：各源取数 → 内存 join → 统一后处理）"""
+        return await crud.query_federated(gql, params)
 
     async def insert(self, schema_name: str, data: dict) -> dict[str, Any]:
         return await crud.insert(schema_name, data)
@@ -116,17 +134,33 @@ class Store:
     async def aggregate(self, schema_name: str, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return await crud.aggregate(schema_name, pipeline)
 
+    async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
+                          overlay: list | None = None, datasource: str | None = None,
+                          register_defs: bool = True) -> list[dict[str, Any]]:
+        return await sync_schema(backend, driver, introspect_options, overlay,
+                                 datasource, register_defs)
+
+    def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
+        return _build_pipeline(gql, params)
+
     def __getattr__(self, name):
         return _store_map[name]
 
 
+# 自定义权限错误（实例可被 store.PermissionError 捕获）
+Store.PermissionError = permission.PermissionError
+
 store = Store()
 
 # 索引名对齐 MongoDB 自动命名（k1_v1_k2_v2），用于幂等创建
-async def _create_indexes_if_needed(db):
+async def _create_indexes_if_needed():
+    """按数据源分派：Mongo 源执行索引创建；SQL 后端**不建索引**（indexes 仅元数据）"""
     names = schema.list()
     for name in names:
         s = schema.get(name)
+        db = datasource.connection_of_schema(name)
+        if datasource.is_sql(db):
+            continue  # SQL 后端不建索引（铁律 6）
         coll = db[s['collection']]
         try:
             index_cursor = await coll.list_indexes()
@@ -155,13 +189,22 @@ async def _create_indexes_if_needed(db):
                 print(f'[py-store] 创建索引失败 {s["collection"]}: {e}', file=sys.stderr)
 
 
-async def init(db):
-    """初始化 store — 传入 PyMongo AsyncMongoClient 的 db 实例"""
-    if db is None or not hasattr(db, 'collection'):
-        raise TypeError('init(db) 需要 PyMongo async 的 db 实例')
-    crud.set_db(db)
+async def init(connections):
+    """
+    初始化 store — 传入数据源连接映射
 
-    # 自动创建索引 — 幂等安全
-    await _create_indexes_if_needed(db)
+      - 多源：``init({'default': db, 'mysql_a': {'kind': 'mysql', 'exec': ...}})``
+      - 单源简写：``init(db)``（PyMongo async 的 db 实例，自动归一为 ``{'default': db}``）
+
+    连接按 schema 的 ``datasource`` 绑定路由；缺省绑定回落 ``default``。
+    """
+    if connections is None or (
+            not isinstance(connections, Mapping)
+            and not callable(getattr(connections, '__getitem__', None))):
+        raise TypeError('init(connections) 需要数据源连接映射（或单个 PyMongo 的 db 实例）')
+    datasource.set_connections(connections)
+
+    # 自动创建索引（仅 Mongo 源）— 幂等安全
+    await _create_indexes_if_needed()
 
     return store
