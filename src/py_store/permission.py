@@ -16,7 +16,7 @@
 import contextvars
 from contextlib import contextmanager
 
-_ctx: contextvars.ContextVar = contextvars.ContextVar('mongo_store_ctx', default=None)
+_ctx: contextvars.ContextVar = contextvars.ContextVar('py_store_ctx', default=None)
 
 _MISSING = object()
 

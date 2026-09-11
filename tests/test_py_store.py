@@ -1,4 +1,4 @@
-"""mongo-store 单元测试（纯逻辑，无真实 DB）：pipeline / permission / computes / crud
+"""py-store 单元测试（纯逻辑，无真实 DB）：pipeline / permission / computes / crud
 
 从业务工程单测平移而来；schema 注册用本文件内置的最小模型（替代业务工程 register_all）。
 """
@@ -8,11 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from mongo_store import computes as comp
-from mongo_store import crud as _crud_mod
-from mongo_store import pipeline as ppl
-from mongo_store import schema as _sc
-import mongo_store.permission as perm
+from py_store import computes as comp
+from py_store import crud as _crud_mod
+from py_store import pipeline as ppl
+from py_store import schema as _sc
+import py_store.permission as perm
 
 
 # ---------- 内置最小 schema（与业务工程 CommercialLedger 同构） ----------

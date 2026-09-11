@@ -46,7 +46,7 @@ def set_db(db):
 
 def _get_db():
     if _db is None:
-        raise RuntimeError('MongoStore 未初始化，请先调用 init(db)')
+        raise RuntimeError('py-store 未初始化，请先调用 init(db)')
     return _db
 
 

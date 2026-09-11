@@ -1,14 +1,14 @@
 """
-MongoStore — 轻量 MongoDB 数据层（Python 版）
+py-store — 轻量多后端数据层（Python 版；支持 MongoDB / MySQL / SQLite / PostgreSQL）
 
 核心理念:
   1. 纯 JSON schema 定义，零代码
   2. 读取时自动补默认值 + 执行计算列
-  3. GQL 树形查询 → 一次 $lookup 聚合
+  3. GQL 树形查询 → 一次原生查询
   4. 写入只存用户数据，不补默认值
 
 用法:
-    from mongo_store import init, store
+    from py_store import init, store
 
     await init(db)
     items = await store.query(`Model($condition:@c0) { field1, field2 }`, {'c0': {...}})
@@ -152,7 +152,7 @@ async def _create_indexes_if_needed(db):
                 await coll.create_index(list(keys.items()), **final_options)
             except PyMongoError as e:
                 import sys
-                print(f'[MongoStore] 创建索引失败 {s["collection"]}: {e}', file=sys.stderr)
+                print(f'[py-store] 创建索引失败 {s["collection"]}: {e}', file=sys.stderr)
 
 
 async def init(db):
