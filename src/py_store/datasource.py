@@ -164,13 +164,10 @@ async def exec_sql(source, connection, cmd):
     塑形为 Mongo 驱动等价返回值（见 ``executors.shape_result``），使上层（crud/*）
     对 Mongo / SQL 两条路径无感。
     """
-    exec_fn = _exec_of(connection)
-    if not callable(exec_fn):
-        raise RuntimeError(
-            f'SQL 数据源 {source}({_kind_of(connection)}) 的执行器未接入（见执行文档 Phase 4）')
     plan = _core.dialect_translate(_kind_of(connection), cmd)
     # Host 兜底：core 标记了无法安全下推的组合（如 $lookup 子 $limit 每父 top-N）时，
     # 绝不执行「缺少该段」的 SQL（会静默返回错误结果），改为显式报错，由调用方降级重查。
+    # 先于执行器检查 —— 命令本身不可安全下推时，报下推不支持而非「执行器未接入」。
     unsupported = plan.get('unsupported') or []
     if unsupported:
         err = PushdownUnsupportedError(
@@ -182,5 +179,9 @@ async def exec_sql(source, connection, cmd):
         # 自动反馈：拦截即告警（无 sink 时打 stderr），禁止静默失守
         _emit_feedback(err.feedback())
         raise err
+    exec_fn = _exec_of(connection)
+    if not callable(exec_fn):
+        raise RuntimeError(
+            f'SQL 数据源 {source}({_kind_of(connection)}) 的执行器未接入（见执行文档 Phase 4）')
     out = await exec_fn(plan)
     return executors.shape_result(cmd, out)
