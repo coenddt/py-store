@@ -93,58 +93,76 @@ _store_map = {
 
 
 class Store:
-    """以属性方式访问 _store_map，支持 store.query(...) 调用形态"""
+    """以属性方式访问 _store_map，支持 store.query(...) 调用形态
 
-    async def query(self, gql: str, params: dict | None = None) -> list[dict[str, Any]]:
-        return await crud.query(gql, params)
+    CRUD / mutation / aggregate 各方法均支持可选 ``route_override``
+    （``{'source', 'namespace'}`` 多租户路由，覆盖命令定位；权限与计算列
+    仍按结构 schema 判定，见 multi-datasource-routing-plan.md §6）。
+    """
 
-    async def query_one(self, gql: str, params: dict | None = None) -> dict[str, Any] | None:
-        return await crud.query_one(gql, params)
+    async def query(self, gql: str, params: dict | None = None,
+                    route_override: dict | None = None) -> list[dict[str, Any]]:
+        return await crud.query(gql, params, route_override)
 
-    async def query_with_count(self, gql: str, params: dict | None = None) -> dict[str, Any]:
-        return await crud.query_with_count(gql, params)
+    async def query_one(self, gql: str, params: dict | None = None,
+                        route_override: dict | None = None) -> dict[str, Any] | None:
+        return await crud.query_one(gql, params, route_override)
+
+    async def query_with_count(self, gql: str, params: dict | None = None,
+                               route_override: dict | None = None) -> dict[str, Any]:
+        return await crud.query_with_count(gql, params, route_override)
 
     async def query_federated(self, gql: str, params: dict | None = None) -> list[dict[str, Any]]:
         """跨库联邦查询（一条 GQL 跨多数据源：各源取数 → 内存 join → 统一后处理）"""
         return await crud.query_federated(gql, params)
 
-    async def insert(self, schema_name: str, data: dict) -> dict[str, Any]:
-        return await crud.insert(schema_name, data)
+    async def insert(self, schema_name: str, data: dict,
+                     route_override: dict | None = None) -> dict[str, Any]:
+        return await crud.insert(schema_name, data, route_override)
 
-    async def insert_many(self, schema_name: str, docs: list[dict]) -> list[dict[str, Any]]:
-        return await crud.insert_many(schema_name, docs)
+    async def insert_many(self, schema_name: str, docs: list[dict],
+                          route_override: dict | None = None) -> list[dict[str, Any]]:
+        return await crud.insert_many(schema_name, docs, route_override)
 
     async def update(self, schema_name: str, condition: dict, data: dict,
-                     options: dict | None = None) -> dict[str, Any] | None:
-        return await crud.update(schema_name, condition, data, options)
+                     options: dict | None = None,
+                     route_override: dict | None = None) -> dict[str, Any] | None:
+        return await crud.update(schema_name, condition, data, options, route_override)
 
-    async def update_many(self, schema_name: str, condition: dict, data: dict) -> dict[str, Any]:
-        return await crud.update_many(schema_name, condition, data)
+    async def update_many(self, schema_name: str, condition: dict, data: dict,
+                          route_override: dict | None = None) -> dict[str, Any]:
+        return await crud.update_many(schema_name, condition, data, route_override)
 
-    async def remove(self, schema_name: str, condition: dict) -> dict[str, Any]:
-        return await crud.remove(schema_name, condition)
+    async def remove(self, schema_name: str, condition: dict,
+                     route_override: dict | None = None) -> dict[str, Any]:
+        return await crud.remove(schema_name, condition, route_override)
 
-    async def exists(self, schema_name: str, condition: dict) -> bool:
-        return await crud.exists(schema_name, condition)
+    async def exists(self, schema_name: str, condition: dict,
+                     route_override: dict | None = None) -> bool:
+        return await crud.exists(schema_name, condition, route_override)
 
-    async def count(self, schema_name: str, filter: dict | None = None) -> int:
-        return await crud.count(schema_name, filter)
+    async def count(self, schema_name: str, filter: dict | None = None,
+                    route_override: dict | None = None) -> int:
+        return await crud.count(schema_name, filter, route_override)
 
-    async def mutation(self, schema_name: str, data: dict | list[dict]) -> Any:
-        return await crud.mutation(schema_name, data)
+    async def mutation(self, schema_name: str, data: dict | list[dict],
+                       route_override: dict | None = None) -> Any:
+        return await crud.mutation(schema_name, data, route_override)
 
     async def upsert(self, schema_name: str, condition: dict, data: dict,
-                     options: dict | None = None) -> dict[str, Any] | None:
-        return await crud.upsert(schema_name, condition, data, options)
+                     options: dict | None = None,
+                     route_override: dict | None = None) -> dict[str, Any] | None:
+        return await crud.upsert(schema_name, condition, data, options, route_override)
 
-    async def aggregate(self, schema_name: str, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return await crud.aggregate(schema_name, pipeline)
+    async def aggregate(self, schema_name: str, pipeline: list[dict[str, Any]],
+                        route_override: dict | None = None) -> list[dict[str, Any]]:
+        return await crud.aggregate(schema_name, pipeline, route_override)
 
     async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
                           overlay: list | None = None, datasource: str | None = None,
-                          register_defs: bool = True) -> list[dict[str, Any]]:
+                          namespace: str | None = None, register_defs: bool = True) -> list[dict[str, Any]]:
         return await sync_schema(backend, driver, introspect_options, overlay,
-                                 datasource, register_defs)
+                                 datasource, namespace, register_defs)
 
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
@@ -164,8 +182,13 @@ async def _create_indexes_if_needed():
     names = schema.list()
     for name in names:
         s = schema.get(name)
-        db = datasource.connection_of_schema(name)
-        if datasource.is_sql(db):
+        # 索引创建是初始化的辅助动作（非命令路由）：schema 绑定的 source 暂未在
+        # 当前连接映射中时跳过，不阻塞 init（命令路由的 fail fast 不在此处）
+        try:
+            db = datasource.db_of_schema(name)  # Mongo 按 (datasource, namespace) 解析；SQL 源返回 None
+        except Exception:  # noqa: BLE001
+            continue
+        if db is None:
             continue  # SQL 后端不建索引（铁律 6）
         coll = db[s['collection']]
         try:
@@ -199,10 +222,12 @@ async def init(connections):
     """
     初始化 store — 传入数据源连接映射
 
-      - 多源：``init({'default': db, 'mysql_a': {'kind': 'mysql', 'exec': ...}})``
-      - 单源简写：``init(db)``（PyMongo async 的 db 实例，自动归一为 ``{'default': db}``）
+      - 多源：``init({'default': db, 'mongo_b': client,
+            'pg_a': executors.create_connection('postgres', pool)})``
+      - 单源简写：``init(db)`` / ``init(client)``（PyMongo async 的 db 实例或
+        MongoClient，自动归一为 ``{'default': 连接}``）
 
-    连接按 schema 的 ``datasource`` 绑定路由；缺省绑定回落 ``default``。
+    连接按命令的 ``source`` 路由、``namespace`` 定位库（schema 声明）；缺省绑定回落 ``default``。
     """
     if connections is None or (
             not isinstance(connections, Mapping)

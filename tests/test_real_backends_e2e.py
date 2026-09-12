@@ -413,7 +413,11 @@ async def _t_upsert(ctx):
 
 async def _t_sync_schema(ctx):
     """introspect → schema_from_rows → register"""
-    defs = await store.sync_schema(ctx.kind, ctx.driver, datasource=ctx.ds)
+    # 库里含已注册逻辑模型（my_posts 等），三元组唯一性下直接注册必冲突 ——
+    # 故先 register_defs=False 拿 defs 验证映射，再显式断言冲突 fail fast，
+    # 最后单独注册非冲突表验证注册链路。
+    defs = await store.sync_schema(ctx.kind, ctx.driver, datasource=ctx.ds,
+                                   register_defs=False)
 
     widgets = next((d for d in defs if d['name'] == 'widgets'), None)
     assert widgets, '应产出 widgets 定义'
@@ -430,7 +434,18 @@ async def _t_sync_schema(ctx):
     assert gadgets['relations']['widgets']['type'] == 'one'
     assert gadgets['relations']['widgets']['localField'] == 'widget_id'
 
-    assert _sc.has('widgets'), 'syncSchema 应完成注册'
+    # 三元组冲突 fail fast：已注册 <ctx.schema_name>（同 source、同 collection）再注册即抛错
+    dupe = next((d for d in defs if d['collection'] == ctx.collection), None)
+    assert dupe, 'introspect 应产出已注册表的 def'
+    with pytest.raises(RuntimeError, match='冲突|占用'):
+        _sc.register({**dupe, 'name': f"{dupe['name']}_dupe"})
+
+    taken = {_sc.get(n)['collection'] for n in _sc.list()}
+    for d in defs:
+        if d['collection'] in taken:
+            continue
+        _sc.register(d)
+    assert _sc.has('widgets'), 'syncSchema 应完成非冲突表注册'
 
 
 @pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)

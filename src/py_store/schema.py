@@ -90,6 +90,7 @@ def register(defn):
     _schemas[defn['name']] = {
         'name': defn['name'],
         'collection': defn.get('collection') or defn['name'],
+        'namespace': defn.get('namespace') or None,
         'idPrefix': defn.get('idPrefix') or '',
         'timestamps': defn.get('timestamps') is not False,
         # 时间戳单位（'ms'/'s'/None=不维护）；值合法性由 core.register 校验
@@ -112,7 +113,9 @@ def register(defn):
             'collection': f"{defn.get('collection') or defn['name']}_deleted",
             'idPrefix': '',
             '_isArchive': True,
+            # 归档表与原表同 (source, namespace)
             'datasource': defn.get('datasource'),
+            'namespace': defn.get('namespace') or None,
             'fields': {**(defn.get('fields') or {}), 'deletedAt': {'type': 'number'}},
             'indexes': defn.get('indexes') or [],
         })

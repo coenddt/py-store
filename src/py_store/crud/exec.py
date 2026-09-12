@@ -5,7 +5,8 @@
 本模块只做 Host 三件事里最底层的一件：把 core 产出的 Command JSON
 路由到对应数据源连接并执行。不确定性输入由本层供给（now 时钟、newId 随机 ID）。
 
-路由规则见 ``..datasource``：按命令的 ``collection`` 找 schema 绑定的数据源，
+路由规则见 ``..datasource``：命令自带 ``source`` / ``namespace`` 三元组，按 ``source``
+选连接、``namespace`` 定位连接内的库（Mongo 双形态严格校验），
 Mongo 走原生驱动，SQL 走 ``translate → exec``。对齐 ``nodejs-store/src/crud/exec.js``。
 """
 
@@ -64,14 +65,15 @@ def _call(fn):
 async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec）"""
     connection = _datasource.get_connection(source)
-    if _datasource.is_sql(connection):
-        return await _datasource.exec_sql(source, connection, cmd)
-    return await _exec_mongo(connection, cmd)
+    db = _datasource.mongo_db(connection, source, cmd.get('namespace'))
+    if db is not None:
+        return await _exec_mongo(db, cmd)
+    return await _datasource.exec_sql(source, connection, cmd)
 
 
 async def _exec(cmd):
-    """Command JSON → 按 collection 绑定路由到 Mongo 原生 / SQL 翻译执行"""
-    return await _exec_on(_datasource.source_of_collection(cmd['collection']), cmd)
+    """Command JSON → 按命令自带的 ``source`` 路由（不按 collection 反查）"""
+    return await _exec_on(cmd.get('source') or _datasource.DEFAULT_SOURCE, cmd)
 
 
 def _substitute(value, resolver):

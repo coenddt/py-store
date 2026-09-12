@@ -68,19 +68,29 @@ async def introspect(driver, options=None):
 
     from asyncmy.cursors import DictCursor
 
-    async def run(sql):
+    database = (options or {}).get('database')
+    # 显式传 database（连接串不带库或跨库同步）→ 参数化 table_schema；
+    # 缺省用当前连接的 DATABASE()。显式库名会作为 namespace 透出到 def。
+    schema_filter = 'table_schema = %s' if database is not None else 'table_schema = DATABASE()'
+    params = (database,) if database is not None else ()
+    tables_sql = lambda base: base.replace(
+        'table_schema = DATABASE()', schema_filter)  # noqa: E731
+
+    async def run(sql, args=()):
         async with _acquire(driver) as conn:
             async with conn.cursor(DictCursor) as cur:
-                await cur.execute(sql)
+                await cur.execute(sql, args)
                 return await cur.fetchall()
 
-    tables = await run(_TABLES)
-    columns = await run(_COLUMNS)
-    fks = await run(_FKS)
-    index_rows = await run(_INDEXES)
+    tables = await run(tables_sql(_TABLES), params)
+    columns = await run(tables_sql(_COLUMNS), params)
+    fks = await run(tables_sql(_FKS), params)
+    index_rows = await run(tables_sql(_INDEXES), params)
 
     return {
-        'tables': list(tables),
+        # 显式库名 → 行携带 namespace（core schema_from_rows 会写进 def）
+        'tables': [dict(t, namespace=database) for t in tables]
+        if database is not None else list(tables),
         'columns': [
             {
                 'table': c['table'],

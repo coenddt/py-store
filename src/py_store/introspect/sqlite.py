@@ -28,11 +28,23 @@ async def introspect(db, options=None):
     fks = []
     indexes = []
 
+    # attached db 过滤：PRAGMA database_list 校验库名存在（main/temp/ATTACH 的库名），
+    # 表清单改从 `<db>.sqlite_master` 读取；显式库名作为 namespace 透出到 def。
+    database = (options or {}).get('database')
+    master_from = 'sqlite_master'
+    if database is not None:
+        known = {r[1] for r in await _all(db, 'PRAGMA database_list')}
+        if database not in known:
+            raise RuntimeError(
+                f'SQLite attached db 不存在: {database}（当前 attached: {", ".join(sorted(known))}）')
+        master_from = f'{_quote(database)}.sqlite_master'
+
     table_rows = await _all(
-        db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        db, f"SELECT name FROM {master_from} WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 
     for (name,) in table_rows:
-        tables.append({'name': name})
+        tables.append({'name': name, 'namespace': database}
+                      if database is not None else {'name': name})
 
         for c in await _all(db, f'PRAGMA table_info({_quote(name)})'):
             # (cid, name, type, notnull, dflt_value, pk)

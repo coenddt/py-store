@@ -37,22 +37,25 @@ async def _finalize(plan, items):
     return _core.strip_query(post, prepared['items'])['items']
 
 
-async def query(gql, params=None):
+async def query(gql, params=None, route_override=None):
     """
     GQL 查询（返回数组）
 
     支持的 params 键（通过 GQL 的 @key 引用）:
       $condition / $sort / $skip / $limit / $pipeline
     使用 $pipeline 时，框架不追加 compute 层、不补默认值、不裁剪，完全由用户控制。
+
+    ``route_override``（多租户路由，可选）：``{'source', 'namespace'}`` 覆盖命令定位，
+    权限/计算列仍按结构 schema 判定（见 multi-datasource-routing-plan.md §6）。
     """
     plan = _call(lambda: _core.plan_query(
-        gql, params if params is not None else {}, _ctx()))
+        gql, params if params is not None else {}, _ctx(), route_override))
     return await _finalize(plan, await _run_query_plan(plan))
 
 
-async def query_one(gql, params=None):
+async def query_one(gql, params=None, route_override=None):
     """GQL 查询（返回单条）"""
-    items = await query(gql, params)
+    items = await query(gql, params, route_override)
     return items[0] if items else None
 
 
@@ -99,7 +102,7 @@ async def query_federated(gql, params=None):
     return await _finalize(plan, merged)
 
 
-async def query_with_count(gql, params=None):
+async def query_with_count(gql, params=None, route_override=None):
     """
     GQL 查询（返回 items + total + 分页元数据）
 
@@ -109,7 +112,7 @@ async def query_with_count(gql, params=None):
     pageSize 上限 5000，防止拖库。
     """
     plan = _call(lambda: _core.plan_query_with_count(
-        gql, params if params is not None else {}, _ctx(), None))
+        gql, params if params is not None else {}, _ctx(), None, route_override))
     items = await _finalize(plan, await _run_query_plan(plan))
     total = await _exec(plan['countCommand'])
     return {
