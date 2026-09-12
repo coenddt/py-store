@@ -1,19 +1,22 @@
 name: release-pypi
 
-# 发布 py-store（纯 Python 薄 Host）到 PyPI。
+# 发布 storepy（纯 Python 薄 Host，import 名为 py_store）到 PyPI。
 #
 # 凭证：PyPI Trusted Publishing（OIDC），不使用长期 token。
 # 前置（PyPI 侧一次性配置 https://pypi.org/manage/account/publishing/）：
-#   PyPI Project Name = py-store
+#   PyPI Project Name = storepy
 #   Owner             = coenddt
 #   Repository name   = py-store
 #   Workflow name     = release-pypi.yml
 #   Environment name  = （留空）
 #
+# 注：分发名原定 `py-store`，被 PyPI 近似名规则拒绝（与已存在项目 `pystore`
+#     剥离分隔符后同名），故改为 `storepy`；仓库名仍为 py-store。
+#
 # 触发：推 v* tag，或手动 dispatch（手动触发只构建，不发布）。
 #
 # 注：本包依赖 rust-store-py（同版本区间），首次发布须先发 rust-store-py，
-#     否则 `pip install py-store` 会因缺依赖失败。纯 Python，wheel 为 py3-none-any。
+#     否则 `pip install storepy` 会因缺依赖失败。纯 Python，wheel 为 py3-none-any。
 
 on:
   push:

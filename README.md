@@ -26,10 +26,10 @@ GQL tree queries compile to a single native query per backend — never hand-wri
 ## Installation
 
 ```bash
-pip install py-store
+pip install storepy
 ```
 
-> The distribution name is `py-store`; the import package is `py_store`:
+> The distribution name is `storepy`; the import package is `py_store`:
 > `from py_store import init, store`.
 
 Requires Python 3.10+ and one supported backend (MongoDB / MySQL / SQLite / PostgreSQL).

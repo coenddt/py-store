@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "py-store"
+name = "storepy"
 version = "0.1.0"
 description = "Lightweight multi-backend data layer (MongoDB / MySQL / SQLite / PostgreSQL): pure JSON schemas, GQL tree queries compiled to a single query, computed columns, soft-delete and role-based access control"
 readme = "README.md"
