@@ -1,6 +1,8 @@
 """Mutation / Upsert / 原生聚合 —— 规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
 
-from ..schema import core as _core, get as _get_schema
+from .. import datasource as _datasource
+from ..schema import core as _core
+from ..schema import get as _get_schema
 from .exec import _call, _ctx, _exec, _now_for, resolve_placeholders
 from .id import _generate_id, _new_id_pool
 
@@ -11,18 +13,28 @@ async def _mutation_one(schema_name, data, route_override=None):
         schema_name, data, _now_for(schema_name), _new_id_pool(schema_name, data), _ctx(),
         route_override))
 
-    resolved = []
-    root_result = None
-    for i, step in enumerate(plan['steps']):
-        cmd = resolve_placeholders(step['command'], steps=resolved)
-        result = await _exec(cmd)
-        resolved.append(result.get('_id') if result else None)
-        if i == 0:
-            root_result = result  # 首步即根写入
+    async def _run_steps():
+        resolved: list = []
+        root_result = None
+        for i, step in enumerate(plan['steps']):
+            cmd = resolve_placeholders(step['command'], steps=resolved)
+            result = await _exec(cmd)
+            resolved.append(result.get('_id') if result else None)
+            if i == 0:
+                root_result = result  # 首步即根写入
 
-    if not root_result:
-        return None
-    return _call(lambda: _core.apply_write_defaults(schema_name, root_result))
+        if not root_result:
+            return None
+        return _call(lambda: _core.apply_write_defaults(schema_name, root_result))
+
+    # 单一 SQL 源 → 步骤序列整体事务化（同连接同事务，任一步失败整体回滚）；
+    # Mongo 源 / 跨源步骤按原样顺序执行（非原子边界见 README「事务边界」）
+    sources = {(s['command'].get('source') or _datasource.DEFAULT_SOURCE) for s in plan['steps']}
+    if len(sources) == 1:
+        source = next(iter(sources))
+        if _datasource.is_sql_source(source):
+            return await _datasource.run_in_transaction(source, _run_steps)
+    return await _run_steps()
 
 
 async def mutation(schema_name, data, route_override=None):

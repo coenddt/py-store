@@ -63,11 +63,11 @@ def _to_core_defn(defn):
             return out
         if isinstance(value, _LIST_TYPES):
             # 对齐 JS：数组内被剔除的函数值变成 null
-            out = []
+            out_arr = []
             for v in value:
                 w = walk(v)
-                out.append(None if w is _DROP else w)
-            return out
+                out_arr.append(None if w is _DROP else w)
+            return out_arr
         return value
 
     return walk(defn)
@@ -144,6 +144,22 @@ def list():
 def set_allow_user_pipeline(allow=True):
     """开关用户 $pipeline 直通（默认允许；AI 问数宿主建议关闭作纵深防御）"""
     core.set_allow_user_pipeline(bool(allow))
+
+
+def set_require_context(require=True):
+    """
+    开关「上下文强制」（默认关闭 = fail-open，与 JS 原版语义一致）。
+
+    开启后：所有 plan 入口遇 ctx 缺失抛 ``ERR_NO_CONTEXT`` 错误（fail-secure）；
+    内部调用（索引创建、归档回填、后台任务等）须在 ``run_as_internal`` 中执行，
+    或显式传 ``{'internal': True}`` 上下文。
+    """
+    core.set_require_context(bool(require))
+
+
+def require_context():
+    """「上下文强制」开关当前值"""
+    return core.require_context()
 
 
 def get_async_fn(fn_ref):

@@ -27,6 +27,12 @@ async def exec_mongo(db, cmd):
         await coll.insert_one(cmd['doc'])
         return cmd['doc']
     if kind == 'insertMany':
+        if cmd.get('upsertById'):
+            # 归档幂等（core plan_archive_docs）：按 _id 逐条覆盖 —— 「归档成功但删除失败」
+            # 的重试不再因 _id 冲突整批失败。SQL 侧由 dialect 的 ON CONFLICT/REPLACE 承接。
+            for doc in cmd['docs']:
+                await coll.replace_one({'_id': doc['_id']}, doc, upsert=True)
+            return {'insertedCount': len(cmd['docs'])}
         await coll.insert_many(cmd['docs'])
         return {'insertedCount': len(cmd['docs'])}
     if kind == 'findOneAndUpdate':

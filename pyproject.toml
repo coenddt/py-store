@@ -36,6 +36,7 @@ classifiers = [
 mysql = ["asyncmy>=0.2.9"]
 postgres = ["asyncpg>=0.29"]
 sqlite = ["aiosqlite>=0.19"]
+dev = ["pytest>=8", "ruff>=0.16", "mypy>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/coenddt/py-store"
@@ -44,3 +45,31 @@ Issues = "https://github.com/coenddt/py-store/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# e2e 用例在外部库（MySQL/PG/Mongo）不可达时自动 skip；开发兜底需 LOCAL_CORE=1（见 README Development）
+addopts = "-q"
+
+# ── lint（评测报告 m-8：规则从现有风格反推，宽松起步） ──────────────────────
+# E/F/W 正确性底线；I 导入排序；B 常见 bug；RUF 杂项。
+# 刻意不启 SIM/UP/FURB 等风格改写类规则、不跑 ruff format —— 避免一次性大规模重排。
+[tool.ruff]
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "RUF"]
+ignore = [
+  "E501",      # 行长：现有代码含长 schema 示例与 GQL 字面量，不因行长重构
+  "RUF001",    # 中文注释/文档/字符串的全角标点（，。（）等）是既定风格，非混淆字符
+  "RUF002",
+  "RUF003",
+]
+
+[tool.mypy]
+python_version = "3.10"
+# 宽松起步：py_store 为动态薄适配层，注解覆盖不足，先只挡「导入失败/明显类型矛盾」
+ignore_missing_imports = true
+check_untyped_defs = true

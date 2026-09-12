@@ -22,7 +22,8 @@ def create(driver, options=None):
     if driver is None or not hasattr(driver, 'fetch'):
         raise TypeError('postgres 执行器需要 asyncpg 的连接或连接池')
 
-    async def exec_(plan):
+    async def run_stmts(conn, plan):
+        """在指定连接上依序执行 plan.stmts（事务内与池路径共用）"""
         docs = None
         rows = None
         affected_rows = 0
@@ -31,11 +32,24 @@ def create(driver, options=None):
             shape = stmt.get('rowShape')
             if shape:
                 # SELECT 或带 RETURNING 的写语句 → 取结果集
-                records = await driver.fetch(stmt['text'], *params)
+                records = await conn.fetch(stmt['text'], *params)
                 rows = [dict(r) for r in records]
                 docs = _core.restore_rows(shape, rows)
             else:
-                affected_rows = _affected(await driver.execute(stmt['text'], *params))
+                affected_rows = _affected(await conn.execute(stmt['text'], *params))
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
 
-    return {'kind': 'postgres', 'exec': exec_}
+    async def exec_(plan):
+        return await run_stmts(driver, plan)
+
+    async def with_transaction(body):
+        """事务执行：pool → acquire 专用连接 + ``conn.transaction()``；单连接直接用；
+        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+        if hasattr(driver, 'acquire'):
+            async with driver.acquire() as conn:
+                async with conn.transaction():
+                    return await body(lambda plan: run_stmts(conn, plan))
+        async with driver.transaction():
+            return await body(lambda plan: run_stmts(driver, plan))
+
+    return {'kind': 'postgres', 'exec': exec_, 'with_transaction': with_transaction}

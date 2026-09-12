@@ -32,7 +32,7 @@ def _dev_fallback():
         sys.path.insert(0, str(_DEV_DIST))
     try:
         return importlib.import_module('rust_store_py')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {'__error': f'{_DEV_DIST}: {e}'}
 
 
@@ -53,7 +53,7 @@ def _load():
             "请设置 LOCAL_CORE=1（且 NODE_ENV != 'production'）并在 rust-store 仓库构建：\n"
             '  python -m maturin develop --manifest-path rust-store/core-py/Cargo.toml\n'
             + '\n'.join(hints)
-        )
+        ) from e
 
 
 native = _load()

@@ -1,10 +1,12 @@
 """读路径 —— find 快路径 / 两阶段（取 ID → 关联 → 还原排序）/ 标准聚合 + asyncFn 尾处理
-/ 跨库联邦（逐源执行 → 内存 hash join）"""
+/ 跨库联邦（并行逐源执行 → 内存 hash join）"""
 
+import asyncio
 import inspect
 
 from ..feedback import emit as _emit_feedback
-from ..schema import core as _core, get_async_fn
+from ..schema import core as _core
+from ..schema import get_async_fn
 from .exec import _call, _ctx, _exec, _exec_on, resolve_placeholders
 
 
@@ -47,6 +49,7 @@ async def query(gql, params=None, route_override=None):
 
     ``route_override``（多租户路由，可选）：``{'source', 'namespace'}`` 覆盖命令定位，
     权限/计算列仍按结构 schema 判定（见 multi-datasource-routing-plan.md §6）。
+    注意：``route_override`` 为**受信服务端参数**，禁止透传用户输入（否则可被用于跨源路由，CWE-639）。
     """
     plan = _call(lambda: _core.plan_query(
         gql, params if params is not None else {}, _ctx(), route_override))
@@ -54,8 +57,14 @@ async def query(gql, params=None, route_override=None):
 
 
 async def query_one(gql, params=None, route_override=None):
-    """GQL 查询（返回单条）"""
-    items = await query(gql, params, route_override)
+    """GQL 查询（返回单条）
+
+    走 core ``plan_query_one``：用户未显式 ``$limit`` 时强制下推 ``$limit(1)``，
+    大集合不再全量取回后取首条（对齐 PyMongo ``find_one`` 的 limit-1 语义）。
+    """
+    plan = _call(lambda: _core.plan_query_one(
+        gql, params if params is not None else {}, _ctx(), route_override))
+    items = await _finalize(plan, await _run_query_plan(plan))
     return items[0] if items else None
 
 
@@ -80,8 +89,8 @@ async def query_federated(gql, params=None):
     """
     跨库联邦查询（返回嵌套文档数组）
 
-    Host 四步：core ``plan_federated`` 拆源 → 逐源执行 → core ``merge_federated``
-    内存 hash join → 统一后处理（``_finalize``，与单库同一路径）。
+    Host 四步：core ``plan_federated`` 拆源 → 并行逐源执行（任一源失败整体失败）
+    → core ``merge_federated`` 内存 hash join → 统一后处理（``_finalize``，与单库同一路径）。
 
     ``postprocess`` 取自根单元快照（含全部关系），因此结果形状与单库 ``query`` 完全一致。
     每源取数上限 ``MAX_FEDERATION_ROWS`` 由 core 强制（超限即报错，拒绝静默全表拉取）；
@@ -94,9 +103,8 @@ async def query_federated(gql, params=None):
         # 降级事件走统一反馈通道（无 sink 时打 stderr，允许拦截，禁止静默失守）
         _emit_feedback(dict(d or {}, type='federation_degraded'))
 
-    results = []
-    for unit in plan.get('sources') or []:
-        results.append(await _run_federated_unit(unit))
+    results = await asyncio.gather(
+        *(_run_federated_unit(u) for u in plan.get('sources') or []))
 
     merged = _call(lambda: _core.merge_federated(plan, results))
     return await _finalize(plan, merged)

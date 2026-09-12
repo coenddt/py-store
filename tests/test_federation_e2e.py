@@ -21,7 +21,8 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from py_store import executors, init, permission, schema as _sc, store
+from py_store import executors, init, permission, store
+from py_store import schema as _sc
 
 MYSQL_URI = os.environ.get(
     'MYSQL_URI', 'mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4')
@@ -74,7 +75,7 @@ async def _setup_mongo():
     client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
     try:
         await client.admin.command({'ping': 1})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         state.reason = f'MongoDB 不可达（{MONGO_URI}）: {e}'
         await client.close()
         return
@@ -97,7 +98,7 @@ async def _setup_mysql():
             async with conn.cursor() as cur:
                 await cur.execute('SELECT 1')
                 await cur.fetchall()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         state.reason = f'MySQL 不可达（{MYSQL_URI}）: {e}'
         return
     async with pool.acquire() as conn:

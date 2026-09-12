@@ -68,21 +68,40 @@ def create(driver, options=None):
 
     from asyncmy.cursors import DictCursor
 
-    async def exec_(plan):
+    async def run_stmts(conn, plan):
+        """在指定连接上依序执行 plan.stmts（事务内与池路径共用）"""
         docs = None
         rows = None
         affected_rows = 0
-        for stmt in plan.get('stmts') or []:
-            async with acquire(driver) as conn:
-                async with conn.cursor(DictCursor) as cur:
-                    await cur.execute(_to_pyformat(stmt['text']), list(stmt.get('params') or []))
-                    if cur.description is not None:
-                        rows = [_plain(r) for r in await cur.fetchall()]
-                        shape = stmt.get('rowShape')
-                        if shape:
-                            docs = _core.restore_rows(shape, rows)
-                    else:
-                        affected_rows = int(cur.rowcount or 0)
+        async with conn.cursor(DictCursor) as cur:
+            for stmt in plan.get('stmts') or []:
+                await cur.execute(_to_pyformat(stmt['text']), list(stmt.get('params') or []))
+                if cur.description is not None:
+                    rows = [_plain(r) for r in await cur.fetchall()]
+                    shape = stmt.get('rowShape')
+                    if shape:
+                        docs = _core.restore_rows(shape, rows)
+                else:
+                    affected_rows = int(cur.rowcount or 0)
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
 
-    return {'kind': 'mysql', 'exec': exec_}
+    async def exec_(plan):
+        # 整个 plan 固定在同一连接上执行（池路径也保持语句顺序与连接一致性）
+        async with acquire(driver) as conn:
+            return await run_stmts(conn, plan)
+
+    async def with_transaction(body):
+        """事务执行：显式 BEGIN + commit/rollback（对 autocommit 任意配置均确定成立）；
+        body(execute_on_tx) 的全部 plan 落在同一连接同一事务，任一失败整体回滚"""
+        async with acquire(driver) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute('BEGIN')
+            try:
+                out = await body(lambda plan: run_stmts(conn, plan))
+                await conn.commit()
+                return out
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    return {'kind': 'mysql', 'exec': exec_, 'with_transaction': with_transaction}

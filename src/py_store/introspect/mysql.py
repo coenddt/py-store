@@ -46,7 +46,7 @@ _INDEXES = """
 
 def _group_indexes(rows):
     """把 ``{table,name,nonUnique,column}`` 行按索引名归并出 columns 数组"""
-    by_key = {}
+    by_key: dict = {}
     for r in rows:
         key = f"{r['table']}::{r['name']}"
         entry = by_key.get(key)
@@ -73,8 +73,8 @@ async def introspect(driver, options=None):
     # 缺省用当前连接的 DATABASE()。显式库名会作为 namespace 透出到 def。
     schema_filter = 'table_schema = %s' if database is not None else 'table_schema = DATABASE()'
     params = (database,) if database is not None else ()
-    tables_sql = lambda base: base.replace(
-        'table_schema = DATABASE()', schema_filter)  # noqa: E731
+    def tables_sql(base):
+        return base.replace('table_schema = DATABASE()', schema_filter)
 
     async def run(sql, args=()):
         async with _acquire(driver) as conn:

@@ -1,6 +1,10 @@
-"""ID 供给（Host 随机源） —— 与 core `needs_new_id` 语义对齐"""
+"""ID 供给（Host 随机源） —— 与 core `needs_new_id` 语义对齐
 
-import random
+随机段使用 secrets 强随机源 8 位 base36（约 41 bit 熵）：random 仅 4 位
+（36^4 ≈ 168 万组合），insert_many 同毫秒批量生成时碰撞概率不可忽略（CWE-338）。
+"""
+
+import secrets
 import string
 import time
 
@@ -21,9 +25,9 @@ def _to_base36(n):
 
 
 def _generate_id(schema):
-    """按 schema.idPrefix 生成唯一 ID（时间戳36进制 + 随机4位）"""
+    """按 schema.idPrefix 生成唯一 ID（时间戳36进制 + secrets 随机8位）"""
     ts = _to_base36(int(time.time() * 1000)).upper()
-    rnd = ''.join(random.choice(_ID_CHARS).upper() for _ in range(4))
+    rnd = ''.join(secrets.choice(_ID_CHARS).upper() for _ in range(8))
     return schema['idPrefix'] + ts + rnd
 
 

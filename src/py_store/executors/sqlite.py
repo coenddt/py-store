@@ -27,7 +27,8 @@ def create(db, options=None):
     if db is None or not hasattr(db, 'execute'):
         raise TypeError('sqlite 执行器需要 aiosqlite 的 Connection 实例')
 
-    async def exec_(plan):
+    async def run_stmts(plan):
+        """依序执行 plan.stmts（单连接，事务内与池路径共用）"""
         docs = None
         rows = None
         affected_rows = 0
@@ -36,7 +37,7 @@ def create(db, options=None):
             try:
                 if cur.description is not None:
                     cols = [d[0] for d in cur.description]
-                    rows = [dict(zip(cols, r)) for r in await cur.fetchall()]
+                    rows = [dict(zip(cols, r, strict=True)) for r in await cur.fetchall()]
                     shape = stmt.get('rowShape')
                     if shape:
                         docs = _core.restore_rows(shape, rows)
@@ -46,4 +47,20 @@ def create(db, options=None):
                 await cur.close()
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
 
-    return {'kind': 'sqlite', 'exec': exec_}
+    async def exec_(plan):
+        return await run_stmts(plan)
+
+    async def with_transaction(body):
+        """事务执行：显式 BEGIN + commit/rollback（先清理遗留隐式事务，保证 BEGIN 干净）；
+        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+        await db.commit()
+        await db.execute('BEGIN')
+        try:
+            out = await body(run_stmts)
+            await db.commit()
+            return out
+        except BaseException:
+            await db.rollback()
+            raise
+
+    return {'kind': 'sqlite', 'exec': exec_, 'with_transaction': with_transaction}

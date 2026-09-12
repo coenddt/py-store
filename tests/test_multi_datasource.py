@@ -19,9 +19,8 @@ import asyncio
 
 import pytest
 
-from py_store import datasource, executors, permission, schema as _sc
-from py_store import init, store
-
+from py_store import datasource, executors, init, permission, store
+from py_store import schema as _sc
 
 # ─── Mongo 桩驱动 ────────────────────────────────────────────
 

@@ -24,7 +24,19 @@ from typing import Any
 
 from pymongo.errors import PyMongoError
 
-from . import crud, datasource, executors, feedback, introspect, permission, schema
+from . import (
+    crud,
+    datasource,
+    feedback,
+    permission,
+    schema,
+)
+from . import (
+    executors as executors,
+)
+from . import (
+    introspect as introspect,
+)
 from .sync import sync_schema
 
 
@@ -34,70 +46,15 @@ def _build_pipeline(gql, params=None):
         gql, params if params is not None else {}, permission.get_context())
 
 
-_store_map = {
-    # Schema 管理
-    'register': schema.register,
-    'get': schema.get,
-    'has': schema.has,
-    'list': schema.list,
-    # CRUD
-    'query': crud.query,
-    'queryOne': crud.query_one,
-    'queryWithCount': crud.query_with_count,
-    'queryFederated': crud.query_federated,
-    'exists': crud.exists,
-    'count': crud.count,
-    'insert': crud.insert,
-    'insertMany': crud.insert_many,
-    'update': crud.update,
-    'updateMany': crud.update_many,
-    'remove': crud.remove,
-    # Mutation — 智能持久化（upsert/insert + 父子关联填充）
-    'mutation': crud.mutation,
-    # Upsert — 显式条件 upsert（不处理父子关系）
-    'upsert': crud.upsert,
-    # 底层工具（调试/高级用法）
-    'buildPipeline': _build_pipeline,
-    'build_pipeline': _build_pipeline,
-    # 原生聚合查询
-    'aggregate': crud.aggregate,
-    # 结构同步（SQL 数据源：introspect → schemaFromRows → mergeSchema → register）
-    'syncSchema': sync_schema,
-    'sync_schema': sync_schema,
-    # 数据源连接（多后端路由）
-    'setConnections': crud.set_connections,
-    'set_connections': crud.set_connections,
-    # 权限控制（ContextVar 上下文）
-    'setContext': permission.set_context,
-    'getContext': permission.get_context,
-    'set_context': permission.set_context,
-    'get_context': permission.get_context,
-    'scopedRoles': permission.scoped_roles,
-    'scoped_roles': permission.scoped_roles,
-    'runAsInternal': permission.run_as_internal,
-    'run_as_internal': permission.run_as_internal,
-    'PermissionError': permission.PermissionError,
-    # 用户 $pipeline 直通开关（Registry 级守卫，AI 问数宿主建议关闭）
-    'setAllowUserPipeline': schema.set_allow_user_pipeline,
-    'set_allow_user_pipeline': schema.set_allow_user_pipeline,
-    # 反馈事件通道（兜底/降级/拦截的统一出口，接入自动反馈闭环）
-    'setFeedbackSink': feedback.set_sink,
-    'set_feedback_sink': feedback.set_sink,
-    # 蛇形命名别名（Python 风格调用）
-    'query_one': crud.query_one,
-    'query_with_count': crud.query_with_count,
-    'query_federated': crud.query_federated,
-    'insert_many': crud.insert_many,
-    'update_many': crud.update_many,
-}
-
-
 class Store:
-    """以属性方式访问 _store_map，支持 store.query(...) 调用形态
+    """以属性方式访问各 API（**全显式类方法，无动态查找**）
 
     CRUD / mutation / aggregate 各方法均支持可选 ``route_override``
     （``{'source', 'namespace'}`` 多租户路由，覆盖命令定位；权限与计算列
     仍按结构 schema 判定，见 multi-datasource-routing-plan.md §6）。
+
+    驼峰命名对齐 JS 端（nodejs-store）既有约定，蛇形为 Python 风格命名；
+    两者指向同一实现，仅为命名差异（新增 API 只需定义一次）。
     """
 
     async def query(self, gql: str, params: dict | None = None,
@@ -167,12 +124,48 @@ class Store:
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
 
-    def __getattr__(self, name):
-        return _store_map[name]
+    # ── 驼峰别名（与上方同名蛇形方法为**同一实现**，仅命名差异）──
+    queryOne = query_one
+    queryWithCount = query_with_count
+    queryFederated = query_federated
+    insertMany = insert_many
+    updateMany = update_many
+    syncSchema = sync_schema
+    buildPipeline = build_pipeline
 
+    # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
+    # Schema 管理
+    register = staticmethod(schema.register)
+    has = staticmethod(schema.has)
+    get = staticmethod(schema.get)
+    # 数据源连接（多后端路由）
+    setConnections = staticmethod(crud.set_connections)
+    set_connections = staticmethod(crud.set_connections)
+    # 权限控制（ContextVar 上下文）
+    setContext = staticmethod(permission.set_context)
+    getContext = staticmethod(permission.get_context)
+    set_context = staticmethod(permission.set_context)
+    get_context = staticmethod(permission.get_context)
+    scopedRoles = staticmethod(permission.scoped_roles)
+    scoped_roles = staticmethod(permission.scoped_roles)
+    runAsInternal = staticmethod(permission.run_as_internal)
+    run_as_internal = staticmethod(permission.run_as_internal)
+    # 自定义权限错误（实例可被 store.PermissionError 捕获）
+    PermissionError = permission.PermissionError
+    # 用户 $pipeline 直通开关（Registry 级守卫，AI 问数宿主建议关闭）
+    setAllowUserPipeline = staticmethod(schema.set_allow_user_pipeline)
+    set_allow_user_pipeline = staticmethod(schema.set_allow_user_pipeline)
+    # 上下文强制开关（fail-secure：开启后 ctx 缺失报 ERR_NO_CONTEXT，内部调用走 run_as_internal）
+    setRequireContext = staticmethod(schema.set_require_context)
+    set_require_context = staticmethod(schema.set_require_context)
+    requireContext = staticmethod(schema.require_context)
+    require_context = staticmethod(schema.require_context)
+    # 反馈事件通道（兜底/降级/拦截的统一出口，接入自动反馈闭环）
+    setFeedbackSink = staticmethod(feedback.set_sink)
+    set_feedback_sink = staticmethod(feedback.set_sink)
+    # 置最后：`list` 遮蔽内置名，须位于全部方法/类型注解之后
+    list = staticmethod(schema.list)
 
-# 自定义权限错误（实例可被 store.PermissionError 捕获）
-Store.PermissionError = permission.PermissionError
 
 store = Store()
 
@@ -183,11 +176,11 @@ async def _create_indexes_if_needed():
     for name in names:
         s = schema.get(name)
         # 索引创建是初始化的辅助动作（非命令路由）：schema 绑定的 source 暂未在
-        # 当前连接映射中时跳过，不阻塞 init（命令路由的 fail fast 不在此处）
-        try:
-            db = datasource.db_of_schema(name)  # Mongo 按 (datasource, namespace) 解析；SQL 源返回 None
-        except Exception:  # noqa: BLE001
+        # 当前连接映射中时软跳过，不阻塞 init（命令路由的 fail fast 不在此处）；
+        # 其余配置错误（namespace 形态不匹配等）按 fail-fast 由 db_of_schema 上抛
+        if not datasource.has_connection(datasource.source_of_schema(name)):
             continue
+        db = datasource.db_of_schema(name)  # Mongo 按 (datasource, namespace) 解析；SQL 源返回 None
         if db is None:
             continue  # SQL 后端不建索引（铁律 6）
         coll = db[s['collection']]

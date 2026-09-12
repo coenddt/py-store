@@ -13,7 +13,6 @@ from py_store import crud as _crud_mod
 from py_store import permission as perm
 from py_store import schema as _sc
 
-
 # ─────────────────────────────────────────────────────────────
 # 内置最小 schema（与业务工程 CommercialLedger 同构）
 # ─────────────────────────────────────────────────────────────
@@ -68,15 +67,16 @@ def test_schema_get_unregistered_raises():
         raise AssertionError('应抛出 KeyError')
 
 
-def test_store_map_camel_and_snake():
+def test_store_camel_and_snake_aliases():
     from py_store import store
-    assert store.query is not None
-    assert callable(store.query_one)                                  # 蛇形：显式方法
-    assert store.queryOne is _crud_mod.query_one                      # 驼峰：_store_map 转发
-    assert store.queryWithCount is _crud_mod.query_with_count
-    assert store.query_with_count is not None
-    assert store.buildPipeline is not None and store.build_pipeline is not None
+    assert callable(store.query) and callable(store.query_one)          # 蛇形：显式方法
+    # 驼峰与蛇形为**同一实现**的别名（全显式绑定，非 __getattr__ 动态查找）
+    assert store.queryOne.__func__ is store.query_one.__func__
+    assert store.queryWithCount.__func__ is store.query_with_count.__func__
+    assert store.buildPipeline.__func__ is store.build_pipeline.__func__
+    assert store.register is _sc.register                               # 其余 API：显式绑定
     assert store.PermissionError is perm.PermissionError
+    assert not hasattr(store, 'quer')                                   # 拼错属性即 AttributeError
 
 
 # ─────────────────────────────────────────────────────────────
@@ -168,6 +168,16 @@ class _MemColl:
     async def insert_many(self, docs):
         self.docs.extend(docs)
         return _Result(inserted_count=len(docs))
+
+    async def replace_one(self, condition, doc, upsert=False):
+        """归档幂等（insertMany + upsertById）走 replaceOne(upsert)"""
+        for i, d in enumerate(self.docs):
+            if d.get('_id') == condition.get('_id'):
+                self.docs[i] = dict(doc)
+                return _Result(modified_count=1)
+        if upsert:
+            self.docs.append(dict(doc))
+        return _Result(modified_count=0)
 
     async def find_one_and_update(self, condition, update, **options):
         base = dict(self.docs[0]) if self.docs else {}
@@ -386,7 +396,7 @@ def test_schema_register_rejects_invalid_timestamps():
             'name': 'BadLedger', 'collection': 'bad_ledger', 'timestamps': 'years',
             'fields': {}, 'relations': {},
         })
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         assert 'timestamps 仅支持' in str(e)
     else:
         raise AssertionError('非法 timestamps 应报错')

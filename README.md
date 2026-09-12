@@ -103,6 +103,10 @@ await store.query('User($condition:@c0){...}', params, {"namespace": "tenant_42"
 await store.insert("Order", data, {"source": "pg_cluster", "namespace": "tenant_7"})
 ```
 
+**`route_override` is a trusted server-side parameter** — it carries no origin check, so
+forwarding user-controlled input into it lets a caller re-target another tenant's
+`source`/`namespace` (CWE-639 authorization-bypass surface). Never pass raw request data here.
+
 Legacy single-db usage (`init(db)` + schema without `datasource`/`namespace`) is unchanged:
 commands carry `source: "default"`, `namespace: None`.
 
@@ -160,6 +164,22 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
 - No context set → permission checks disabled (backward compatible).
 - Denied access raises `store.PermissionError` (with `status = 403`).
 
+### Fail-secure mode (opt-in)
+
+"No context" can mean both *system call* and *caller forgot the context* — by default the
+latter silently passes every check (fail-open, kept for backward compatibility). For
+security-sensitive hosts, enable the context requirement once at startup:
+
+```python
+store.set_require_context(True)
+# now every query/write without a context raises `ERR_NO_CONTEXT:...`
+# internal jobs must be explicit:
+await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
+```
+
+`run_as_internal` marks the call as `{"internal": True}`, which is semantically distinct
+from a missing context and always passes. `set_require_context(False)` restores the default.
+
 ## Feedback events
 
 Degraded / pushdown-rejection paths never fail silently — they emit a structured event:
@@ -207,6 +227,28 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 ```
 
 Types: `string | int | long | float | double | boolean | array | object | date | any`.
+
+## Development
+
+```bash
+# run the full suite from the repo root (e2e cases auto-skip when MySQL/PG/Mongo are unreachable)
+$env:PYTHONPATH='py-store/src'; python -m pytest py-store/tests/ -q
+
+# against custom backends
+$env:MYSQL_URI='mysql://user:pass@host:3306/db'; $env:PG_URI='postgres://user:pass@host:5432/db'; $env:MONGO_URI='mongodb://host:27017/db'
+```
+
+- Unit/contract suites (`test_py_store.py`, `test_host_contract.py`, `test_multi_datasource.py`) need no external services.
+- The Rust core (`GQL parsing / planning / dialect`) lives in `../rust-store/core` and is consumed via the `rust-store-py` binding — pure logic never lives in this repo.
+- `src/py_store/` is a thin Host layer: driver IO, callbacks, placeholder substitution. Keep it that way.
+
+## Transaction boundary
+
+- **Single SQL source**: `mutation` parent-child step sequences and `remove` (archive + delete) run inside one driver transaction on one checked-out connection — any step failure rolls back the whole sequence.
+- **Each SQL write command** is itself atomic: multi-statement plans (e.g. MySQL write + readback) are transaction-wrapped in the executor.
+- **Mongo sources**: single-document writes are atomic; multi-step `mutation` and `remove` execute sequentially and are **not** atomic across steps (Mongo transactions require a replica set). If your consistency requirement spans steps on Mongo, either use an SQL source for those models or add application-level compensation.
+- **Archive idempotency**: `remove` archives with upsert-by-`_id` semantics, so a retry after partial failure no longer fails on duplicate `_id`.
+- **Cross-source steps** (parent and child bound to different datasources) cannot be atomic — they run sequentially by design.
 
 ## License
 

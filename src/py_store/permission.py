@@ -16,6 +16,7 @@
 """
 
 import contextvars
+import inspect
 from contextlib import contextmanager
 
 from .core import core
@@ -53,10 +54,12 @@ async def run_as_internal(fn):
     prev = get_context()
     token = _ctx.set({**(prev or {}), 'internal': True})
     try:
-        import inspect
-        if inspect.iscoroutinefunction(fn):
-            return await fn()
-        return fn()
+        out = fn()
+        # 与 crud/query.py::_finalize 统一用 isawaitable：对 partial / 包装协程同样稳妥
+        # （iscoroutinefunction 对包装后的可等待对象会漏判，退化为同步返回未等待的协程）
+        if inspect.isawaitable(out):
+            return await out
+        return out
     finally:
         _ctx.reset(token)
 

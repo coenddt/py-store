@@ -21,8 +21,10 @@ from ..schema import get as _schema_get
 _PHASE1_IDS = re.compile(r'^\{\{phase1\.ids\}\}$')
 _STEP_PH = re.compile(r'^\{\{step\.(\d+)\._id\}\}$')
 
-# core 权限类错误消息 → PermissionError（消息与 core 常量保持一致）
-_PERMISSION_MSGS = frozenset(['无访问权限', '无写入权限', '无删除权限', '无批量写入权限'])
+# 权限类错误识别：core 权限错误统一携带 `ERR_PERMISSION:` 稳定前缀（见 core
+# `command/mod.rs::ERR_PERM_PREFIX`），按**前缀**映射而非具体文案 —— core 文案
+# 可自由调整，映射不随文案漂移而静默失效。构造 PermissionError 时剥离前缀。
+_PERM_PREFIX = 'ERR_PERMISSION:'
 
 
 def set_db(db):
@@ -51,20 +53,22 @@ def _ctx():
 
 
 def _call(fn):
-    """绑定层调用包装：权限类错误映射为 PermissionError"""
+    """绑定层调用包装：权限类错误（``ERR_PERMISSION:`` 前缀）映射为 PermissionError"""
     try:
         return fn()
-    except Exception as e:  # noqa: BLE001
-        if str(e) in _PERMISSION_MSGS:
-            raise PermissionError(str(e)) from e
+    except Exception as e:
+        msg = str(e)
+        if msg.startswith(_PERM_PREFIX):
+            raise PermissionError(msg[len(_PERM_PREFIX):]) from e
         raise
 
 
 # ─── 命令执行（唯一 IO 边界） ────────────────────────────────
 
 async def _exec_on(source, cmd):
-    """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec）"""
-    connection = _datasource.get_connection(source)
+    """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
+    事务作用域内经 datasource.connection_for 落到事务专用连接）"""
+    connection = _datasource.connection_for(source)
     db = _datasource.mongo_db(connection, source, cmd.get('namespace'))
     if db is not None:
         return await _exec_mongo(db, cmd)

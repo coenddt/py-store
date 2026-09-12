@@ -18,4 +18,4 @@ async def run(backend, driver, options=None):
     return await mod.introspect(driver, options)
 
 
-__all__ = ['run', 'mysql', 'postgres', 'sqlite']
+__all__ = ['mysql', 'postgres', 'run', 'sqlite']

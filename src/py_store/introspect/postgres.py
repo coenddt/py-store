@@ -64,7 +64,7 @@ _INDEXES = """
 
 def _group_indexes(rows):
     """把 ``{table,name,unique,column}`` 行按索引名归并出 columns 数组"""
-    by_key = {}
+    by_key: dict = {}
     for r in rows:
         key = f"{r['table']}::{r['name']}"
         entry = by_key.get(key)

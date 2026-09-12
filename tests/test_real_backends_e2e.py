@@ -22,7 +22,8 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from py_store import executors, init, permission, schema as _sc, store
+from py_store import executors, init, permission, store
+from py_store import schema as _sc
 
 MYSQL_URI = os.environ.get(
     'MYSQL_URI', 'mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4')
@@ -174,7 +175,7 @@ async def _setup_mysql(ctx):
             async with conn.cursor() as cur:
                 await cur.execute('SELECT 1')
                 await cur.fetchall()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         ctx.reason = f'MySQL 不可达（{MYSQL_URI}）: {e}'
         return
 
@@ -198,7 +199,7 @@ async def _setup_postgres(ctx):
     try:
         pool = await asyncio.wait_for(asyncpg.create_pool(dsn=PG_URI, timeout=5), timeout=8)
         await pool.execute('SELECT 1')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         ctx.reason = f'PostgreSQL 不可达（{PG_URI}）: {e}'
         return
 
@@ -220,7 +221,7 @@ async def _setup_mongo(ctx):
     client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
     try:
         await client.admin.command({'ping': 1})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         ctx.reason = f'MongoDB 不可达（{MONGO_URI}）: {e}'
         await client.close()
         return
@@ -437,7 +438,7 @@ async def _t_sync_schema(ctx):
     # 三元组冲突 fail fast：已注册 <ctx.schema_name>（同 source、同 collection）再注册即抛错
     dupe = next((d for d in defs if d['collection'] == ctx.collection), None)
     assert dupe, 'introspect 应产出已注册表的 def'
-    with pytest.raises(RuntimeError, match='冲突|占用'):
+    with pytest.raises(RuntimeError, match='冲突|占用'):  # noqa: RUF043  正则交替是本意（两类冲突文案二选一）
         _sc.register({**dupe, 'name': f"{dupe['name']}_dupe"})
 
     taken = {_sc.get(n)['collection'] for n in _sc.list()}

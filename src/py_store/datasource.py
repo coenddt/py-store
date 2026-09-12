@@ -17,6 +17,7 @@ Mongo 连接支持两种形态（绝不猜，按命令的 namespace 严格校验
 ``{default: 连接}``，保证既有单库调用零变更。对齐 ``nodejs-store/src/datasource.js``。
 """
 
+import contextvars
 from collections.abc import Mapping
 
 from . import executors
@@ -26,7 +27,11 @@ from .schema import get as _get_schema
 
 DEFAULT_SOURCE = 'default'
 
-_connections = {}
+_connections: dict = {}
+
+# 事务作用域的连接覆盖：source → 事务描述符（见 run_in_transaction）
+_tx_override: contextvars.ContextVar = contextvars.ContextVar(
+    'py_store_tx_override', default=None)
 
 
 class PushdownUnsupportedError(RuntimeError):
@@ -84,6 +89,11 @@ def get_connection(source):
         raise RuntimeError(
             f'数据源未配置: {source}（请检查 init(connections) 与 schema 的 datasource 绑定）')
     return conn
+
+
+def has_connection(source):
+    """数据源是否已在当前连接映射中（供索引创建等初始化辅助动作软跳过未配置源）"""
+    return _connections.get(source) is not None
 
 
 def mongo_db(connection, source, namespace):
@@ -148,6 +158,50 @@ def _kind_of(connection):
 def is_sql(connection):
     """判定连接是否为 SQL 数据源描述符（Mongo 驱动实例一律视作 Mongo 源）"""
     return _kind_of(connection) is not None
+
+
+def is_sql_source(source):
+    """数据源名是否绑定 SQL 源"""
+    return is_sql(get_connection(source))
+
+
+def connection_for(source):
+    """当前生效连接：事务作用域内返回覆盖描述符，否则返回全局映射的连接
+    （``crud.exec._exec_on`` 经此取连接，使事务内所有命令落到专用连接）"""
+    override = _tx_override.get()
+    if override and source in override:
+        return override[source]
+    return get_connection(source)
+
+
+async def run_in_transaction(source, fn):
+    """
+    事务作用域：在单个 SQL 源上以「同连接 + 同事务」执行 fn 内的全部命令
+
+      - fn 内经 ``_exec`` 路由到该 source 的命令全部落到事务连接（commit/rollback 一体）；
+      - Mongo 源 / 执行器未实现 with_transaction / 多源混合时按原样执行
+        （跨源无法原子 —— 信任边界见 README「事务边界」），绝不静默假装已事务化；
+      - 事务体抛错统一 rollback 后原样上抛。
+    """
+    conn = get_connection(source)
+    with_tx = conn.get('with_transaction') if isinstance(conn, Mapping) else None
+    if not callable(with_tx):
+        return await fn()
+    parent = _tx_override.get() or {}
+    if source in parent:
+        # 同源嵌套事务：外层已持有该源的事务连接，内层并入外层（不做保存点）
+        return await fn()
+    tx_desc = {'kind': conn['kind'], 'exec': None}
+
+    async def _body(exec_on_tx):
+        tx_desc['exec'] = exec_on_tx
+        return await fn()
+
+    token = _tx_override.set({**parent, source: tx_desc})
+    try:
+        return await with_tx(_body)
+    finally:
+        _tx_override.reset(token)
 
 
 def _exec_of(connection):

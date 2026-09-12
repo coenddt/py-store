@@ -79,6 +79,12 @@ def shape_result(cmd, out):
 
 
 __all__ = [
-    'create_connection', 'shape_result', 'UpdateResult', 'DeleteResult',
-    'mongo', 'mysql', 'postgres', 'sqlite',
+    'DeleteResult',
+    'UpdateResult',
+    'create_connection',
+    'mongo',
+    'mysql',
+    'postgres',
+    'shape_result',
+    'sqlite',
 ]

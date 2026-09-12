@@ -13,8 +13,21 @@ from .query import query, query_federated, query_one, query_with_count
 from .write import count, exists, insert, insert_many, remove, update, update_many
 
 __all__ = [
-    'set_db', 'set_connections', '_get_db',
-    'query', 'query_one', 'query_with_count', 'query_federated',
-    'insert', 'insert_many', 'update', 'update_many', 'remove', 'exists', 'count',
-    'mutation', 'upsert', 'aggregate',
+    '_get_db',
+    'aggregate',
+    'count',
+    'exists',
+    'insert',
+    'insert_many',
+    'mutation',
+    'query',
+    'query_federated',
+    'query_one',
+    'query_with_count',
+    'remove',
+    'set_connections',
+    'set_db',
+    'update',
+    'update_many',
+    'upsert',
 ]
