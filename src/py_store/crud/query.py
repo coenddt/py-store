@@ -2,8 +2,8 @@
 / 跨库联邦（逐源执行 → 内存 hash join）"""
 
 import inspect
-import sys
 
+from ..feedback import emit as _emit_feedback
 from ..schema import core as _core, get_async_fn
 from .exec import _call, _ctx, _exec, _exec_on, resolve_placeholders
 
@@ -88,8 +88,8 @@ async def query_federated(gql, params=None):
         gql, params if params is not None else {}, _ctx()))
 
     for d in plan.get('degraded') or []:
-        d = d or {}
-        print(f"[federation] 降级 {d.get('code') or ''}: {d.get('message') or ''}", file=sys.stderr)
+        # 降级事件走统一反馈通道（无 sink 时打 stderr，允许拦截，禁止静默失守）
+        _emit_feedback(dict(d or {}, type='federation_degraded'))
 
     results = []
     for unit in plan.get('sources') or []:

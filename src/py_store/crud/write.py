@@ -1,7 +1,7 @@
 """写路径 —— 单条/批量插入、更新、删除归档、存在性与计数"""
 
 from ..schema import core as _core, get as _get_schema
-from .exec import _call, _ctx, _exec, _now
+from .exec import _call, _ctx, _exec, _now_for
 from .id import _generate_id
 
 
@@ -18,7 +18,7 @@ async def insert(schema_name, data):
     """插入一条"""
     s = _get_schema(schema_name)
     plan = _call(lambda: _core.plan_insert(
-        schema_name, data, _now(), _generate_id(s) if s['idPrefix'] else '', _ctx()))
+        schema_name, data, _now_for(schema_name), _generate_id(s) if s['idPrefix'] else '', _ctx()))
     await _exec(plan['command'])
     return plan['returns']
 
@@ -32,7 +32,7 @@ async def insert_many(schema_name, docs):
     plan = _call(lambda: _core.plan_insert_many(
         schema_name,
         docs,
-        _now(),
+        _now_for(schema_name),
         # core 按需消费（仅无 _id 的文档取用），多备无害
         [_generate_id(s) if s['idPrefix'] else '' for _ in docs],
         _ctx(),
@@ -50,7 +50,7 @@ async def update(schema_name, condition, data, options=None):
     否则自动包装为 $set 模式。
     """
     out = await _plan_with_probe(lambda found, doc: _call(lambda: _core.plan_update(
-        schema_name, condition, data, options, _now(), _ctx(), found, doc)))
+        schema_name, condition, data, options, _now_for(schema_name), _ctx(), found, doc)))
     result = await _exec(out['command'])
     return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
 
@@ -58,7 +58,7 @@ async def update(schema_name, condition, data, options=None):
 async def update_many(schema_name, condition, data):
     """批量更新（支持原生操作符）"""
     out = _call(lambda: _core.plan_update_many(
-        schema_name, condition, data, _now(), _ctx()))
+        schema_name, condition, data, _now_for(schema_name), _ctx()))
     result = await _exec(out['command'])
     return {'modifiedCount': result.modified_count}
 
@@ -72,7 +72,7 @@ async def remove(schema_name, condition):
     if out.get('findCommand'):
         docs = await _exec(out['findCommand'])
         if docs:
-            arch = _call(lambda: _core.plan_archive_docs(schema_name, docs, _now()))
+            arch = _call(lambda: _core.plan_archive_docs(schema_name, docs, _now_for(schema_name)))
             await _exec(arch['command'])
             archived_count = len(docs)
 

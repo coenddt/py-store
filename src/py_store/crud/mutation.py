@@ -1,14 +1,14 @@
 """Mutation / Upsert / 原生聚合 —— 规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
 
 from ..schema import core as _core, get as _get_schema
-from .exec import _call, _ctx, _exec, _now, resolve_placeholders
+from .exec import _call, _ctx, _exec, _now_for, resolve_placeholders
 from .id import _generate_id, _new_id_pool
 
 
 async def _mutation_one(schema_name, data):
     """mutation 单条：规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
     plan = _call(lambda: _core.plan_mutation(
-        schema_name, data, _now(), _new_id_pool(schema_name, data), _ctx()))
+        schema_name, data, _now_for(schema_name), _new_id_pool(schema_name, data), _ctx()))
 
     resolved = []
     root_result = None
@@ -51,7 +51,7 @@ async def upsert(schema_name, condition, data, options=None):
     """
     s = _get_schema(schema_name)
     plan = _call(lambda: _core.plan_upsert(
-        schema_name, condition, data, options, _now(),
+        schema_name, condition, data, options, _now_for(schema_name),
         _generate_id(s) if s['idPrefix'] else '', _ctx()))
     result = await _exec(plan['command'])
     return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None

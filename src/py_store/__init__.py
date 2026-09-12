@@ -24,7 +24,7 @@ from typing import Any
 
 from pymongo.errors import PyMongoError
 
-from . import crud, datasource, executors, introspect, permission, schema
+from . import crud, datasource, executors, feedback, introspect, permission, schema
 from .sync import sync_schema
 
 
@@ -77,6 +77,12 @@ _store_map = {
     'runAsInternal': permission.run_as_internal,
     'run_as_internal': permission.run_as_internal,
     'PermissionError': permission.PermissionError,
+    # 用户 $pipeline 直通开关（Registry 级守卫，AI 问数宿主建议关闭）
+    'setAllowUserPipeline': schema.set_allow_user_pipeline,
+    'set_allow_user_pipeline': schema.set_allow_user_pipeline,
+    # 反馈事件通道（兜底/降级/拦截的统一出口，接入自动反馈闭环）
+    'setFeedbackSink': feedback.set_sink,
+    'set_feedback_sink': feedback.set_sink,
     # 蛇形命名别名（Python 风格调用）
     'query_one': crud.query_one,
     'query_with_count': crud.query_with_count,

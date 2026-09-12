@@ -14,6 +14,7 @@ Host 依据 schema 镜像的 ``collection → datasource`` 绑定，把每条命
 from collections.abc import Mapping
 
 from . import executors
+from .feedback import emit as _emit_feedback
 from .schema import core as _core
 from .schema import get as _get_schema
 from .schema import list as _list_schemas
@@ -21,6 +22,34 @@ from .schema import list as _list_schemas
 DEFAULT_SOURCE = 'default'
 
 _connections = {}
+
+
+class PushdownUnsupportedError(RuntimeError):
+    """SQL 下推遇到无法安全翻译的组合（core 标记 unsupported）
+
+    显式报错而非静默执行「缺少该段」的 SQL（会返回错误结果）；
+    自动反馈：触发原因见 message，修复指引见 feedback()。
+    """
+
+    def __init__(self, source, kind, codes, warnings):
+        msg = f"SQL 下推不支持（{kind}）: {', '.join(codes)}；{' / '.join(warnings)}"
+        super().__init__(msg)
+        self.source = source
+        self.kind = kind
+        self.codes = codes
+        self.warnings = warnings
+
+    def feedback(self):
+        """转统一反馈事件（与 feedback.emit 的事件形状一致）"""
+        return {
+            'type': 'sql_pushdown_unsupported',
+            'code': 'pushdownUnsupported',
+            'layer': 'dialect',
+            'message': str(self),
+            'hint': '改写查询避开该组合，或改用 Mongo 源执行该段取数',
+            'source': self.source,
+            'kind': self.kind,
+        }
 
 
 def _normalize(connections):
@@ -111,9 +140,14 @@ async def exec_sql(source, connection, cmd):
     # 绝不执行「缺少该段」的 SQL（会静默返回错误结果），改为显式报错，由调用方降级重查。
     unsupported = plan.get('unsupported') or []
     if unsupported:
-        codes = ', '.join(
-            str(u.get('code')) if isinstance(u, Mapping) else str(u) for u in unsupported)
-        raise RuntimeError(
-            f"SQL 下推不支持（{_kind_of(connection)}）: {codes}；{' / '.join(plan.get('warnings') or [])}")
+        err = PushdownUnsupportedError(
+            source,
+            _kind_of(connection),
+            [str(u.get('code')) if isinstance(u, Mapping) else str(u) for u in unsupported],
+            [str(w) for w in (plan.get('warnings') or [])],
+        )
+        # 自动反馈：拦截即告警（无 sink 时打 stderr），禁止静默失守
+        _emit_feedback(err.feedback())
+        raise err
     out = await exec_fn(plan)
     return executors.shape_result(cmd, out)

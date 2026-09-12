@@ -15,6 +15,7 @@ import time
 from .. import datasource as _datasource
 from ..executors.mongo import exec_mongo as _exec_mongo
 from ..permission import PermissionError, get_context
+from ..schema import get as _schema_get
 
 _PHASE1_IDS = re.compile(r'^\{\{phase1\.ids\}\}$')
 _STEP_PH = re.compile(r'^\{\{step\.(\d+)\._id\}\}$')
@@ -38,9 +39,10 @@ def _get_db(source=None):
     return _datasource.get_connection(source or _datasource.DEFAULT_SOURCE)
 
 
-def _now():
-    """毫秒时间戳（Host 时钟源）"""
-    return int(time.time() * 1000)
+def _now_for(schema_name):
+    """按 schema 的 timestamps 单位产出当前时间戳（'s' → 秒，其余/未启用 → 毫秒）"""
+    unit = _schema_get(schema_name).get('timestampUnit')
+    return int(time.time()) if unit == 's' else int(time.time() * 1000)
 
 
 def _ctx():

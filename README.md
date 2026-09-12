@@ -81,7 +81,7 @@ Model($condition:@c0,$sort:@s1,$skip:@sk,$limit:@l1) {
 
 - Values come from the params dict: `{"c0": {...}, "s1": {...}}`.
 - Object sub-fields use dot notation; relations are declared in the schema (`type: "many" | "one"`) and resolved automatically — **do not hand-write `$lookup`**.
-- `$pipeline` passes a raw aggregation through as-is (no compute/defaults/permission trimming) — use with care; prefer `store.aggregate(model, pipeline)` for group/sum needs.
+- `$pipeline` passes a raw aggregation through as-is (no compute/defaults/permission trimming) — use with care; prefer `store.aggregate(model, pipeline)` for group/sum needs. AI/agent hosts can hard-disable it via `store.set_allow_user_pipeline(False)` (registry-level guard; all plan paths then reject `$pipeline` explicitly).
 
 ## Query & write API
 
@@ -106,7 +106,7 @@ rows  = await store.aggregate("Post", pipeline)      # native aggregation
 Notes:
 
 - `None` values are stripped before persisting; `_id` cannot be changed via `update`.
-- `createdAt`/`updatedAt` (ms) are framework-maintained — do not set them manually.
+- `createdAt`/`updatedAt` are framework-maintained — do not set them manually. Unit follows the schema's `timestamps` setting: milliseconds by default, or seconds when `timestamps: "s"`.
 - Snake-case aliases available: `query_one`, `insert_many`, `update_many`, `parse_gql`, `build_pipeline`, ...
 
 ## Permission context
@@ -124,6 +124,22 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
 - No context set → permission checks disabled (backward compatible).
 - Denied access raises `store.PermissionError` (with `status = 403`).
 
+## Feedback events
+
+Degraded / pushdown-rejection paths never fail silently — they emit a structured event:
+
+```python
+{type, code, layer, message, hint, ...}   # federation_degraded / sql_pushdown_unsupported / ...
+```
+
+- Default sink prints to stderr; hosts (e.g. AI data-QA services) can take over for automated feedback loops:
+
+```python
+store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
+```
+
+- SQL pushdown rejection raises `PushdownUnsupportedError` (a `RuntimeError`) **and** emits the event; catch it to re-run that segment on a Mongo source.
+
 ## Schema reference
 
 ```python
@@ -131,7 +147,7 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
     "name": "Order",
     "collection": "orders",
     "idPrefix": "OD",
-    "timestamps": True,                # default: auto-maintain createdAt/updatedAt (ms)
+    "timestamps": True,                # True (ms, default) | False | "ms" | "s" (seconds); auto-maintain createdAt/updatedAt
     "fields": {
         "_id": "string",                                        # shorthand
         "title": {"type": "string", "default": ""},

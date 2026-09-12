@@ -92,6 +92,9 @@ def register(defn):
         'collection': defn.get('collection') or defn['name'],
         'idPrefix': defn.get('idPrefix') or '',
         'timestamps': defn.get('timestamps') is not False,
+        # 时间戳单位（'ms'/'s'/None=不维护）；值合法性由 core.register 校验
+        'timestampUnit': 's' if defn.get('timestamps') == 's' else (
+            None if defn.get('timestamps') is False else 'ms'),
         'fields': defn.get('fields') or {},
         'relations': defn.get('relations') or {},
         'computes': computes,
@@ -133,6 +136,11 @@ def has(name):
 def list():
     """所有已注册 schema 名称（core 侧，含归档表，按注册顺序）"""
     return core.list()
+
+
+def set_allow_user_pipeline(allow=True):
+    """开关用户 $pipeline 直通（默认允许；AI 问数宿主建议关闭作纵深防御）"""
+    core.set_allow_user_pipeline(bool(allow))
 
 
 def get_async_fn(fn_ref):

@@ -353,3 +353,109 @@ def test_crud_aggregate():
     _crud_w_mock([{'unit': 'a'}])
     out = _run(_crud_mod.aggregate('CommercialLedger', [{'$match': {'unit': 'a'}}]))
     assert len(out) and out[0]['unit'] == 'a'
+
+
+# ─────────────────────────────────────────────────────────────
+# 扩展守卫：timestamps 单位 / $pipeline 开关 / feedback 事件
+# ─────────────────────────────────────────────────────────────
+
+def test_schema_timestamp_unit_seconds_insert():
+    # timestamps: 's' → Host 时钟注入秒级时间戳（< 10 位量级）
+    _sc.register({
+        'name': 'SecLedger', 'collection': 'sec_ledger', 'idPrefix': 'SEC', 'timestamps': 's',
+        'fields': {'unit': 'string'}, 'relations': {}, 'read': None, 'write': None,
+    })
+    assert _sc.get('SecLedger')['timestampUnit'] == 's'
+    _crud_w_mock()
+    doc = _run(_crud_mod.insert('SecLedger', {'unit': 'x'}))
+    assert 0 < doc['createdAt'] < 10 ** 10
+    assert 0 < doc['updatedAt'] < 10 ** 10
+
+
+def test_schema_timestamp_unit_ms_default():
+    # 缺省 timestamps: true → 毫秒级（13 位量级）
+    _crud_w_mock()
+    doc = _run(_crud_mod.insert('CommercialLedger', {'unit': 'x', 'income': 1.0}))
+    assert doc['createdAt'] >= 10 ** 12
+
+
+def test_schema_register_rejects_invalid_timestamps():
+    # 行为收紧：原先任意非 false 值放行，现非法值注册即报错（core 校验）
+    try:
+        _sc.register({
+            'name': 'BadLedger', 'collection': 'bad_ledger', 'timestamps': 'years',
+            'fields': {}, 'relations': {},
+        })
+    except Exception as e:  # noqa: BLE001
+        assert 'timestamps 仅支持' in str(e)
+    else:
+        raise AssertionError('非法 timestamps 应报错')
+
+
+def test_store_pipeline_switch_blocks_and_restores():
+    # Registry 级开关：关闭后 $pipeline 显式报错；重新打开恢复（进程级单例，finally 必恢复）
+    from py_store import store
+    _crud_w_mock([{'unit': 'a'}])
+    gql = 'CommercialLedger($pipeline:@p){unit}'
+    params = {'p': [{'$match': {}}]}
+    try:
+        store.setAllowUserPipeline(False)
+        try:
+            _run(_crud_mod.query(gql, params))
+        except RuntimeError as e:
+            assert '已被禁用' in str(e)
+        else:
+            raise AssertionError('禁用后应显式报错')
+        store.setAllowUserPipeline(True)
+        items = _run(_crud_mod.query(gql, params))
+        assert items and items[0]['unit'] == 'a'
+    finally:
+        store.setAllowUserPipeline(True)
+
+
+def test_feedback_sink_and_default_stderr():
+    from py_store import feedback
+    events = []
+    feedback.set_sink(events.append)
+    feedback.emit({'type': 'federation_degraded', 'code': 'crossSourceSort',
+                   'layer': 'federation', 'message': 'm', 'hint': 'h'})
+    assert events and events[0]['code'] == 'crossSourceSort'
+    feedback.set_sink(None)  # 恢复默认 stderr（验证不抛错即可）
+    feedback.emit({'code': 'x'})
+
+
+def test_pushdown_unsupported_error_feedback():
+    import py_store.datasource as ds
+    err = ds.PushdownUnsupportedError('mysql_a', 'mysql', ['lookupTopN'], ['每父 top-N 无法下推'])
+    assert isinstance(err, RuntimeError)  # 旧调用方兼容
+    ev = err.feedback()
+    assert ev['type'] == 'sql_pushdown_unsupported'
+    assert ev['code'] == 'pushdownUnsupported'
+    assert ev['layer'] == 'dialect'
+    assert ev['source'] == 'mysql_a'
+
+
+def test_exec_sql_unsupported_raises_and_emits():
+    # 拦截即告警：exec_sql 抛结构化异常的同时自动产出反馈事件
+    import py_store.datasource as ds
+    from py_store import feedback
+
+    class _FakeCore:
+        def dialect_translate(self, kind, cmd):
+            return {'unsupported': [{'code': 'lookupTopN'}], 'warnings': ['w1']}
+
+    old_core, old_sink = ds._core, feedback._sink
+    events = []
+    ds._core = _FakeCore()
+    feedback.set_sink(events.append)
+    try:
+        _run(ds.exec_sql('mysql_a', {'kind': 'mysql', 'exec': None},
+                         {'collection': 'commercial_ledger'}))
+    except ds.PushdownUnsupportedError as e:
+        assert 'lookupTopN' in str(e)
+    else:
+        raise AssertionError('应抛出 PushdownUnsupportedError')
+    finally:
+        ds._core = old_core
+        feedback.set_sink(old_sink)
+    assert events and events[0]['type'] == 'sql_pushdown_unsupported'

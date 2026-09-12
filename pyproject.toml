@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "storepy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight multi-backend data layer (MongoDB / MySQL / SQLite / PostgreSQL): pure JSON schemas, GQL tree queries compiled to a single query, computed columns, soft-delete and role-based access control"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,7 +16,7 @@ authors = [
 ]
 dependencies = [
   "pymongo>=4.9",
-  "rust-store-py>=0.1.0,<0.2.0",
+  "rust-store-py>=0.2.0,<0.3.0",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
