@@ -73,5 +73,5 @@ async def upsert(schema_name, condition, data, options=None, route_override=None
 
 async def aggregate(schema_name, pipeline, route_override=None):
     """对指定 schema 执行 MongoDB 原生聚合查询"""
-    cmd = _call(lambda: _core.plan_aggregate(schema_name, pipeline or [], route_override))
+    cmd = _call(lambda: _core.plan_aggregate(schema_name, pipeline or [], _ctx(), route_override))
     return await _exec(cmd)

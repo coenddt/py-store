@@ -44,20 +44,29 @@ def _to_pyformat(text):
     但 asyncmy 沿用 PyMySQL 的 ``%s`` paramstyle，直接传 ``?`` 会抛
     ``not all arguments converted during string formatting``。此处只做占位符风格转换，
     不拼任何 SQL（SQL 仍全部由 core 产出）：跳过引号内的 ``?``，仅替换占位符。
+
+    引号内外的字面 ``%``（如三态 present_key 的 ``LIKE '%,field,%'``）在 ``%`` 式
+    paramstyle 下会被误作格式说明符 → 一律转义为 ``%%``（否则 ``execute(sql, args)``
+    做 ``sql % args`` 时抛 ``not enough arguments for format string``）。``?`` 只在引号
+    外是占位符（引号内的 ``?`` 是字符串字面量，保持不变）。
     """
     out = []
     quote = None
     for ch in text:
-        if quote is not None:
-            out.append(ch)
-            if ch == quote:
-                quote = None
-            continue
         if ch in ("'", '"', '`'):
-            quote = ch
+            if quote is None:
+                quote = ch
+            elif ch == quote:
+                quote = None
             out.append(ch)
-            continue
-        out.append('%s' if ch == '?' else ch)
+        elif ch == '?':
+            # 引号内是字符串字面量里的问号，不是占位符
+            out.append('?' if quote is not None else '%s')
+        elif ch == '%':
+            # 字面 % 在 pyformat 下必须转义为 %%（引号内外均如此）
+            out.append('%%')
+        else:
+            out.append(ch)
     return ''.join(out)
 
 

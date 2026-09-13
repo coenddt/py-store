@@ -1,0 +1,1607 @@
+{
+ "backend": "sqlite",
+ "available": true,
+ "skip_reason": null,
+ "results": [
+  {
+   "id": "A-01",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-02",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "0 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-03",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端无法翻译字段 \"tags\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-06",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端无法翻译字段 \"coupon\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-07",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端无法翻译字段 \"meta.seo.title\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-08",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 下推不支持（sqlite）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-10",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-13",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"tags\": []}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"python\", \"db\"]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-14",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"meta\": {}}]\n  期望: [{\"_id\": \"c1\", \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"title\": \"看Python\", \"desc\": \"从零开始\"}}}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-17",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-18",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "page 元数据自洽",
+     "op": "query_with_count",
+     "expectKind": "raw"
+    }
+   ]
+  },
+  {
+   "id": "A-19",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "A-20",
+   "backend": "sqlite",
+   "group": "A",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "期望抛错但未抛错",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "B-01",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "insert 结果: {'_id': 'cMTZEAT7UZMAWQ7ZO', 'categoryId': '', 'createdAt': 1789278633066, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789278633066}",
+     "op": "insert",
+     "expectKind": "inserted"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "count=1 期望 1",
+     "op": "count",
+     "expectKind": "count"
+    }
+   ]
+  },
+  {
+   "id": "B-02",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "insert_many",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "count=2 期望 2",
+     "op": "count",
+     "expectKind": "count"
+    }
+   ]
+  },
+  {
+   "id": "B-04",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-05",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"meta\": {}}]\n  期望: [{\"_id\": \"c1\", \"meta\": {\"cover\": \"x\"}}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-06",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"tags\": []}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"a\", \"b\"]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-08",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-08b",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"tags\": []}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"python\", \"db\", \"x\"]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-10",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: 无批量写入权限",
+     "op": "update_many",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "B-11",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: table courses_deleted has no column named createdAt",
+     "op": "remove",
+     "expectKind": "removed"
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"c1\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-12",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: table courses_deleted has no column named createdAt",
+     "op": "remove",
+     "expectKind": "error"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "count=7 期望 7",
+     "op": "count",
+     "expectKind": "count"
+    }
+   ]
+  },
+  {
+   "id": "B-13",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "upsert",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "count=1 期望 1",
+     "op": "count",
+     "expectKind": "count"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "no assertion",
+     "op": "upsert",
+     "expectKind": null
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "count=1 期望 1",
+     "op": "count",
+     "expectKind": "count"
+    },
+    {
+     "idx": 4,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "B-15",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "insert 结果: {'_id': 'nMTZEATCST5A36KU1', 'content': '', 'courseId': '', 'createdAt': 1789278633244, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789278633244}",
+     "op": "insert",
+     "expectKind": "inserted"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "count=2 期望 2",
+     "op": "count",
+     "expectKind": "count"
+    }
+   ]
+  },
+  {
+   "id": "B-16",
+   "backend": "sqlite",
+   "group": "B",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: 无写入权限",
+     "op": "insert",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "C-01",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-02",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"seq\": 1, \"title\": \"安装\"}, {\"_id\": \"l1\", \"seq\": 1, \"title\": \"安装\"}, {\"_id\": \"l2\", \"seq\": 2, \"title\": \"入门\"}, {\"_id\": \"l2\", \"seq\": 2, \"title\": \"入门\"}]}, {\"_id\": \"c2\", \"lessons\": [{\"_id\": \"l3\", \"seq\": 1, \"title\": \"语法\"}]}, {\"_id\": \"c3\", \"lessons\": []}, {\"_id\": \"c4\", \"lessons\": []}, {\"_id\": \"c5\", \"lessons\": []}, {\"_id\": \"c6\", \"lessons\": []}, {\"_id\": \"c7\", \"lessons\": []}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"title\": \"安装\", \"seq\": 1}, {\"_id\": \"l2\", \"title\": \"入门\", \"seq\": 2}]}, {\"_id\": \"c2\", \"lessons\": [{\"_id\": \"l3\", \"title\": \"语法\", \"seq\": 1}]}, {\"_id\": \"c3\", \"lessons\": []}, {\"_id\": \"c4\", \"lessons\": []}, {\"_id\": \"c5\", \"lessons\": []}, {\"_id\": \"c6\", \"lessons\": []}, {\"_id\": \"c7\", \"lessons\": []}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-03",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-04",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]\n  期望: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}, {\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-05",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"title\": \"安装\"}, {\"_id\": \"l1\", \"title\": \"安装\"}, {\"_id\": \"l2\", \"title\": \"入门\"}, {\"_id\": \"l2\", \"title\": \"入门\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"title\": \"安装\", \"parent\": null}, {\"_id\": \"l2\", \"title\": \"入门\", \"parent\": {\"_id\": \"l1\", \"title\": \"安装\"}}]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-06",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 下推不支持（sqlite）: childLimit；$lookup 关系 lessons 含子 limit/skip（每父 top-N），需窗口函数或 LATERAL，暂未下推（_unsupported:childLimit）",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-07",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-08",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-09",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "C-10",
+   "backend": "sqlite",
+   "group": "C",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"title\": \"安装\"}, {\"_id\": \"l1\", \"title\": \"安装\"}, {\"_id\": \"l2\", \"title\": \"入门\"}, {\"_id\": \"l2\", \"title\": \"入门\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"title\": \"安装\"}, {\"title\": \"入门\"}]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-01",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-02",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"u1\", \"displayName\": \"None#u1\"}]\n  期望: [{\"_id\": \"u1\", \"displayName\": \"Alice#u1\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-03",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"lessonCount\": 2}]",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c7\"}]\n  期望: [{\"_id\": \"c7\", \"lessonCount\": 0}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-04",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-05",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-06",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "secret 未泄漏",
+     "op": "query",
+     "expectKind": "raw"
+    }
+   ]
+  },
+  {
+   "id": "D-08",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789278633520, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789278633520}]\n  期望: [{\"_id\": \"c1\", \"title\": \"Python入门\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "D-09",
+   "backend": "sqlite",
+   "group": "D",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-01",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: 无访问权限",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "E-02",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-03",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-04",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-05",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l1\"}, {\"_id\": \"l1\"}, {\"_id\": \"l1\"}, {\"_id\": \"l2\"}, {\"_id\": \"l2\"}, {\"_id\": \"l2\"}, {\"_id\": \"l2\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l2\"}]}]",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "E-06",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-07",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-08",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "count=1 期望 1",
+     "op": "count",
+     "expectKind": "count"
+    }
+   ]
+  },
+  {
+   "id": "E-09",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"n1\", \"createdBy\": \"u1\"}]\n  期望: [{\"_id\": \"n1\"}]",
+     "op": "aggregate",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-10",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "0 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-11",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "E-12",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"PN1\", \"label\": \"pn\", \"memos\": [{\"_id\": \"m1\", \"body\": \"mine\", \"createdBy\": \"u1\"}, {\"_id\": \"m2\", \"body\": \"other\", \"createdBy\": \"u2\"}]}]\n  期望: [{\"_id\": \"PN1\", \"label\": \"pn\", \"memos\": [{\"body\": \"mine\", \"createdBy\": \"u1\"}]}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-13",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "E-14",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "E-15",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "E-16",
+   "backend": "sqlite",
+   "group": "E",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "F-01",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "F-02",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "4 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "F-03",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "F-04",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "F-05",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "时间戳为 ms 数值",
+     "op": "query",
+     "expectKind": "raw"
+    }
+   ]
+  },
+  {
+   "id": "F-06",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "F-07",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"c2\"}, {\"_id\": \"c5\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c2\"}, {\"_id\": \"c4\"}, {\"_id\": \"c5\"}]\n  期望: [{\"_id\": \"c4\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "F-08",
+   "backend": "sqlite",
+   "group": "F",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "G-01",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "显式(err=RuntimeError, events=[])",
+     "op": "query",
+     "expectKind": "unsupported"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "显式(err=RuntimeError, events=[])",
+     "op": "query",
+     "expectKind": "unsupported"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "显式(err=RuntimeError, events=[])",
+     "op": "query",
+     "expectKind": "unsupported"
+    }
+   ]
+  },
+  {
+   "id": "G-02",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "显式(err=RuntimeError, events=[])",
+     "op": "aggregate",
+     "expectKind": "unsupported"
+    }
+   ]
+  },
+  {
+   "id": "G-03",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789278633958, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789278633958}]\n  期望: []",
+     "op": "aggregate",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "G-04",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: 条件包含被拒绝的操作符 $where（服务端执行类，命中拒绝名单）：请改用结构化条件",
+     "op": "aggregate",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "G-05",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
+     "op": "aggregate",
+     "expectKind": "error"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "实际错误: 聚合阶段 $merge（写副作用）被拒绝：不允许在查询/聚合中写落盘",
+     "op": "aggregate",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "G-06",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "期望抛错但未抛错",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "G-07",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789278634016, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789278634016}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789278611115, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789278611115}]",
+     "op": "aggregate",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "G-08",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "set_flag",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "G-09",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: $expr 引用了 schema 未声明的字段 $notDeclared：请使用 schema 中已定义的字段",
+     "op": "aggregate",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "G-10",
+   "backend": "sqlite",
+   "group": "G",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "显式(err=RuntimeError, events=[])",
+     "op": "query",
+     "expectKind": "unsupported"
+    }
+   ]
+  },
+  {
+   "id": "H-01",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\"}, {\"_id\": \"c2\", \"categoryId\": \"cat1\", \"createdBy\": \"u2\", \"enrolledCount\": 3, \"price\": 100.5, \"status\": \"published\", \"summary\": \"\", \"title\": \"Go进阶\"}, {\"_id\": \"c3\", \"categoryId\": \"\", \"createdBy\": \"u2\", \"enrolledCount\": 0, \"price\": 0.0, \"status\": \"draft\", \"summary\": \"\", \"title\": \"SQL速成\"}, {\"_id\": \"c4\", \"categoryId\": \"\", \"createdBy\": \"u1\", \"enrolledCount\": 2, \"price\": -5.0, \"status\": \"archived\", \"summary\": \"\", \"title\": \"算法题解\"}, {\"_id\": \"c5\", \"categoryId\": \"cat3\", \"createdBy\": \"u2\", \"enrolledCount\": 1, \"price\": 1000000000000000.0, \"status\": \"published\", \"summary\": \"\", \"title\": \"分布式\"}, {\"_id\": \"c6\", \"categoryId\": \"cat2\", \"createdBy\": \"u1\", \"enrolledCount\": 2, \"price\": 0.30000000000000004, \"status\": \"published\", \"summary\": \"fp\", \"title\": \"浮点精度\"}, {\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\"}]\n  期望: [{\"_id\": \"c1\", \"title\": \"Python入门\", \"price\": 9.9, \"enrolledCount\": 0, \"summary\": \"必学\", \"status\": \"published\", \"categoryId\": \"cat2\", \"createdBy\": \"u1\"}, {\"_id\": \"c2\", \"title\": \"Go进阶\", \"price\": 100.5, \"enrolledCount\": 3, \"summary\": null, \"status\": \"published\", \"categoryId\": \"cat1\", \"createdBy\": \"u2\"}, {\"_id\": \"c3\", \"title\": \"SQL速成\", \"price\": 0.0, \"enrolledCount\": 0, \"summary\": \"\", \"status\": \"draft\", \"categoryId\": null, \"createdBy\": \"u2\"}, {\"_id\": \"c4\", \"title\": \"算法题解\", \"price\": -5.0, \"enrolledCount\": 2, \"status\": \"archived\", \"categoryId\": null, \"createdBy\": \"u1\"}, {\"_id\": \"c5\", \"title\": \"分布式\", \"price\": 1000000000000000.0, \"enrolledCount\": 1, \"summary\": null, \"status\": \"published\", \"categoryId\": \"cat3\", \"createdBy\": \"u2\"}, {\"_id\": \"c6\", \"title\": \"浮点精度\", \"price\": 0.30000000000000004, \"enrolledCount\": 2, \"summary\": \"fp\", \"status\": \"published\", \"categoryId\": \"cat2\", \"createdBy\": \"u1\"}, {\"_id\": \"c7\", \"title\": \"基础数学\", \"price\": 0.1, \"enrolledCount\": 0, \"summary\": \"base\", \"status\": \"published\", \"categoryId\": \"cat3\", \"createdBy\": \"u1\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-02",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "7 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-03",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c3\"}, {\"_id\": \"c4\"}]\n  期望: [{\"_id\": \"c3\"}, {\"_id\": \"c7\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-04",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "7 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "H-05",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "no assertion",
+     "op": "raw",
+     "expectKind": null
+    }
+   ]
+  },
+  {
+   "id": "H-06",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-07",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-08",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "执行报错: table courses_deleted has no column named createdAt",
+     "op": "remove",
+     "expectKind": "removed"
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"c1\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-09",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": false,
+     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"e2\"}, {\"_id\": \"e3\"}, {\"_id\": \"e5\"}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "H-10",
+   "backend": "sqlite",
+   "group": "H",
+   "status": "fail",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "no assertion",
+     "op": "update",
+     "expectKind": null
+    },
+    {
+     "idx": 1,
+     "ok": false,
+     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"meta\": {}, \"tags\": []}]\n  期望: [{\"_id\": \"c7\", \"tags\": [\"x\", \"y\"], \"meta\": {\"cover\": \"z\", \"seo\": {\"title\": \"深\", \"desc\": \"深描\"}}}]",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  }
+ ]
+}

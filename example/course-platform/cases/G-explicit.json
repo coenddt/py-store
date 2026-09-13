@@ -1,0 +1,92 @@
+[
+  {
+    "id": "G-01", "group": "G", "title": "不可翻译的 filter 必须显式",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] }, "sqlPolicy": "explicit-or-parity",
+    "steps": [
+      { "op": "query", "gql": "Course($condition:@c0){_id}", "params": { "c0": { "tags": "python" } },
+        "expect": { "kind": "unsupported" } },
+      { "op": "query", "gql": "Enrollment($condition:@c0){_id}", "params": { "c0": { "coupon": { "code": "SAVE10" } } },
+        "expect": { "kind": "unsupported" } },
+      { "op": "query", "gql": "Course($condition:@c0){_id}", "params": { "c0": { "meta.seo.title": "X" } },
+        "expect": { "kind": "unsupported" } }
+    ], "note": "G-01：SQL 后端对 array/object 字段 filter → 必须 Err 或告警；静默丢弃并返回全表=缺陷"
+  },
+  {
+    "id": "G-02", "group": "G", "title": "未支持聚合阶段",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] }, "sqlPolicy": "explicit-or-parity",
+    "steps": [
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$group": { "_id": "$status", "n": { "$sum": 1 } } } ],
+        "expect": { "kind": "unsupported" } }
+    ], "note": "G-02：不得静默忽略 $group 后返回原始行（历史 M-11-2）"
+  },
+  {
+    "id": "G-03", "group": "G", "title": "聚合阶段顺序必须保持",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "aggregate", "schema": "Course",
+        "pipeline": [ { "$match": { "status": "published" } }, { "$limit": 1 }, { "$match": { "_id": "c7" } } ],
+        "expect": { "kind": "rows", "rows": [] } }
+    ], "note": "G-03 / 历史 M-11-3：published→limit1→再 match c7 = 空；压平 WHERE published AND _id=c7 LIMIT1 会错返回 [c7]"
+  },
+  {
+    "id": "G-04", "group": "G", "title": "危险算子不透传",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$match": { "$where": "this.secret" } } ],
+        "expect": { "kind": "error" } }
+    ], "note": "G-04：$where 必须拒绝，不得进入 SQL"
+  },
+  {
+    "id": "G-05", "group": "G", "title": "写副作用阶段不透传",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$out": "blob" } ],
+        "expect": { "kind": "error" } },
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$merge": { "into": "blob" } } ],
+        "expect": { "kind": "error" } }
+    ], "note": "G-05：$out/$merge 必须拒绝"
+  },
+  {
+    "id": "G-06", "group": "G", "title": "空逻辑组",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "query", "gql": "Course($condition:@c0){_id}", "params": { "c0": { "$and": [] } },
+        "expect": { "kind": "error" } }
+    ], "note": "G-06：空 $and 不得产出无 WHERE 的全表查询"
+  },
+  {
+    "id": "G-07", "group": "G", "title": "排除式投影不得反带敏感列",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] }, "sqlPolicy": "explicit-or-parity",
+    "steps": [
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$match": { "_id": "c1" } }, { "$project": { "secret": 0 } } ],
+        "expect": { "kind": "rows" } },
+      { "op": "raw", "fn": "check_no_secret", "field": "secret", "secret": "SECRET-1" }
+    ], "note": "G-07 / 历史 M-11-4：$project secret:0 必须真的排除 secret（与 mongo oracle 比对 + 泄漏探针）"
+  },
+  {
+    "id": "G-08", "group": "G", "title": "$pipeline 不得绕过拒绝名单",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "set_flag", "name": "allow_user_pipeline", "value": true },
+      { "op": "query", "gql": "Course($pipeline:@p0){_id, title}",
+        "params": { "p0": [ { "$out": "blob" } ] },
+        "expect": { "kind": "error" } }
+    ], "note": "G-08 / 历史 M-11-5：即使 allow_user_pipeline=True，被拒算子仍应被拒"
+  },
+  {
+    "id": "G-09", "group": "G", "title": "$expr 引用未声明字段",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
+    "steps": [
+      { "op": "aggregate", "schema": "Course", "pipeline": [ { "$match": { "$expr": { "$gt": [ "$notDeclared", 1 ] } } } ],
+        "expect": { "kind": "error" } }
+    ], "note": "G-09：$expr 引用 schema 外字段必须 Err"
+  },
+  {
+    "id": "G-10", "group": "G", "title": "Mongo 特有算子的 SQL 处理必须二择一",
+    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] }, "sqlPolicy": "explicit-or-parity",
+    "steps": [
+      { "op": "query", "gql": "Course($condition:@c0){_id}", "params": { "c0": { "tags": { "$elemMatch": { "$eq": "python" } } } },
+        "expect": { "kind": "unsupported" } }
+    ], "note": "G-10：$elemMatch 对 SQL 后端必须正确翻译或显式 Err/unsupported"
+  }
+]

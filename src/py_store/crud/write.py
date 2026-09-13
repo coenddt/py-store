@@ -107,5 +107,5 @@ async def exists(schema_name, condition, route_override=None):
 
 async def count(schema_name, filter=None, route_override=None):
     """统计符合条件的文档数量"""
-    cmd = _call(lambda: _core.plan_count(schema_name, filter, route_override))
+    cmd = _call(lambda: _core.plan_count(schema_name, filter, _ctx(), route_override))
     return await _exec(cmd)
