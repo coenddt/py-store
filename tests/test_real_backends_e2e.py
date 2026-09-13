@@ -50,6 +50,7 @@ MYSQL_DDL = [
          title VARCHAR(255),
          status VARCHAR(64),
          views INT,
+         __present VARCHAR(255),
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
     f"""CREATE TABLE my_posts_{E2E_TOKEN}_deleted (
@@ -58,18 +59,21 @@ MYSQL_DDL = [
          status VARCHAR(64),
          views INT,
          deletedAt BIGINT,
+         __present VARCHAR(255),
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
     f"""CREATE TABLE widgets_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          sku VARCHAR(255) NOT NULL,
          price DOUBLE,
+         __present VARCHAR(255),
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB""",
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          widget_id VARCHAR(64),
          label VARCHAR(255),
+         __present VARCHAR(255),
          PRIMARY KEY (_id),
          FOREIGN KEY (widget_id) REFERENCES widgets_{E2E_TOKEN}(_id)
        ) ENGINE=InnoDB""",
@@ -81,14 +85,14 @@ PG_DDL = [
     f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN}_deleted CASCADE',
     f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN} CASCADE',
     f'CREATE TABLE pg_posts_{E2E_TOKEN} '
-    f'(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER)',
+    f'(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT)',
     f"""CREATE TABLE pg_posts_{E2E_TOKEN}_deleted (
-         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deletedAt" BIGINT
+         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deletedAt" BIGINT, __present TEXT
        )""",
     f'CREATE TABLE widgets_{E2E_TOKEN} '
-    f'(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION)',
+    f'(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION, __present TEXT)',
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
-         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT
+         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT, __present TEXT
        )""",
 ]
 
@@ -98,14 +102,14 @@ SQLITE_DDL = [
     f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}_deleted',
     f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}',
     f"""CREATE TABLE sq_posts_{E2E_TOKEN} (
-         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER
+         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT
        )""",
     f"""CREATE TABLE sq_posts_{E2E_TOKEN}_deleted (
-         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deletedAt INTEGER
+         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deletedAt INTEGER, __present TEXT
        )""",
-    f'CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL)',
+    f'CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL, __present TEXT)',
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
-         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT
+         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT, __present TEXT
        )""",
 ]
 
@@ -397,7 +401,7 @@ async def _t_update_many(ctx):
         {'title': 'A', 'status': 'draft', 'views': 1},
         {'title': 'B', 'status': 'draft', 'views': 2},
     ])
-    r = await store.update_many(S, {}, {'$inc': {'views': 10}})
+    r = await store.update_many(S, {'status': 'draft'}, {'$inc': {'views': 10}})
     assert r['modifiedCount'] == 2
     items = await store.query(f'{S}{{_id, views}}')
     assert sorted(d['views'] for d in items) == [11, 12]

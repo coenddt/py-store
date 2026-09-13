@@ -67,12 +67,7 @@
     },
     "computes": {
       "revenue":     { "type": "float", "fn": true, "fnRef": "course_revenue", "depends": ["price", "enrolledCount"] },
-      "lessonCount": { "type": "int",
-        "lookup": { "from": "lessons",
-          "let": { "cid": "$_id" },
-          "pipeline": [{ "$match": { "$expr": { "$eq": ["$courseId", "$$cid"] } } }],
-          "as": "_lessonCount" },
-        "addFields": { "$size": { "$ifNull": ["$_lessonCount", []] } } }
+      "lessonCount": { "type": "int", "agg": { "$count": "lessons" } }
     }
   },
   {

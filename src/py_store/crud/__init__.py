@@ -8,13 +8,12 @@ CRUD 包 —— 薄 Host 适配层（对齐 nodejs-store/src/crud.js 的分工�
 """
 
 from .exec import _get_db, set_connections, set_db
-from .mutation import aggregate, mutation, upsert
+from .mutation import mutation, upsert
 from .query import query, query_federated, query_one, query_with_count
 from .write import count, exists, insert, insert_many, remove, update, update_many
 
 __all__ = [
     '_get_db',
-    'aggregate',
     'count',
     'exists',
     'insert',

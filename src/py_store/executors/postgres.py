@@ -7,6 +7,7 @@
 """
 
 from ..schema import core as _core
+from ._values import normalize_rows
 
 
 def _affected(tag):
@@ -33,7 +34,7 @@ def create(driver, options=None):
             if shape:
                 # SELECT 或带 RETURNING 的写语句 → 取结果集
                 records = await conn.fetch(stmt['text'], *params)
-                rows = [dict(r) for r in records]
+                rows = normalize_rows([dict(r) for r in records])
                 docs = _core.restore_rows(shape, rows)
             else:
                 affected_rows = _affected(await conn.execute(stmt['text'], *params))

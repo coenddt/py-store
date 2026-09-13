@@ -44,14 +44,14 @@
    "id": "A-03",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"tags\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -59,14 +59,14 @@
    "id": "A-06",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"coupon\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "实际错误: 对象字段 \"coupon\" 不支持过滤条件（U2/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -74,14 +74,14 @@
    "id": "A-07",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"meta.seo.title\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "实际错误: 对象点号路径 \"meta.seo.title\" 不支持过滤条件（U3/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -89,14 +89,14 @@
    "id": "A-08",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 下推不支持（sqlite）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序",
+     "ok": true,
+     "note": "实际错误: 对象点号路径 \"meta.level\" 不支持排序（U4/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -119,12 +119,12 @@
    "id": "A-13",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"python\", \"db\"]}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -134,12 +134,12 @@
    "id": "A-14",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"title\": \"看Python\", \"desc\": \"从零开始\"}}}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -201,12 +201,12 @@
    "id": "A-20",
    "backend": "sqlite",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "期望抛错但未抛错",
+     "ok": true,
+     "note": "实际错误: $or 逻辑组为空：拒绝生成无条件的全表查询（请在组内提供至少一个条件）",
      "op": "query",
      "expectKind": "error"
     }
@@ -221,7 +221,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'cMTZK27D5YVQ9A8L0', 'categoryId': '', 'createdAt': 1789288309193, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789288309193}",
+     "note": "insert 结果: {'_id': 'cMU02I9FUU5W7CSYN', 'categoryId': '', 'createdAt': 1789319291466, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789319291466}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -282,7 +282,7 @@
    "id": "B-05",
    "backend": "sqlite",
    "group": "B",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -293,8 +293,8 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"meta\": {\"cover\": \"x\"}}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -304,7 +304,7 @@
    "id": "B-06",
    "backend": "sqlite",
    "group": "B",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -315,8 +315,8 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"a\", \"b\"]}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -348,7 +348,7 @@
    "id": "B-08b",
    "backend": "sqlite",
    "group": "B",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -359,8 +359,8 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\"}]\n  期望: [{\"_id\": \"c1\", \"tags\": [\"python\", \"db\", \"x\"]}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -385,19 +385,19 @@
    "id": "B-11",
    "backend": "sqlite",
    "group": "B",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: table courses_deleted has no column named createdAt",
+     "ok": true,
+     "note": "remove 结果: {'deletedCount': 1, 'archivedCount': 1}",
      "op": "remove",
      "expectKind": "removed"
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"c1\"}]",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -477,7 +477,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'nMTZK27I3151F41IL', 'content': '', 'courseId': '', 'createdAt': 1789288309371, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789288309371}",
+     "note": "insert 结果: {'_id': 'nMU02I9L0NPDWMGBW', 'content': '', 'courseId': '', 'createdAt': 1789319291652, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789319291652}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -509,12 +509,12 @@
    "id": "C-01",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "7 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -539,12 +539,12 @@
    "id": "C-03",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "3 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -554,12 +554,12 @@
    "id": "C-04",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]\n  期望: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}, {\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]",
+     "ok": true,
+     "note": "3 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -569,12 +569,12 @@
    "id": "C-05",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"parent\": null, \"title\": \"安装\"}, {\"_id\": \"l2\", \"parent\": null, \"title\": \"入门\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\", \"title\": \"安装\", \"parent\": null}, {\"_id\": \"l2\", \"title\": \"入门\", \"parent\": {\"_id\": \"l1\", \"title\": \"安装\"}}]}]",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -584,12 +584,12 @@
    "id": "C-06",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 下推不支持（sqlite）: childLimit；$lookup 关系 lessons 含子 limit/skip（每父 top-N），需窗口函数或 LATERAL，暂未下推（_unsupported:childLimit）",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -599,7 +599,7 @@
    "id": "C-07",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -610,8 +610,8 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -621,12 +621,12 @@
    "id": "C-08",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -636,12 +636,12 @@
    "id": "C-09",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -703,19 +703,19 @@
    "id": "D-03",
    "backend": "sqlite",
    "group": "D",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $addFields：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $addFields：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -763,21 +763,6 @@
      "note": "secret 未泄漏",
      "op": "query",
      "expectKind": "raw"
-    }
-   ]
-  },
-  {
-   "id": "D-08",
-   "backend": "sqlite",
-   "group": "D",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "1 行",
-     "op": "query",
-     "expectKind": "rows"
     }
    ]
   },
@@ -860,21 +845,14 @@
    "id": "E-05",
    "backend": "sqlite",
    "group": "E",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l1\"}, {\"_id\": \"l2\"}, {\"_id\": \"l2\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l2\"}]}]",
-     "op": "query",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
      "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
+     "note": "实际错误: 无访问权限",
+     "op": "query",
+     "expectKind": "error"
     }
    ]
   },
@@ -924,21 +902,6 @@
    ]
   },
   {
-   "id": "E-09",
-   "backend": "sqlite",
-   "group": "E",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "1 行",
-     "op": "aggregate",
-     "expectKind": "rows"
-    }
-   ]
-  },
-  {
    "id": "E-10",
    "backend": "sqlite",
    "group": "E",
@@ -957,21 +920,14 @@
    "id": "E-11",
    "backend": "sqlite",
    "group": "E",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
-     "op": "query",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
      "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
+     "note": "实际错误: 无访问权限",
+     "op": "query",
+     "expectKind": "error"
     }
    ]
   },
@@ -979,12 +935,12 @@
    "id": "E-12",
    "backend": "sqlite",
    "group": "E",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"PN1\", \"label\": \"pn\", \"memos\": [{\"body\": \"mine\", \"createdBy\": \"u1\"}, {\"body\": \"other\", \"createdBy\": \"u2\"}]}]\n  期望: [{\"_id\": \"PN1\", \"label\": \"pn\", \"memos\": [{\"body\": \"mine\", \"createdBy\": \"u1\"}]}]",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -1249,89 +1205,22 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "显式(err=RuntimeError, events=[])",
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     },
     {
      "idx": 1,
      "ok": true,
-     "note": "显式(err=RuntimeError, events=[])",
+     "note": "实际错误: 对象字段 \"coupon\" 不支持过滤条件（U2/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     },
     {
      "idx": 2,
      "ok": true,
-     "note": "显式(err=RuntimeError, events=[])",
+     "note": "实际错误: 对象点号路径 \"meta.seo.title\" 不支持过滤条件（U3/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
-    }
-   ]
-  },
-  {
-   "id": "G-02",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "显式(err=RuntimeError, events=[])",
-     "op": "aggregate",
-     "expectKind": "unsupported"
-    }
-   ]
-  },
-  {
-   "id": "G-03",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "fail",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789288310085, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789288310085}]\n  期望: []",
-     "op": "aggregate",
-     "expectKind": "rows"
-    }
-   ]
-  },
-  {
-   "id": "G-04",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: 条件包含被拒绝的操作符 $where（服务端执行类，命中拒绝名单）：请改用结构化条件",
-     "op": "aggregate",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-05",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
-     "op": "aggregate",
-     "expectKind": "error"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $merge（写副作用）被拒绝：不允许在查询/聚合中写落盘",
-     "op": "aggregate",
      "expectKind": "error"
     }
    ]
@@ -1340,72 +1229,13 @@
    "id": "G-06",
    "backend": "sqlite",
    "group": "G",
-   "status": "fail",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": false,
-     "note": "期望抛错但未抛错",
-     "op": "query",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-07",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "fail",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789288310144, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789288310144}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789287668253, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789287668253}]",
-     "op": "aggregate",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
-    }
-   ]
-  },
-  {
-   "id": "G-08",
-   "backend": "sqlite",
-   "group": "G",
    "status": "pass",
    "steps": [
     {
      "idx": 0,
      "ok": true,
-     "note": "no assertion",
-     "op": "set_flag",
-     "expectKind": null
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
+     "note": "实际错误: $and 逻辑组为空：拒绝生成无条件的全表查询（请在组内提供至少一个条件）",
      "op": "query",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-09",
-   "backend": "sqlite",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: $expr 引用了 schema 未声明的字段 $notDeclared：请使用 schema 中已定义的字段",
-     "op": "aggregate",
      "expectKind": "error"
     }
    ]
@@ -1419,9 +1249,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "显式(err=RuntimeError, events=[])",
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     }
    ]
   },
@@ -1533,12 +1363,12 @@
    "id": "H-07",
    "backend": "sqlite",
    "group": "H",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     },
@@ -1555,19 +1385,19 @@
    "id": "H-08",
    "backend": "sqlite",
    "group": "H",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: table courses_deleted has no column named createdAt",
+     "ok": true,
+     "note": "remove 结果: {'deletedCount': 1, 'archivedCount': 1}",
      "op": "remove",
      "expectKind": "removed"
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: []\n  期望: [{\"_id\": \"c1\"}]",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -1592,7 +1422,7 @@
    "id": "H-10",
    "backend": "sqlite",
    "group": "H",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -1603,8 +1433,313 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c7\"}]\n  期望: [{\"_id\": \"c7\", \"tags\": [\"x\", \"y\"], \"meta\": {\"cover\": \"z\", \"seo\": {\"title\": \"深\", \"desc\": \"深描\"}}}]",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-01",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-02",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "6 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-03",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-04",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-05",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-06",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-07",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "0 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-08",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: $group.agg 别名 \"status\" 与 by 键冲突",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "实际错误: $group 至少需要 by 键或 agg 别名之一",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "实际错误: $group.agg \"n\" 的算子 $median 不在白名单（$count/$sum/$avg/$min/$max）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "实际错误: $having 引用了未声明的字段 \"bogus\"（仅可引用 by 键 / agg 别名）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 4,
+     "ok": true,
+     "note": "实际错误: $having 需要与 $group 同时使用（无 $group 时没有分组结果可过滤）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 5,
+     "ok": true,
+     "note": "实际错误: $group 的 by 键 \"lessons\" 是关系名（分组键仅支持标量域，不支持关系字段）",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "J-09",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-10",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-11",
+   "backend": "sqlite",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }

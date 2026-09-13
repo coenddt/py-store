@@ -49,9 +49,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "2 行",
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -64,9 +64,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "1 行",
+     "note": "实际错误: 对象字段 \"coupon\" 不支持过滤条件（U2/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -79,9 +79,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "1 行",
+     "note": "实际错误: 对象点号路径 \"meta.seo.title\" 不支持过滤条件（U3/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -94,9 +94,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "7 行",
+     "note": "实际错误: 对象点号路径 \"meta.level\" 不支持排序（U4/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "rows"
+     "expectKind": "error"
     }
    ]
   },
@@ -206,7 +206,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "实际错误: $or argument must be a non-empty array, full error: {'ok': 0.0, 'errmsg': '$or argument must be a non-empty array', 'code': 2, 'codeName': 'BadValue'}",
+     "note": "实际错误: $or 逻辑组为空：拒绝生成无条件的全表查询（请在组内提供至少一个条件）",
      "op": "query",
      "expectKind": "error"
     }
@@ -221,7 +221,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'cMTZTMET5RG3I607X', 'categoryId': '', 'createdAt': 1789304368505, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789304368505}",
+     "note": "insert 结果: {'_id': 'cMU02HW9UO6QWJO51', 'categoryId': '', 'createdAt': 1789319274402, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789319274402}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -477,7 +477,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'nMTZTMF2EWBZKRNVT', 'content': '', 'courseId': '', 'createdAt': 1789304368838, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789304368838}",
+     "note": "insert 结果: {'_id': 'nMU02HWIWXOJSHVWF', 'content': '', 'courseId': '', 'createdAt': 1789319274728, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789319274728}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -767,21 +767,6 @@
    ]
   },
   {
-   "id": "D-08",
-   "backend": "mongodb",
-   "group": "D",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "1 行",
-     "op": "query",
-     "expectKind": "rows"
-    }
-   ]
-  },
-  {
    "id": "D-09",
    "backend": "mongodb",
    "group": "D",
@@ -865,16 +850,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "1 行",
+     "note": "实际错误: 无访问权限",
      "op": "query",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
+     "expectKind": "error"
     }
    ]
   },
@@ -924,21 +902,6 @@
    ]
   },
   {
-   "id": "E-09",
-   "backend": "mongodb",
-   "group": "E",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "1 行",
-     "op": "aggregate",
-     "expectKind": "rows"
-    }
-   ]
-  },
-  {
    "id": "E-10",
    "backend": "mongodb",
    "group": "E",
@@ -962,16 +925,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "1 行",
+     "note": "实际错误: 无访问权限",
      "op": "query",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
+     "expectKind": "error"
     }
    ]
   },
@@ -1249,89 +1205,22 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "mongo 基准支持",
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     },
     {
      "idx": 1,
      "ok": true,
-     "note": "mongo 基准支持",
+     "note": "实际错误: 对象字段 \"coupon\" 不支持过滤条件（U2/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     },
     {
      "idx": 2,
      "ok": true,
-     "note": "mongo 基准支持",
+     "note": "实际错误: 对象点号路径 \"meta.seo.title\" 不支持过滤条件（U3/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
-    }
-   ]
-  },
-  {
-   "id": "G-02",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "mongo 基准支持",
-     "op": "aggregate",
-     "expectKind": "unsupported"
-    }
-   ]
-  },
-  {
-   "id": "G-03",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "0 行",
-     "op": "aggregate",
-     "expectKind": "rows"
-    }
-   ]
-  },
-  {
-   "id": "G-04",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: 条件包含被拒绝的操作符 $where（服务端执行类，命中拒绝名单）：请改用结构化条件",
-     "op": "aggregate",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-05",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
-     "op": "aggregate",
-     "expectKind": "error"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $merge（写副作用）被拒绝：不允许在查询/聚合中写落盘",
-     "op": "aggregate",
      "expectKind": "error"
     }
    ]
@@ -1345,67 +1234,8 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "实际错误: $and argument must be a non-empty array, full error: {'ok': 0.0, 'errmsg': '$and argument must be a non-empty array', 'code': 2, 'codeName': 'BadValue'}",
+     "note": "实际错误: $and 逻辑组为空：拒绝生成无条件的全表查询（请在组内提供至少一个条件）",
      "op": "query",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-07",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "1 行",
-     "op": "aggregate",
-     "expectKind": "rows"
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "no assertion",
-     "op": "raw",
-     "expectKind": null
-    }
-   ]
-  },
-  {
-   "id": "G-08",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "no assertion",
-     "op": "set_flag",
-     "expectKind": null
-    },
-    {
-     "idx": 1,
-     "ok": true,
-     "note": "实际错误: 聚合阶段 $out（写副作用）被拒绝：不允许在查询/聚合中写落盘",
-     "op": "query",
-     "expectKind": "error"
-    }
-   ]
-  },
-  {
-   "id": "G-09",
-   "backend": "mongodb",
-   "group": "G",
-   "status": "pass",
-   "steps": [
-    {
-     "idx": 0,
-     "ok": true,
-     "note": "实际错误: $expr 引用了 schema 未声明的字段 $notDeclared：请使用 schema 中已定义的字段",
-     "op": "aggregate",
      "expectKind": "error"
     }
    ]
@@ -1419,9 +1249,9 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "mongo 基准支持",
+     "note": "实际错误: 数组字段 \"tags\" 不支持过滤条件（U1/D2：所有后端含 Mongo 统一显式拒绝）",
      "op": "query",
-     "expectKind": "unsupported"
+     "expectKind": "error"
     }
    ]
   },
@@ -1609,6 +1439,311 @@
      "expectKind": "rows"
     }
    ]
+  },
+  {
+   "id": "J-01",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-02",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "6 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-03",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-04",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-05",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-06",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-07",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "0 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-08",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "实际错误: $group.agg 别名 \"status\" 与 by 键冲突",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "实际错误: $group 至少需要 by 键或 agg 别名之一",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "实际错误: $group.agg \"n\" 的算子 $median 不在白名单（$count/$sum/$avg/$min/$max）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "实际错误: $having 引用了未声明的字段 \"bogus\"（仅可引用 by 键 / agg 别名）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 4,
+     "ok": true,
+     "note": "实际错误: $having 需要与 $group 同时使用（无 $group 时没有分组结果可过滤）",
+     "op": "query",
+     "expectKind": "error"
+    },
+    {
+     "idx": 5,
+     "ok": true,
+     "note": "实际错误: $group 的 by 键 \"lessons\" 是关系名（分组键仅支持标量域，不支持关系字段）",
+     "op": "query",
+     "expectKind": "error"
+    }
+   ]
+  },
+  {
+   "id": "J-09",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "5 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-10",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 2,
+     "ok": true,
+     "note": "2 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 3,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
+  },
+  {
+   "id": "J-11",
+   "backend": "mongodb",
+   "group": "J",
+   "status": "pass",
+   "steps": [
+    {
+     "idx": 0,
+     "ok": true,
+     "note": "3 行",
+     "op": "query",
+     "expectKind": "rows"
+    },
+    {
+     "idx": 1,
+     "ok": true,
+     "note": "1 行",
+     "op": "query",
+     "expectKind": "rows"
+    }
+   ]
   }
  ],
  "oracle": {
@@ -1654,71 +1789,16 @@
    []
   ],
   "A-03": [
-   [
-    {
-     "_id": "c1",
-     "tags": [
-      "python",
-      "db"
-     ]
-    },
-    {
-     "_id": "c6",
-     "tags": [
-      "python"
-     ]
-    }
-   ]
+   null
   ],
   "A-06": [
-   [
-    {
-     "_id": "e1",
-     "coupon": {
-      "code": "SAVE10",
-      "off": 10
-     }
-    }
-   ]
+   null
   ],
   "A-07": [
-   [
-    {
-     "_id": "c1"
-    }
-   ]
+   null
   ],
   "A-08": [
-   [
-    {
-     "_id": "c1",
-     "title": "Python入门"
-    },
-    {
-     "_id": "c2",
-     "title": "Go进阶"
-    },
-    {
-     "_id": "c3",
-     "title": "SQL速成"
-    },
-    {
-     "_id": "c4",
-     "title": "算法题解"
-    },
-    {
-     "_id": "c5",
-     "title": "分布式"
-    },
-    {
-     "_id": "c6",
-     "title": "浮点精度"
-    },
-    {
-     "_id": "c7",
-     "title": "基础数学"
-    }
-   ]
+   null
   ],
   "A-10": [
    [
@@ -2184,14 +2264,6 @@
   "D-06": [
    null
   ],
-  "D-08": [
-   [
-    {
-     "_id": "c1",
-     "title": "Python入门"
-    }
-   ]
-  ],
   "D-09": [
    [
     {
@@ -2231,19 +2303,6 @@
    ]
   ],
   "E-05": [
-   [
-    {
-     "_id": "c1",
-     "lessons": [
-      {
-       "_id": "l1"
-      },
-      {
-       "_id": "l2"
-      }
-     ]
-    }
-   ],
    null
   ],
   "E-06": [
@@ -2265,26 +2324,10 @@
   "E-08": [
    null
   ],
-  "E-09": [
-   [
-    {
-     "_id": "n1"
-    }
-   ]
-  ],
   "E-10": [
    []
   ],
   "E-11": [
-   [
-    {
-     "_id": "h1",
-     "grade": {
-      "score": 90
-     },
-     "label": "h1"
-    }
-   ],
    null
   ],
   "E-12": [
@@ -2451,57 +2494,7 @@
    null,
    null
   ],
-  "G-02": [
-   null
-  ],
-  "G-03": [
-   []
-  ],
-  "G-04": [
-   null
-  ],
-  "G-05": [
-   null,
-   null
-  ],
   "G-06": [
-   null
-  ],
-  "G-07": [
-   [
-    {
-     "_id": "c1",
-     "categoryId": "cat2",
-     "createdAt": 1789304370251,
-     "createdBy": "u1",
-     "enrolledCount": 0,
-     "meta": {
-      "cover": "c1.png",
-      "level": "beginner",
-      "seo": {
-       "desc": "从零开始",
-       "title": "看Python"
-      }
-     },
-     "price": 9.9,
-     "rating": 4.5,
-     "status": "published",
-     "summary": "必学",
-     "tags": [
-      "python",
-      "db"
-     ],
-     "title": "Python入门",
-     "updatedAt": 1789304370251
-    }
-   ],
-   null
-  ],
-  "G-08": [
-   null,
-   null
-  ],
-  "G-09": [
    null
   ],
   "G-10": [
@@ -2759,6 +2752,300 @@
       "x",
       "y"
      ]
+    }
+   ]
+  ],
+  "J-01": [
+   [
+    {
+     "n": 1,
+     "total": -5.0,
+     "status": "archived"
+    },
+    {
+     "n": 1,
+     "total": 0.0,
+     "status": "draft"
+    },
+    {
+     "n": 5,
+     "total": 1000000000000110.8,
+     "status": "published"
+    }
+   ],
+   [
+    {
+     "cnt": 0,
+     "status": "archived"
+    },
+    {
+     "cnt": 1,
+     "status": "draft"
+    },
+    {
+     "cnt": 3,
+     "status": "published"
+    }
+   ]
+  ],
+  "J-02": [
+   [
+    {
+     "n": 1,
+     "enrolledCount": 2,
+     "status": "archived"
+    },
+    {
+     "n": 1,
+     "enrolledCount": 0,
+     "status": "draft"
+    },
+    {
+     "n": 2,
+     "enrolledCount": 0,
+     "status": "published"
+    },
+    {
+     "n": 1,
+     "enrolledCount": 1,
+     "status": "published"
+    },
+    {
+     "n": 1,
+     "enrolledCount": 2,
+     "status": "published"
+    },
+    {
+     "n": 1,
+     "enrolledCount": 3,
+     "status": "published"
+    }
+   ]
+  ],
+  "J-03": [
+   [
+    {
+     "avgPrice": -5.0,
+     "maxPrice": -5.0,
+     "minPrice": -5.0,
+     "n": 1,
+     "status": "archived"
+    },
+    {
+     "avgPrice": 0.0,
+     "maxPrice": 0.0,
+     "minPrice": 0.0,
+     "n": 1,
+     "status": "draft"
+    },
+    {
+     "avgPrice": 200000000000022.16,
+     "maxPrice": 1000000000000000.0,
+     "minPrice": 0.1,
+     "n": 5,
+     "status": "published"
+    }
+   ],
+   [
+    {
+     "mn": null,
+     "status": "archived"
+    },
+    {
+     "mn": 0.0,
+     "status": "draft"
+    },
+    {
+     "mn": 1.1,
+     "status": "published"
+    }
+   ]
+  ],
+  "J-04": [
+   [
+    {
+     "n": 5,
+     "total": 1000000000000110.8,
+     "status": "published"
+    }
+   ],
+   [
+    {
+     "n": 5,
+     "total": 1000000000000110.8,
+     "status": "published"
+    }
+   ],
+   [
+    {
+     "n": 5,
+     "status": "published"
+    }
+   ]
+  ],
+  "J-05": [
+   [
+    {
+     "n": 1,
+     "total": 0.0,
+     "status": "draft"
+    },
+    {
+     "n": 5,
+     "total": 1000000000000110.8,
+     "status": "published"
+    }
+   ],
+   [
+    {
+     "n": 1,
+     "total": 0.0,
+     "status": "draft"
+    }
+   ],
+   [
+    {
+     "n": 1,
+     "status": "archived"
+    },
+    {
+     "n": 1,
+     "status": "draft"
+    }
+   ]
+  ],
+  "J-06": [
+   [
+    {
+     "avgPrice": 142857142857157.97,
+     "n": 7,
+     "total": 1000000000000105.8
+    }
+   ],
+   [
+    {
+     "n": 5,
+     "total": 1000000000000110.8
+    }
+   ]
+  ],
+  "J-07": [
+   [
+    {
+     "avgPrice": null,
+     "n": 0,
+     "total": null
+    }
+   ],
+   []
+  ],
+  "J-08": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "J-09": [
+   [
+    {
+     "_id": "c1"
+    },
+    {
+     "_id": "c2"
+    }
+   ],
+   [
+    {
+     "_id": "c3"
+    },
+    {
+     "_id": "c4"
+    },
+    {
+     "_id": "c5"
+    },
+    {
+     "_id": "c6"
+    },
+    {
+     "_id": "c7"
+    }
+   ],
+   [
+    {
+     "_id": "c3"
+    },
+    {
+     "_id": "c4"
+    },
+    {
+     "_id": "c5"
+    },
+    {
+     "_id": "c6"
+    },
+    {
+     "_id": "c7"
+    }
+   ],
+   [
+    {
+     "_id": "c1"
+    },
+    {
+     "_id": "c2"
+    }
+   ]
+  ],
+  "J-10": [
+   [
+    {
+     "_id": "c1"
+    }
+   ],
+   [
+    {
+     "_id": "c1"
+    }
+   ],
+   [
+    {
+     "_id": "c1"
+    },
+    {
+     "_id": "c2"
+    }
+   ],
+   [
+    {
+     "_id": "c1"
+    }
+   ]
+  ],
+  "J-11": [
+   [
+    {
+     "avgEnrolled": 0.0,
+     "sumEnrolled": 0,
+     "status": "draft"
+    },
+    {
+     "avgEnrolled": 1.2,
+     "sumEnrolled": 6,
+     "status": "published"
+    },
+    {
+     "avgEnrolled": 2.0,
+     "sumEnrolled": 2,
+     "status": "archived"
+    }
+   ],
+   [
+    {
+     "avgEnrolled": 1.1428571428571428,
+     "sumEnrolled": 8
     }
    ]
   ]

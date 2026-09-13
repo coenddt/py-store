@@ -49,7 +49,7 @@ def _build_pipeline(gql, params=None):
 class Store:
     """以属性方式访问各 API（**全显式类方法，无动态查找**）
 
-    CRUD / mutation / aggregate 各方法均支持可选 ``route_override``
+    CRUD / mutation 各方法均支持可选 ``route_override``
     （``{'source', 'namespace'}`` 多租户路由，覆盖命令定位；权限与计算列
     仍按结构 schema 判定，见 multi-datasource-routing-plan.md §6）。
 
@@ -111,10 +111,6 @@ class Store:
                      route_override: dict | None = None) -> dict[str, Any] | None:
         return await crud.upsert(schema_name, condition, data, options, route_override)
 
-    async def aggregate(self, schema_name: str, pipeline: list[dict[str, Any]],
-                        route_override: dict | None = None) -> list[dict[str, Any]]:
-        return await crud.aggregate(schema_name, pipeline, route_override)
-
     async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
                           overlay: list | None = None, datasource: str | None = None,
                           namespace: str | None = None, register_defs: bool = True) -> list[dict[str, Any]]:
@@ -152,9 +148,6 @@ class Store:
     run_as_internal = staticmethod(permission.run_as_internal)
     # 自定义权限错误（实例可被 store.PermissionError 捕获）
     PermissionError = permission.PermissionError
-    # 用户 $pipeline 直通开关（Registry 级守卫，AI 问数宿主建议关闭）
-    setAllowUserPipeline = staticmethod(schema.set_allow_user_pipeline)
-    set_allow_user_pipeline = staticmethod(schema.set_allow_user_pipeline)
     # 上下文强制开关（fail-secure：开启后 ctx 缺失报 ERR_NO_CONTEXT，内部调用走 run_as_internal）
     setRequireContext = staticmethod(schema.set_require_context)
     set_require_context = staticmethod(schema.set_require_context)

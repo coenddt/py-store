@@ -18,7 +18,7 @@
     ], "note": "D-02：displayName asyncFn 尾处理，值正确"
   },
   {
-    "id": "D-03", "group": "D", "title": "lookup 计算列",
+    "id": "D-03", "group": "D", "title": "归一聚合计算列",
     "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
     "steps": [
       { "op": "query", "gql": "Course($condition:@c0){_id, lessonCount}", "params": { "c0": { "_id": "c1" } },
@@ -50,15 +50,6 @@
       { "op": "query", "gql": "ProbeCompute($condition:@c0){_id, label, code}", "params": { "c0": { "_id": "pc1" } },
         "expect": { "kind": "raw", "fn": "check_no_secret", "field": "secret", "secret": "ABCD1234" } }
     ], "note": "D-06：code 依赖 secret(read=admin)，student 不得透出 secret 值（可 Err 或省略）"
-  },
-  {
-    "id": "D-08", "group": "D", "title": "$pipeline 模式不追加计算列",
-    "reset": "seed", "ctx": { "userId": "u1", "roles": ["admin"] },
-    "steps": [
-      { "op": "query", "gql": "Course($pipeline:@p0){_id, title}",
-        "params": { "p0": [ { "$match": { "_id": "c1" } } ] },
-        "expect": { "kind": "rows", "rows": [ { "_id": "c1", "title": "Python入门" } ] } }
-    ], "note": "D-08：$pipeline 原样执行，不追加 compute 层/补默认值/裁剪"
   },
   {
     "id": "D-09", "group": "D", "title": "计算列 + 投影混用",

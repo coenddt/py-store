@@ -136,7 +136,7 @@ def _write_report():
     lines.append('> 本报告只出证据，不修实现。判定规则：SQL 结果集与 Mongo(oracle) 逐行相等'
                  '或显式 Err/unsupported+告警；静默不一致判缺陷。')
     lines.append('')
-    lines.append('## 二、覆盖度表（A~H 组）')
+    lines.append('## 二、覆盖度表（A~J 组）')
     lines.append('')
     lines.append('| 组 | 覆盖数 | 后端 | 通过 | 失败 | skip(不可达) |')
     lines.append('|---|----|----|----|----|----|')

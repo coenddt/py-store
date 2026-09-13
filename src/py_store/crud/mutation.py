@@ -1,17 +1,21 @@
 """Mutation / Upsert / 原生聚合 —— 规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
 
 from .. import datasource as _datasource
+from ..feedback import emit as _emit_feedback
 from ..schema import core as _core
 from ..schema import get as _get_schema
 from .exec import _call, _ctx, _exec, _now_for, resolve_placeholders
 from .id import _generate_id, _new_id_pool
 
 
-async def _mutation_one(schema_name, data, route_override=None):
+async def _mutation_one(schema_name, data, now, route_override=None):
     """mutation 单条：规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
     plan = _call(lambda: _core.plan_mutation(
-        schema_name, data, _now_for(schema_name), _new_id_pool(schema_name, data), _ctx(),
-        route_override))
+        schema_name, data, now, _new_id_pool(schema_name, data), _ctx(), route_override))
+
+    # §11.4 静默点收口：规划期降级（如关系不可读被跳过）走统一反馈通道，禁止静默失守
+    for d in plan.get('degraded') or []:
+        _emit_feedback(dict(d or {}, type='mutation_degraded'))
 
     async def _run_steps():
         resolved: list = []
@@ -50,9 +54,13 @@ async def mutation(schema_name, data, route_override=None):
     if not items:
         return [] if is_array else None
 
+    # §11.3 确定性输入：一次 mutation 调用共用一个 now
+    # （数组内多条 + 父子步骤 + 默认值 / 计算列全部同值）
+    now = _now_for(schema_name)
+
     results = []
     for item in items:
-        results.append(await _mutation_one(schema_name, item, route_override))
+        results.append(await _mutation_one(schema_name, item, now, route_override))
 
     return results if is_array else results[0]
 
@@ -69,9 +77,3 @@ async def upsert(schema_name, condition, data, options=None, route_override=None
         _generate_id(s) if s['idPrefix'] else '', _ctx(), route_override))
     result = await _exec(plan['command'])
     return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
-
-
-async def aggregate(schema_name, pipeline, route_override=None):
-    """对指定 schema 执行 MongoDB 原生聚合查询"""
-    cmd = _call(lambda: _core.plan_aggregate(schema_name, pipeline or [], _ctx(), route_override))
-    return await _exec(cmd)

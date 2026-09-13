@@ -24,7 +24,7 @@ Schema 管理 — 薄适配层
         },
         'computes': {
             'statusLabel': {'type': 'string', 'depends': ['status'], 'fn': lambda item: LABELS.get(item.get('status'), '')},
-            'bidCount':    {'type': 'int', 'lookup': {'$size': {'$ifNull': ['$bidders', []]}}},
+            'bidCount':    {'type': 'int', 'agg': {'$count': 'bidders'}},
         },
         'indexes': [
             {'keys': {'status': 1, 'startTime': -1}},
@@ -139,11 +139,6 @@ def has(name):
 def list():
     """所有已注册 schema 名称（core 侧，含归档表，按注册顺序）"""
     return core.list()
-
-
-def set_allow_user_pipeline(allow=True):
-    """开关用户 $pipeline 直通（默认允许；AI 问数宿主建议关闭作纵深防御）"""
-    core.set_allow_user_pipeline(bool(allow))
 
 
 def set_require_context(require=True):

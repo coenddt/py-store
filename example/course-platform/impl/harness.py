@@ -244,8 +244,6 @@ async def run_step(h, step):
             result = await h.store.upsert(step['schema'], step['condition'], step['data'])
         elif op == 'mutation':
             result = await h.store.mutation(step['schema'], step['data'])
-        elif op == 'aggregate':
-            result = await h.store.aggregate(step['schema'], step['pipeline'])
         elif op == 'set_flag':
             _set_flag(step['name'], step['value'])
             result = None
@@ -258,9 +256,7 @@ async def run_step(h, step):
 
 
 def _set_flag(name, value):
-    if name == 'allow_user_pipeline':
-        store.set_allow_user_pipeline(value)
-    elif name == 'require_context':
+    if name == 'require_context':
         store.set_require_context(value)
     else:
         raise RuntimeError(f'未知开关 {name}')
@@ -379,9 +375,8 @@ async def _run_backend_inner(kind, oracle):
                 await seed(kind, driver)
             permission.set_context(case.get('ctx'))
             h.case_policy = case.get('sqlPolicy')  # case 级 sqlPolicy 透传给各 step
-            # 快照开关，用例结束复原（E-13/G-08 会改 require_context / allow_user_pipeline）
+            # 快照开关，用例结束复原（E-13 会改 require_context）
             _saved_require = store.require_context()
-            _saved_pipeline = True
             steps_out = []
             case_oracle_steps = []
             try:
@@ -411,7 +406,6 @@ async def _run_backend_inner(kind, oracle):
                                       'op': step['op'], 'expectKind': step.get('expect', {}).get('kind')})
             finally:
                 store.set_require_context(_saved_require)
-                store.set_allow_user_pipeline(_saved_pipeline)
             results.append({'id': case['id'], 'backend': kind, 'group': case.get('group'),
                             'status': 'pass' if all(s['ok'] for s in steps_out) else 'fail',
                             'steps': steps_out})

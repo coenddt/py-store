@@ -311,9 +311,9 @@ def test_crud_update_empty_set_raises():
 
 def test_crud_update_many_raw_and_set():
     _crud_w_mock([{'income': 1.0}])
-    r1 = _run(_crud_mod.update_many('CommercialLedger', {}, {'$inc': {'income': 1}}))
+    r1 = _run(_crud_mod.update_many('CommercialLedger', {'income': 1.0}, {'$inc': {'income': 1}}))
     assert r1['modifiedCount'] == 1
-    r2 = _run(_crud_mod.update_many('CommercialLedger', {}, {'income': 2.0}))
+    r2 = _run(_crud_mod.update_many('CommercialLedger', {'income': 1.0}, {'income': 2.0}))
     assert r2['modifiedCount'] == 1
 
 
@@ -359,14 +359,8 @@ def test_crud_mutation_empty_array():
     assert _run(_crud_mod.mutation('CommercialLedger', [])) == []
 
 
-def test_crud_aggregate():
-    _crud_w_mock([{'unit': 'a'}])
-    out = _run(_crud_mod.aggregate('CommercialLedger', [{'$match': {'unit': 'a'}}]))
-    assert len(out) and out[0]['unit'] == 'a'
-
-
 # ─────────────────────────────────────────────────────────────
-# 扩展守卫：timestamps 单位 / $pipeline 开关 / feedback 事件
+# 扩展守卫：timestamps 单位 / feedback 事件
 # ─────────────────────────────────────────────────────────────
 
 def test_schema_timestamp_unit_seconds_insert():
@@ -400,27 +394,6 @@ def test_schema_register_rejects_invalid_timestamps():
         assert 'timestamps 仅支持' in str(e)
     else:
         raise AssertionError('非法 timestamps 应报错')
-
-
-def test_store_pipeline_switch_blocks_and_restores():
-    # Registry 级开关：关闭后 $pipeline 显式报错；重新打开恢复（进程级单例，finally 必恢复）
-    from py_store import store
-    _crud_w_mock([{'unit': 'a'}])
-    gql = 'CommercialLedger($pipeline:@p){unit}'
-    params = {'p': [{'$match': {}}]}
-    try:
-        store.setAllowUserPipeline(False)
-        try:
-            _run(_crud_mod.query(gql, params))
-        except RuntimeError as e:
-            assert '已被禁用' in str(e)
-        else:
-            raise AssertionError('禁用后应显式报错')
-        store.setAllowUserPipeline(True)
-        items = _run(_crud_mod.query(gql, params))
-        assert items and items[0]['unit'] == 'a'
-    finally:
-        store.setAllowUserPipeline(True)
 
 
 def test_feedback_sink_and_default_stderr():

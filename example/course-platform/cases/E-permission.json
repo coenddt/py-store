@@ -32,14 +32,13 @@
     ], "note": "E-04：admin 可见 secret"
   },
   {
-    "id": "E-05", "group": "E", "title": "关系级 read 裁剪",
-    "reset": "seed", "ctx": { "userId": "u2", "roles": ["student"] }, "sqlPolicy": "explicit-or-parity",
+    "id": "E-05", "group": "E", "title": "关系级 read 拒绝（显式请求不可读关系）",
+    "reset": "seed", "ctx": { "userId": "u2", "roles": ["student"] },
     "steps": [
       { "op": "query", "gql": "Course($condition:@c0){_id, lessons{_id}, reviews{_id, score}}",
         "params": { "c0": { "_id": "c1" } },
-        "expect": { "kind": "rows" } },
-      { "op": "raw", "fn": "check_relation_trim", "field": "reviews" }
-    ], "note": "E-05：reviews 关系 read=admin/editor，student 不得带回评价数据（历史关系权限未收口）"
+        "expect": { "kind": "error", "code": "ERR_PERMISSION", "status": 403 } }
+    ], "note": "E-05 / RBAC R0-1：reviews 关系 read=admin/editor，student 显式请求 → Err(ERR_PERMISSION)，绝不静默裁剪"
   },
   {
     "id": "E-06", "group": "E", "title": "owner 注入（带 $condition）",
@@ -65,14 +64,6 @@
     ], "note": "E-08：count 路径也注入 owner（u1 只有 n1）"
   },
   {
-    "id": "E-09", "group": "E", "title": "owner 注入 + aggregate",
-    "reset": "seed", "ctx": { "userId": "u1", "roles": ["student"] }, "sqlPolicy": "explicit-or-parity",
-    "steps": [
-      { "op": "aggregate", "schema": "StudyNote", "pipeline": [ { "$match": {} } ],
-        "expect": { "kind": "rows", "rows": [ { "_id": "n1" } ] , "normalize": { "ignore": ["title", "content", "courseId", "createdAt", "updatedAt", "createdBy", "meta", "tags"] } } }
-    ], "note": "E-09：aggregate 路径同样注入 owner，只返回 u1 的行"
-  },
-  {
     "id": "E-10", "group": "E", "title": "owner 条件不覆盖原条件",
     "reset": "seed", "ctx": { "userId": "u1", "roles": ["student"] },
     "steps": [
@@ -81,14 +72,13 @@
     ], "note": "E-10：最终条件=AND(原条件,owner)；笔记B 属 u2，u1 得空（丢其一将越权）"
   },
   {
-    "id": "E-11", "group": "E", "title": "关系目标 schema 不可读",
-    "reset": "seed", "ctx": { "userId": "u5", "roles": ["student"] }, "sqlPolicy": "explicit-or-parity",
+    "id": "E-11", "group": "E", "title": "关系目标 schema 不可读 → 拒绝",
+    "reset": "seed", "ctx": { "userId": "u5", "roles": ["student"] },
     "steps": [
       { "op": "query", "gql": "ProbeHolder($condition:@c0){_id, label, grade{score}}",
         "params": { "c0": { "_id": "h1" } },
-        "expect": { "kind": "rows" } },
-      { "op": "raw", "fn": "check_relation_trim", "field": "grade" }
-    ], "note": "E-11 / 历史 A 组：ProbeGrade read=admin，student 不得把 grade 数据带出"
+        "expect": { "kind": "error", "code": "ERR_PERMISSION", "status": 403 } }
+    ], "note": "E-11 / RBAC R0-1：目标模型 ProbeGrade read=admin，student 显式请求 grade 关系 → Err(ERR_PERMISSION)"
   },
   {
     "id": "E-12", "group": "E", "title": "关系目标 owner 隔离",

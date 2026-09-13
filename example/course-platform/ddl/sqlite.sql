@@ -27,7 +27,7 @@ CREATE TABLE users (
 CREATE TABLE users_deleted (
   _id TEXT PRIMARY KEY,
   name TEXT, email TEXT, role TEXT, avatar TEXT,
-  createdBy TEXT, updatedAt INTEGER, deletedAt INTEGER,
+  createdBy TEXT, createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 
@@ -53,7 +53,7 @@ CREATE TABLE courses_deleted (
   _id TEXT PRIMARY KEY,
   title TEXT, summary TEXT, status TEXT, price REAL,
   enrolledCount INTEGER, rating REAL, secret TEXT,
-  categoryId TEXT, createdBy TEXT, updatedAt INTEGER, deletedAt INTEGER,
+  categoryId TEXT, createdBy TEXT, createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 
@@ -68,7 +68,7 @@ CREATE TABLE lessons_deleted (
   _id TEXT PRIMARY KEY,
   courseId TEXT, parentId TEXT, title TEXT, seq INTEGER,
   duration INTEGER, videoUrl TEXT, free INTEGER, createdBy TEXT,
-  updatedAt INTEGER, deletedAt INTEGER,
+  createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 
@@ -83,7 +83,7 @@ CREATE TABLE enrollments_deleted (
   _id TEXT PRIMARY KEY,
   userId TEXT, courseId TEXT, amount REAL,
   paid INTEGER, paidAt INTEGER, status TEXT, createdBy TEXT,
-  updatedAt INTEGER, deletedAt INTEGER,
+  createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 
@@ -96,7 +96,7 @@ CREATE TABLE reviews (
 CREATE TABLE reviews_deleted (
   _id TEXT PRIMARY KEY,
   courseId TEXT, userId TEXT, score INTEGER, content TEXT, createdBy TEXT,
-  updatedAt INTEGER, deletedAt INTEGER,
+  createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 
@@ -109,7 +109,7 @@ CREATE TABLE study_notes (
 CREATE TABLE study_notes_deleted (
   _id TEXT PRIMARY KEY,
   title TEXT, content TEXT, courseId TEXT, createdBy TEXT,
-  updatedAt INTEGER, deletedAt INTEGER,
+  createdAt INTEGER, updatedAt INTEGER, deletedAt INTEGER,
   __present TEXT
 );
 

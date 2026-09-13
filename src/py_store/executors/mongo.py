@@ -22,7 +22,9 @@ def _explicit_null(v):
                 out[k] = _explicit_null(val)
             elif k.startswith('$'):
                 out[k] = val
-            elif isinstance(val, dict):
+            elif isinstance(val, (dict, list)):
+                # 与 nodejs-store/src/executors/mongo.js#_explicitNull 对齐：
+                # 非 `$` 键的对象/数组值一律递归下钻（否则数组内嵌套对象的显式 null 不会被改写 → 三端 parity 破）
                 out[k] = _explicit_null(val)
             elif val is None:
                 out[k] = {'$eq': None, '$exists': True}

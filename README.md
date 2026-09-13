@@ -121,7 +121,11 @@ Model($condition:@c0,$sort:@s1,$skip:@sk,$limit:@l1) {
 
 - Values come from the params dict: `{"c0": {...}, "s1": {...}}`.
 - Object sub-fields use dot notation; relations are declared in the schema (`type: "many" | "one"`) and resolved automatically — **do not hand-write `$lookup`**.
-- `$pipeline` passes a raw aggregation through as-is (no compute/defaults/permission trimming) — use with care; prefer `store.aggregate(model, pipeline)` for group/sum needs. AI/agent hosts can hard-disable it via `store.set_allow_user_pipeline(False)` (registry-level guard; all plan paths then reject `$pipeline` explicitly).
+
+> **Breaking change**: user `$pipeline` passthrough and `store.aggregate()` were removed
+> (raw aggregation escape hatch). A GQL containing `$pipeline` now fails explicitly instead
+> of being silently ignored. Use `$condition`/`$sort`/`$skip`/`$limit` + relations; normalized
+> aggregation (`$group`/`$sum`) is being redesigned and will return under a single GQL syntax.
 
 ## Query & write API
 
@@ -140,7 +144,6 @@ await store.update_many("Post", {"type": t}, {"status": "live"})
 r      = await store.remove("Post", {"_id": pid})    # archives to <collection>_deleted first
 await store.mutation("Post", {...})                  # smart upsert + recursive relation children
 await store.upsert("Post", {"code": "A1"}, {...})    # explicit-condition upsert (no relation handling)
-rows  = await store.aggregate("Post", pipeline)      # native aggregation
 ```
 
 Notes:
@@ -215,7 +218,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
     },
     "computes": {
         "total": {"type": "float", "depends": ["amount"], "fn": lambda d: d["amount"] * 1.1},
-        "itemCount": {"type": "int", "lookup": {"$size": {"$ifNull": ["$items", []]}}},
+        "itemCount": {"type": "int", "agg": {"$count": "items"}},
     },
     "indexes": [
         {"keys": {"status": 1}},

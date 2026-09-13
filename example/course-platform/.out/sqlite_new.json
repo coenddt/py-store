@@ -221,7 +221,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'cMTZTMKJW2MBD4427', 'categoryId': '', 'createdAt': 1789304375948, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789304375948}",
+     "note": "insert 结果: {'_id': 'cMTZURRMM997TVRKP', 'categoryId': '', 'createdAt': 1789306298014, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789306298014}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -477,7 +477,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'nMTZTMKP52TYD4E5W', 'content': '', 'courseId': '', 'createdAt': 1789304376137, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789304376137}",
+     "note": "insert 结果: {'_id': 'nMTZURRSCQBJZ6ZZ2', 'content': '', 'courseId': '', 'createdAt': 1789306298220, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789306298220}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -509,12 +509,12 @@
    "id": "C-01",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "7 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -539,12 +539,12 @@
    "id": "C-03",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "3 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -599,7 +599,7 @@
    "id": "C-07",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
@@ -610,8 +610,8 @@
     },
     {
      "idx": 1,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -621,12 +621,12 @@
    "id": "C-08",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -636,12 +636,12 @@
    "id": "C-09",
    "backend": "sqlite",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -860,12 +860,12 @@
    "id": "E-05",
    "backend": "sqlite",
    "group": "E",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l1\"}, {\"_id\": \"l2\"}, {\"_id\": \"l2\"}]}]\n  期望: [{\"_id\": \"c1\", \"lessons\": [{\"_id\": \"l1\"}, {\"_id\": \"l2\"}]}]",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     },
@@ -962,7 +962,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "SQL 显式报错（RuntimeError）可接受",
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     },
@@ -1293,7 +1293,7 @@
     {
      "idx": 0,
      "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789304376905, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789304376905}]\n  期望: []",
+     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789306299043, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789306299043}]\n  期望: []",
      "op": "aggregate",
      "expectKind": "rows"
     }
@@ -1360,7 +1360,7 @@
     {
      "idx": 0,
      "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789304376970, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789304376970}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789304370251, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789304370251}]",
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789306299111, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789306299111}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789304370251, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789304370251}]",
      "op": "aggregate",
      "expectKind": "rows"
     },
@@ -1533,12 +1533,12 @@
    "id": "H-07",
    "backend": "sqlite",
    "group": "H",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "1 行",
      "op": "query",
      "expectKind": "rows"
     },

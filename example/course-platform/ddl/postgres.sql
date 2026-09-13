@@ -28,7 +28,7 @@ CREATE TABLE users (
 CREATE TABLE users_deleted (
   _id TEXT PRIMARY KEY,
   name TEXT, email TEXT, role TEXT, avatar TEXT,
-  "createdBy" TEXT, "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "createdBy" TEXT, "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 
@@ -54,7 +54,7 @@ CREATE TABLE courses_deleted (
   _id TEXT PRIMARY KEY,
   title TEXT, summary TEXT, status TEXT, price DOUBLE PRECISION,
   "enrolledCount" INTEGER, rating DOUBLE PRECISION, secret TEXT,
-  "categoryId" TEXT, "createdBy" TEXT, "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "categoryId" TEXT, "createdBy" TEXT, "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 
@@ -69,7 +69,7 @@ CREATE TABLE lessons_deleted (
   _id TEXT PRIMARY KEY,
   "courseId" TEXT, "parentId" TEXT, title TEXT, seq INTEGER,
   duration INTEGER, "videoUrl" TEXT, free BOOLEAN, "createdBy" TEXT,
-  "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 
@@ -84,7 +84,7 @@ CREATE TABLE enrollments_deleted (
   _id TEXT PRIMARY KEY,
   "userId" TEXT, "courseId" TEXT, amount DOUBLE PRECISION,
   paid BOOLEAN, "paidAt" BIGINT, status TEXT, "createdBy" TEXT,
-  "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 
@@ -97,7 +97,7 @@ CREATE TABLE reviews (
 CREATE TABLE reviews_deleted (
   _id TEXT PRIMARY KEY,
   "courseId" TEXT, "userId" TEXT, score INTEGER, content TEXT, "createdBy" TEXT,
-  "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 
@@ -110,7 +110,7 @@ CREATE TABLE study_notes (
 CREATE TABLE study_notes_deleted (
   _id TEXT PRIMARY KEY,
   title TEXT, content TEXT, "courseId" TEXT, "createdBy" TEXT,
-  "updatedAt" BIGINT, "deletedAt" BIGINT,
+  "createdAt" BIGINT, "updatedAt" BIGINT, "deletedAt" BIGINT,
   __present TEXT
 );
 

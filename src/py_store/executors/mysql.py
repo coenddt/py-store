@@ -9,6 +9,7 @@
 from contextlib import asynccontextmanager
 
 from ..schema import core as _core
+from ._values import normalize_rows
 
 
 @asynccontextmanager
@@ -86,7 +87,7 @@ def create(driver, options=None):
             for stmt in plan.get('stmts') or []:
                 await cur.execute(_to_pyformat(stmt['text']), list(stmt.get('params') or []))
                 if cur.description is not None:
-                    rows = [_plain(r) for r in await cur.fetchall()]
+                    rows = normalize_rows([_plain(r) for r in await cur.fetchall()])
                     shape = stmt.get('rowShape')
                     if shape:
                         docs = _core.restore_rows(shape, rows)
