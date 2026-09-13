@@ -17,6 +17,8 @@ import asyncio
 import json
 import os
 
+import pytest
+
 from py_store import crud as _crud_mod
 from py_store import permission as perm
 from py_store.crud.exec import resolve_placeholders
@@ -29,7 +31,12 @@ _HOST_FIXTURES = os.path.join(
 
 
 def _load(name):
-    with open(os.path.join(_HOST_FIXTURES, name), encoding='utf-8') as f:
+    # I-7：fixture 位于仓库外（rust-store），单仓 clone / 单包 CI 时不存在——
+    # 此时 skip 而非抛 FileNotFoundError，保证测试可独立运行
+    path = os.path.join(_HOST_FIXTURES, name)
+    if not os.path.exists(path):
+        pytest.skip(f'缺少 rust-store fixture: {path}（需同时 clone rust-store 仓库）')
+    with open(path, encoding='utf-8') as f:
         return json.load(f)
 
 

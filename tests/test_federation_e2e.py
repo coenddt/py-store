@@ -7,6 +7,8 @@ A6：跨库计算列（依赖子源关系字段）在同一 GQL 内生效。
 
 需本机 127.0.0.1 已启动 MySQL(3306) / MongoDB(27017)，库 `mongo_store_e2e`，
 账号 `e2e/e2e123`（可用 MYSQL_URI / MONGO_URI 覆盖）；任一不可达则整体 skip。
+表 / 集合名统一带进程级 token 后缀（M-4）：同机多进程或跨仓（nodejs-store e2e）
+并发跑同一共享库时，各实例只建并只清自己的表，互不干扰。
 
 全程只走 store 统一入口：`store.query_federated` → core `plan_federated` 拆源
   → 逐源执行（Mongo 原生 / SQL translate→exec）→ core `merge_federated` 内存 join
@@ -17,6 +19,7 @@ A6：跨库计算列（依赖子源关系字段）在同一 GQL 内生效。
 
 import asyncio
 import os
+import uuid
 from urllib.parse import unquote, urlparse
 
 import pytest
@@ -24,14 +27,17 @@ import pytest
 from py_store import executors, init, permission, store
 from py_store import schema as _sc
 
+# 进程级唯一 token（M-4）：表 / 集合名统一加此后缀，`_reset()` 只清理自己的表。
+# 每次运行随机生成；可用 PYSTORE_E2E_TOKEN 环境变量覆盖（复现并发冲突时固定值）。
+E2E_TOKEN = os.environ.get('PYSTORE_E2E_TOKEN') or uuid.uuid4().hex[:8]
+
 MYSQL_URI = os.environ.get(
     'MYSQL_URI', 'mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4')
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://127.0.0.1:27017/mongo_store_e2e')
 
 MYSQL_DDL = [
-    'DROP TABLE IF EXISTS fed_orders_deleted',
-    'DROP TABLE IF EXISTS fed_orders',
-    """CREATE TABLE fed_orders (
+    f'DROP TABLE IF EXISTS fed_orders_{E2E_TOKEN}',
+    f"""CREATE TABLE fed_orders_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          userId VARCHAR(64),
          code VARCHAR(255),
@@ -81,7 +87,7 @@ async def _setup_mongo():
         return
     state.mongo_client = client
     state.mongo_db = client.get_default_database()
-    await state.mongo_db['fed_users'].delete_many({})
+    await state.mongo_db[f'fed_users_{E2E_TOKEN}'].delete_many({})
     state.mongo_ready = True
 
 
@@ -125,7 +131,7 @@ async def _setup():
 
     _sc.register({
         'name': 'FedUser',
-        'collection': 'fed_users',
+        'collection': f'fed_users_{E2E_TOKEN}',
         'idPrefix': 'u_',
         'datasource': 'mongo_e2e',
         'timestamps': False,
@@ -145,7 +151,7 @@ async def _setup():
     })
     _sc.register({
         'name': 'FedOrder',
-        'collection': 'fed_orders',
+        'collection': f'fed_orders_{E2E_TOKEN}',
         'idPrefix': 'o_',
         'datasource': 'mysql_e2e',
         'timestamps': False,
@@ -173,10 +179,11 @@ async def _teardown():
 
 
 async def _reset():
+    # M-4：只清理本 token 的表（并发进程 / 跨仓实例互不干扰）
     async with state.mysql_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute('DELETE FROM fed_orders')
-    await state.mongo_db['fed_users'].delete_many({})
+            await cur.execute(f'DELETE FROM fed_orders_{E2E_TOKEN}')
+    await state.mongo_db[f'fed_users_{E2E_TOKEN}'].delete_many({})
 
 
 _LOOP = None
@@ -185,8 +192,18 @@ _LOOP = None
 @pytest.fixture(scope='module', autouse=True)
 def _boot():
     global _LOOP
-    _LOOP = asyncio.new_event_loop()
-    asyncio.set_event_loop(_LOOP)
+    # m-11：惰性 / 安全建 loop —— asyncmy 连接池绑定创建时的 loop，连接须共用同一事件循环；
+    # loop 在 fixture（首次使用）时创建，模块导入期零副作用；仅当当前线程无运行中 loop
+    # 时才创建并 set（不覆盖宿主 / 异步框架已有 loop），teardown 关闭并清理本 fixture 的 set。
+    # 取舍说明：3.14 起获取「线程 current loop」的标准 API 均已弃用，故 teardown 统一
+    # set_event_loop(None)（测试自管理的既有取舍，进程结束即回收）；真实宿主应自行管理 loop。
+    # （schema._schemas / datasource._connections 全局单例为既定设计，维持现状，不动。）
+    try:
+        asyncio.get_running_loop()  # 同步 fixture 上下文不应有运行中 loop，此处恒走 except
+        _LOOP = asyncio.get_event_loop()
+    except RuntimeError:
+        _LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_LOOP)
     try:
         _LOOP.run_until_complete(_setup())
         yield _LOOP

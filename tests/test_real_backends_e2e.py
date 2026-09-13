@@ -4,6 +4,8 @@
 sql-executor.test.js）。本文件一次覆盖四库：MySQL(3306) / PostgreSQL(5432) / MongoDB(27017)
 需本机已启动，库 `mongo_store_e2e`，账号 `e2e/e2e123`（可用 MYSQL_URI / PG_URI / MONGO_URI 覆盖）；
 SQLite 走内存库（无需外部服务）。任一外部库不可达时，其相关用例自动 skip，不影响其余回归。
+表 / 集合名统一带进程级 token 后缀（M-4）：同机多进程或跨仓（nodejs-store e2e）
+并发跑同一共享库时，各实例只建并只清自己的表，互不干扰。
 
 全程只走 store 统一入口：
   store.init(连接) → crud.* → datasource 路由 → core.dialect_translate
@@ -18,6 +20,7 @@ SQLite 走内存库（无需外部服务）。任一外部库不可达时，其�
 
 import asyncio
 import os
+import uuid
 from urllib.parse import unquote, urlparse
 
 import pytest
@@ -25,26 +28,31 @@ import pytest
 from py_store import executors, init, permission, store
 from py_store import schema as _sc
 
+# 进程级唯一 token（M-4）：表 / 集合名统一加此后缀，`_reset()` 只清理自己的表。
+# 每次运行随机生成；可用 PYSTORE_E2E_TOKEN 环境变量覆盖（复现并发冲突时固定值）。
+E2E_TOKEN = os.environ.get('PYSTORE_E2E_TOKEN') or uuid.uuid4().hex[:8]
+
 MYSQL_URI = os.environ.get(
     'MYSQL_URI', 'mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4')
 PG_URI = os.environ.get('PG_URI', 'postgres://e2e:e2e123@127.0.0.1:5432/mongo_store_e2e')
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://127.0.0.1:27017/mongo_store_e2e')
 
 # ─── 物理表结构（标量范式，与 core 关系模型一致；archive 表供 remove 归档） ───
+# 归档表名 = collection + '_deleted'（core 在 register 时自动派生 `<collection>_deleted` 归档 schema）
 
 MYSQL_DDL = [
-    'DROP TABLE IF EXISTS gadgets',
-    'DROP TABLE IF EXISTS widgets',
-    'DROP TABLE IF EXISTS my_posts_deleted',
-    'DROP TABLE IF EXISTS my_posts',
-    """CREATE TABLE my_posts (
+    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}',
+    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN}',
+    f'DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}_deleted',
+    f'DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}',
+    f"""CREATE TABLE my_posts_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          title VARCHAR(255),
          status VARCHAR(64),
          views INT,
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE my_posts_deleted (
+    f"""CREATE TABLE my_posts_{E2E_TOKEN}_deleted (
          _id VARCHAR(64) NOT NULL,
          title VARCHAR(255),
          status VARCHAR(64),
@@ -52,50 +60,52 @@ MYSQL_DDL = [
          deletedAt BIGINT,
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE widgets (
+    f"""CREATE TABLE widgets_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          sku VARCHAR(255) NOT NULL,
          price DOUBLE,
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB""",
-    """CREATE TABLE gadgets (
+    f"""CREATE TABLE gadgets_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          widget_id VARCHAR(64),
          label VARCHAR(255),
          PRIMARY KEY (_id),
-         FOREIGN KEY (widget_id) REFERENCES widgets(_id)
+         FOREIGN KEY (widget_id) REFERENCES widgets_{E2E_TOKEN}(_id)
        ) ENGINE=InnoDB""",
 ]
 
 PG_DDL = [
-    'DROP TABLE IF EXISTS gadgets CASCADE',
-    'DROP TABLE IF EXISTS widgets CASCADE',
-    'DROP TABLE IF EXISTS pg_posts_deleted CASCADE',
-    'DROP TABLE IF EXISTS pg_posts CASCADE',
-    'CREATE TABLE pg_posts (_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER)',
-    """CREATE TABLE pg_posts_deleted (
+    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN} CASCADE',
+    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN} CASCADE',
+    f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN}_deleted CASCADE',
+    f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN} CASCADE',
+    f'CREATE TABLE pg_posts_{E2E_TOKEN} '
+    f'(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER)',
+    f"""CREATE TABLE pg_posts_{E2E_TOKEN}_deleted (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deletedAt" BIGINT
        )""",
-    'CREATE TABLE widgets (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION)',
-    """CREATE TABLE gadgets (
-         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets(_id), label TEXT
+    f'CREATE TABLE widgets_{E2E_TOKEN} '
+    f'(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION)',
+    f"""CREATE TABLE gadgets_{E2E_TOKEN} (
+         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT
        )""",
 ]
 
 SQLITE_DDL = [
-    'DROP TABLE IF EXISTS gadgets',
-    'DROP TABLE IF EXISTS widgets',
-    'DROP TABLE IF EXISTS sq_posts_deleted',
-    'DROP TABLE IF EXISTS sq_posts',
-    """CREATE TABLE sq_posts (
+    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}',
+    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN}',
+    f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}_deleted',
+    f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}',
+    f"""CREATE TABLE sq_posts_{E2E_TOKEN} (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER
        )""",
-    """CREATE TABLE sq_posts_deleted (
+    f"""CREATE TABLE sq_posts_{E2E_TOKEN}_deleted (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deletedAt INTEGER
        )""",
-    'CREATE TABLE widgets (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL)',
-    """CREATE TABLE gadgets (
-         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets(_id), label TEXT
+    f'CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL)',
+    f"""CREATE TABLE gadgets_{E2E_TOKEN} (
+         _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT
        )""",
 ]
 
@@ -115,15 +125,19 @@ class _Ctx:
         self.reset_collections = []
 
 
-mysql_ctx = _Ctx(kind='mysql', ds='mysql_e2e', schema_name='MyPost', collection='my_posts',
-                 archive_schema='MyPostDeleted', archive='my_posts_deleted')
-pg_ctx = _Ctx(kind='postgres', ds='pg_e2e', schema_name='PgPost', collection='pg_posts',
-              archive_schema='PgPostDeleted', archive='pg_posts_deleted')
-mongo_ctx = _Ctx(kind='mongodb', ds='mongo_e2e', schema_name='MgPost', collection='mg_posts',
-                 archive_schema='MgPostDeleted', archive='mg_posts_deleted')
-# SQLite 内存库无需外部服务，天然作为 `default` 源
-sqlite_ctx = _Ctx(kind='sqlite', ds='default', schema_name='SqPost', collection='sq_posts',
-                  archive_schema='SqPostDeleted', archive='sq_posts_deleted')
+mysql_ctx = _Ctx(kind='mysql', ds='mysql_e2e', schema_name='MyPost',
+                 collection=f'my_posts_{E2E_TOKEN}',
+                 archive_schema='MyPostDeleted', archive=f'my_posts_{E2E_TOKEN}_deleted')
+pg_ctx = _Ctx(kind='postgres', ds='pg_e2e', schema_name='PgPost',
+              collection=f'pg_posts_{E2E_TOKEN}',
+              archive_schema='PgPostDeleted', archive=f'pg_posts_{E2E_TOKEN}_deleted')
+mongo_ctx = _Ctx(kind='mongodb', ds='mongo_e2e', schema_name='MgPost',
+                 collection=f'mg_posts_{E2E_TOKEN}',
+                 archive_schema='MgPostDeleted', archive=f'mg_posts_{E2E_TOKEN}_deleted')
+# SQLite 内存库无需外部服务，天然作为 `default` 源（表名带 token 与其余后端保持一致）
+sqlite_ctx = _Ctx(kind='sqlite', ds='default', schema_name='SqPost',
+                  collection=f'sq_posts_{E2E_TOKEN}',
+                  archive_schema='SqPostDeleted', archive=f'sq_posts_{E2E_TOKEN}_deleted')
 
 CTXS = [mysql_ctx, pg_ctx, mongo_ctx, sqlite_ctx]
 CRUD_CTXS = CTXS
@@ -185,7 +199,8 @@ async def _setup_mysql(ctx):
                 await cur.execute(stmt)
     ctx.driver = pool
     ctx.conn = executors.create_connection('mysql', pool)
-    ctx.reset_sql = ['DELETE FROM my_posts', 'DELETE FROM my_posts_deleted']
+    ctx.reset_sql = [f'DELETE FROM my_posts_{E2E_TOKEN}',
+                     f'DELETE FROM my_posts_{E2E_TOKEN}_deleted']
     _register_post(ctx)
     ctx.ready = True
 
@@ -207,7 +222,8 @@ async def _setup_postgres(ctx):
         await pool.execute(stmt)
     ctx.driver = pool
     ctx.conn = executors.create_connection('postgres', pool)
-    ctx.reset_sql = ['DELETE FROM pg_posts', 'DELETE FROM pg_posts_deleted']
+    ctx.reset_sql = [f'DELETE FROM pg_posts_{E2E_TOKEN}',
+                     f'DELETE FROM pg_posts_{E2E_TOKEN}_deleted']
     _register_post(ctx)
     ctx.ready = True
 
@@ -229,7 +245,8 @@ async def _setup_mongo(ctx):
     ctx.client = client
     ctx.driver = db
     ctx.conn = db
-    ctx.reset_collections = ['mg_posts', 'mg_posts_deleted']
+    # M-4：只清理本 token 的集合（并发进程 / 跨仓实例互不干扰）
+    ctx.reset_collections = [f'mg_posts_{E2E_TOKEN}', f'mg_posts_{E2E_TOKEN}_deleted']
     _register_post(ctx)
     ctx.ready = True
 
@@ -246,7 +263,8 @@ async def _setup_sqlite(ctx):
     await db.commit()
     ctx.driver = db
     ctx.conn = executors.create_connection('sqlite', db)
-    ctx.reset_sql = ['DELETE FROM sq_posts', 'DELETE FROM sq_posts_deleted']
+    ctx.reset_sql = [f'DELETE FROM sq_posts_{E2E_TOKEN}',
+                     f'DELETE FROM sq_posts_{E2E_TOKEN}_deleted']
     _register_post(ctx)
     ctx.ready = True
 
@@ -302,8 +320,18 @@ _LOOP = None
 @pytest.fixture(scope='module', autouse=True)
 def _boot():
     global _LOOP
-    _LOOP = asyncio.new_event_loop()
-    asyncio.set_event_loop(_LOOP)
+    # m-11：惰性 / 安全建 loop —— asyncmy/asyncpg 连接池绑定创建时的 loop，连接须共用同一事件循环；
+    # loop 在 fixture（首次使用）时创建，模块导入期零副作用；仅当当前线程无运行中 loop
+    # 时才创建并 set（不覆盖宿主 / 异步框架已有 loop），teardown 关闭并清理本 fixture 的 set。
+    # 取舍说明：3.14 起获取「线程 current loop」的标准 API 均已弃用，故 teardown 统一
+    # set_event_loop(None)（测试自管理的既有取舍，进程结束即回收）；真实宿主应自行管理 loop。
+    # （schema._schemas / datasource._connections 全局单例为既定设计，维持现状，不动。）
+    try:
+        asyncio.get_running_loop()  # 同步 fixture 上下文不应有运行中 loop，此处恒走 except
+        _LOOP = asyncio.get_event_loop()
+    except RuntimeError:
+        _LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_LOOP)
     try:
         _LOOP.run_until_complete(_setup())
         yield _LOOP
@@ -420,20 +448,21 @@ async def _t_sync_schema(ctx):
     defs = await store.sync_schema(ctx.kind, ctx.driver, datasource=ctx.ds,
                                    register_defs=False)
 
-    widgets = next((d for d in defs if d['name'] == 'widgets'), None)
+    widgets = next((d for d in defs if d['collection'] == f'widgets_{E2E_TOKEN}'), None)
     assert widgets, '应产出 widgets 定义'
-    assert widgets['collection'] == 'widgets'
+    assert widgets['collection'] == f'widgets_{E2E_TOKEN}'
     assert widgets['datasource'] == ctx.ds
     assert widgets['fields'].get('_id'), '主键应映射为 _id'
     assert widgets['fields']['sku']['required'] is True, 'NOT NULL 应映射 required'
     assert widgets['fields']['price']['type'] == 'number'
-    assert widgets['relations'].get('gadgets'), '外键应生成反向 many 关系'
-    assert widgets['relations']['gadgets']['type'] == 'many'
+    # 关系键 = 物理表名（带 token 后缀），见探针确认
+    assert widgets['relations'].get(f'gadgets_{E2E_TOKEN}'), '外键应生成反向 many 关系'
+    assert widgets['relations'][f'gadgets_{E2E_TOKEN}']['type'] == 'many'
 
-    gadgets = next((d for d in defs if d['name'] == 'gadgets'), None)
-    assert gadgets['relations'].get('widgets'), '外键侧应有 many-to-one 关系'
-    assert gadgets['relations']['widgets']['type'] == 'one'
-    assert gadgets['relations']['widgets']['localField'] == 'widget_id'
+    gadgets = next((d for d in defs if d['collection'] == f'gadgets_{E2E_TOKEN}'), None)
+    assert gadgets['relations'].get(f'widgets_{E2E_TOKEN}'), '外键侧应有 many-to-one 关系'
+    assert gadgets['relations'][f'widgets_{E2E_TOKEN}']['type'] == 'one'
+    assert gadgets['relations'][f'widgets_{E2E_TOKEN}']['localField'] == 'widget_id'
 
     # 三元组冲突 fail fast：已注册 <ctx.schema_name>（同 source、同 collection）再注册即抛错
     dupe = next((d for d in defs if d['collection'] == ctx.collection), None)
@@ -443,10 +472,11 @@ async def _t_sync_schema(ctx):
 
     taken = {_sc.get(n)['collection'] for n in _sc.list()}
     for d in defs:
-        if d['collection'] in taken:
+        # M-4：共享库中还有并发进程 / 跨仓（nodejs-store）的表，只注册本 token 的表
+        if d['collection'] in taken or not d['collection'].endswith(f'_{E2E_TOKEN}'):
             continue
         _sc.register(d)
-    assert _sc.has('widgets'), 'syncSchema 应完成非冲突表注册'
+    assert _sc.has(f'widgets_{E2E_TOKEN}'), 'syncSchema 应完成非冲突表注册'
 
 
 @pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
