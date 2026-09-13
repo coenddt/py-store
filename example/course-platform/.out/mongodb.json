@@ -221,7 +221,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'cMTZJOFH0E3EHQEW9', 'categoryId': '', 'createdAt': 1789287666516, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789287666516}",
+     "note": "insert 结果: {'_id': 'cMTZTMET5RG3I607X', 'categoryId': '', 'createdAt': 1789304368505, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789304368505}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -477,7 +477,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'nMTZJOFPX37PF9OU7', 'content': '', 'courseId': '', 'createdAt': 1789287666837, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789287666837}",
+     "note": "insert 结果: {'_id': 'nMTZTMF2EWBZKRNVT', 'content': '', 'courseId': '', 'createdAt': 1789304368838, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789304368838}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -554,12 +554,12 @@
    "id": "C-04",
    "backend": "mongodb",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]\n  期望: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}, {\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]",
+     "ok": true,
+     "note": "3 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -2472,7 +2472,7 @@
     {
      "_id": "c1",
      "categoryId": "cat2",
-     "createdAt": 1789287668253,
+     "createdAt": 1789304370251,
      "createdBy": "u1",
      "enrolledCount": 0,
      "meta": {
@@ -2492,7 +2492,7 @@
       "db"
      ],
      "title": "Python入门",
-     "updatedAt": 1789287668253
+     "updatedAt": 1789304370251
     }
    ],
    null

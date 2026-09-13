@@ -44,12 +44,12 @@
    "id": "A-03",
    "backend": "mysql",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"tags\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -59,12 +59,12 @@
    "id": "A-06",
    "backend": "mysql",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"coupon\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -74,12 +74,12 @@
    "id": "A-07",
    "backend": "mysql",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端无法翻译字段 \"meta.seo.title\" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -89,12 +89,12 @@
    "id": "A-08",
    "backend": "mysql",
    "group": "A",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 下推不支持（mysql）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序",
+     "ok": true,
+     "note": "SQL 显式报错（PushdownUnsupportedError）可接受",
      "op": "query",
      "expectKind": "rows"
     }
@@ -221,7 +221,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'cMTZKCOB06TVUVP1X', 'categoryId': '', 'createdAt': 1789288797708, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789288797708}",
+     "note": "insert 结果: {'_id': 'cMTZTMQV8THZX8GX2', 'categoryId': '', 'createdAt': 1789304384132, 'createdBy': 'u1', 'enrolledCount': 0, 'meta': {'cover': '', 'level': '', 'seo': {'desc': '', 'title': ''}}, 'price': 0, 'rating': 0, 'revenue': 0, 'secret': '', 'status': 'draft', 'summary': '', 'tags': [], 'title': '新课程', 'updatedAt': 1789304384132}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -477,7 +477,7 @@
     {
      "idx": 0,
      "ok": true,
-     "note": "insert 结果: {'_id': 'nMTZKCOYQZ6V4UBPH', 'content': '', 'courseId': '', 'createdAt': 1789288798562, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789288798562}",
+     "note": "insert 结果: {'_id': 'nMTZTMRL68T1KFC3X', 'content': '', 'courseId': '', 'createdAt': 1789304385066, 'createdBy': 'u1', 'meta': {'color': ''}, 'tags': [], 'title': '新笔记', 'updatedAt': 1789304385066}",
      "op": "insert",
      "expectKind": "inserted"
     },
@@ -554,12 +554,12 @@
    "id": "C-04",
    "backend": "mysql",
    "group": "C",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]\n  期望: [{\"_id\": \"cat1\", \"children\": [{\"_id\": \"cat2\", \"name\": \"后端\", \"sort\": 2}, {\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat2\", \"children\": [{\"_id\": \"cat3\", \"name\": \"数据库\", \"sort\": 3}]}, {\"_id\": \"cat3\", \"children\": []}]",
+     "ok": true,
+     "note": "3 行",
      "op": "query",
      "expectKind": "rows"
     }
@@ -957,12 +957,12 @@
    "id": "E-11",
    "backend": "mysql",
    "group": "E",
-   "status": "fail",
+   "status": "pass",
    "steps": [
     {
      "idx": 0,
-     "ok": false,
-     "note": "执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行",
+     "ok": true,
+     "note": "SQL 显式报错（RuntimeError）可接受",
      "op": "query",
      "expectKind": "rows"
     },
@@ -1293,7 +1293,7 @@
     {
      "idx": 0,
      "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789288802017, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789288802017}]\n  期望: []",
+     "note": "行集不一致\n  实际: [{\"_id\": \"c7\", \"categoryId\": \"cat3\", \"createdAt\": 1789304389124, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 0.1, \"rating\": 1.1, \"secret\": \"SECRET-7\", \"status\": \"published\", \"summary\": \"base\", \"title\": \"基础数学\", \"updatedAt\": 1789304389124}]\n  期望: []",
      "op": "aggregate",
      "expectKind": "rows"
     }
@@ -1360,7 +1360,7 @@
     {
      "idx": 0,
      "ok": false,
-     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789288802298, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789288802298}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789287668253, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789287668253}]",
+     "note": "行集不一致\n  实际: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789304389435, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"price\": 9.9, \"rating\": 4.5, \"secret\": \"SECRET-1\", \"status\": \"published\", \"summary\": \"必学\", \"title\": \"Python入门\", \"updatedAt\": 1789304389435}]\n  期望: [{\"_id\": \"c1\", \"categoryId\": \"cat2\", \"createdAt\": 1789304370251, \"createdBy\": \"u1\", \"enrolledCount\": 0, \"meta\": {\"cover\": \"c1.png\", \"level\": \"beginner\", \"seo\": {\"desc\": \"从零开始\", \"title\": \"看Python\"}}, \"price\": 9.9, \"rating\": 4.5, \"status\": \"published\", \"summary\": \"必学\", \"tags\": [\"python\", \"db\"], \"title\": \"Python入门\", \"updatedAt\": 1789304370251}]",
      "op": "aggregate",
      "expectKind": "rows"
     },

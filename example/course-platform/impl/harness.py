@@ -273,7 +273,8 @@ async def assert_step(h, step, oracle_rows):
         return True, 'no assertion'
     kind = expect['kind']
     is_sql = h.backend in ('mysql', 'postgres', 'sqlite')
-    policy = step.get('sqlPolicy') or 'parity'
+    # sqlPolicy 支持 case 级声明（现状用例都写在 case 上）；step 级优先覆盖
+    policy = step.get('sqlPolicy') or getattr(h, 'case_policy', None) or 'parity'
     err = h.error
     events = h.events
 
@@ -377,6 +378,7 @@ async def _run_backend_inner(kind, oracle):
                 await reset(kind, driver)
                 await seed(kind, driver)
             permission.set_context(case.get('ctx'))
+            h.case_policy = case.get('sqlPolicy')  # case 级 sqlPolicy 透传给各 step
             # 快照开关，用例结束复原（E-13/G-08 会改 require_context / allow_user_pipeline）
             _saved_require = store.require_context()
             _saved_pipeline = True

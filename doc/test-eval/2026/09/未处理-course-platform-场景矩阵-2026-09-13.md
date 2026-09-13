@@ -3,9 +3,9 @@
 ## 一、环境与后端可达性
 
 - `mongodb`：可达，通过 88/88
-- `postgres`：可达，通过 59/88
-- `mysql`：可达，通过 60/88
-- `sqlite`：可达，通过 60/88
+- `postgres`：可达，通过 64/88
+- `mysql`：可达，通过 65/88
+- `sqlite`：可达，通过 65/88
 
 > 本报告只出证据，不修实现。判定规则：SQL 结果集与 Mongo(oracle) 逐行相等或显式 Err/unsupported+告警；静默不一致判缺陷。
 
@@ -13,11 +13,11 @@
 
 | 组 | 覆盖数 | 后端 | 通过 | 失败 | skip(不可达) |
 |---|----|----|----|----|----|
-| A | 13 | mongodb,postgres,mysql,sqlite | 31 | 21 | - |
+| A | 13 | mongodb,postgres,mysql,sqlite | 43 | 9 | - |
 | B | 13 | mongodb,postgres,mysql,sqlite | 39 | 13 | - |
 | C | 10 | mongodb,postgres,mysql,sqlite | 19 | 21 | - |
 | D | 8 | mongodb,postgres,mysql,sqlite | 29 | 3 | - |
-| E | 16 | mongodb,postgres,mysql,sqlite | 55 | 9 | - |
+| E | 16 | mongodb,postgres,mysql,sqlite | 58 | 6 | - |
 | F | 8 | mongodb,postgres,mysql,sqlite | 32 | 0 | - |
 | G | 10 | mongodb,postgres,mysql,sqlite | 31 | 9 | - |
 | H | 10 | mongodb,postgres,mysql,sqlite | 31 | 9 | - |
@@ -26,10 +26,6 @@
 
 ## 三、缺陷清单（按 静默失真 > 越权 > 其它 排序）
 
-- **A-03** `[postgres]` group=A：执行报错: SQL 后端无法翻译字段 "tags" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-06** `[postgres]` group=A：执行报错: SQL 后端无法翻译字段 "coupon" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-07** `[postgres]` group=A：执行报错: SQL 后端无法翻译字段 "meta.seo.title" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-08** `[postgres]` group=A：执行报错: SQL 下推不支持（postgres）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序
 - **A-13** `[postgres]` group=A：行集不一致
   实际: [{"_id": "c1"}]
   期望: [{"_id": "c1", "tags": ["python", "db"]}]
@@ -69,17 +65,16 @@
 - **E-05** `[postgres]` group=E：行集不一致
   实际: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l1"}, {"_id": "l2"}, {"_id": "l2"}]}]
   期望: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l2"}]}]
-- **E-11** `[postgres]` group=E：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **E-12** `[postgres]` group=E：行集不一致
   实际: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}, {"body": "other", "createdBy": "u2"}]}]
   期望: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}]}]
 - **G-03** `[postgres]` group=G：行集不一致
-  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789297951795, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789297951795}]
+  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789304448881, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789304448881}]
   期望: []
 - **G-06** `[postgres]` group=G：期望抛错但未抛错
 - **G-07** `[postgres]` group=G：行集不一致
-  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297951928, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789297951928}]
-  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297948428, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789297948428}]
+  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304449023, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789304449023}]
+  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304445508, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789304445508}]
 - **H-07** `[postgres]` group=H：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **H-08** `[postgres]` group=H：执行报错: column "createdAt" of relation "courses_deleted" does not exist
 - **H-08** `[postgres]` group=H：行集不一致
@@ -88,10 +83,6 @@
 - **H-10** `[postgres]` group=H：行集不一致
   实际: [{"_id": "c7"}]
   期望: [{"_id": "c7", "tags": ["x", "y"], "meta": {"cover": "z", "seo": {"title": "深", "desc": "深描"}}}]
-- **A-03** `[mysql]` group=A：执行报错: SQL 后端无法翻译字段 "tags" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-06** `[mysql]` group=A：执行报错: SQL 后端无法翻译字段 "coupon" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-07** `[mysql]` group=A：执行报错: SQL 后端无法翻译字段 "meta.seo.title" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-08** `[mysql]` group=A：执行报错: SQL 下推不支持（mysql）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序
 - **A-13** `[mysql]` group=A：行集不一致
   实际: [{"_id": "c1"}]
   期望: [{"_id": "c1", "tags": ["python", "db"]}]
@@ -126,17 +117,16 @@
 - **E-05** `[mysql]` group=E：行集不一致
   实际: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l1"}, {"_id": "l2"}, {"_id": "l2"}]}]
   期望: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l2"}]}]
-- **E-11** `[mysql]` group=E：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **E-12** `[mysql]` group=E：行集不一致
   实际: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}, {"body": "other", "createdBy": "u2"}]}]
   期望: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}]}]
 - **G-03** `[mysql]` group=G：行集不一致
-  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789297958723, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789297958723}]
+  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789304456114, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789304456114}]
   期望: []
 - **G-06** `[mysql]` group=G：期望抛错但未抛错
 - **G-07** `[mysql]` group=G：行集不一致
-  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297959051, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789297959051}]
-  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297948428, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789297948428}]
+  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304456427, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789304456427}]
+  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304445508, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789304445508}]
 - **H-07** `[mysql]` group=H：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **H-08** `[mysql]` group=H：执行报错: (1054, "Unknown column 'createdAt' in 'field list'")
 - **H-08** `[mysql]` group=H：行集不一致
@@ -145,10 +135,6 @@
 - **H-10** `[mysql]` group=H：行集不一致
   实际: [{"_id": "c7"}]
   期望: [{"_id": "c7", "tags": ["x", "y"], "meta": {"cover": "z", "seo": {"title": "深", "desc": "深描"}}}]
-- **A-03** `[sqlite]` group=A：执行报错: SQL 后端无法翻译字段 "tags" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-06** `[sqlite]` group=A：执行报错: SQL 后端无法翻译字段 "coupon" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-07** `[sqlite]` group=A：执行报错: SQL 后端无法翻译字段 "meta.seo.title" 的过滤条件（复杂 JSON 或未声明字段）：拒绝静默丢弃后返回全表
-- **A-08** `[sqlite]` group=A：执行报错: SQL 下推不支持（sqlite）: sortField；$sort 字段 meta.level 无法映射到有效列（未知字段 / object·array 字段 / 无对应 $lookup），未下推排序
 - **A-13** `[sqlite]` group=A：行集不一致
   实际: [{"_id": "c1"}]
   期望: [{"_id": "c1", "tags": ["python", "db"]}]
@@ -183,17 +169,16 @@
 - **E-05** `[sqlite]` group=E：行集不一致
   实际: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l1"}, {"_id": "l2"}, {"_id": "l2"}]}]
   期望: [{"_id": "c1", "lessons": [{"_id": "l1"}, {"_id": "l2"}]}]
-- **E-11** `[sqlite]` group=E：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **E-12** `[sqlite]` group=E：行集不一致
   实际: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}, {"body": "other", "createdBy": "u2"}]}]
   期望: [{"_id": "PN1", "label": "pn", "memos": [{"body": "mine", "createdBy": "u1"}]}]
 - **G-03** `[sqlite]` group=G：行集不一致
-  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789297961513, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789297961513}]
+  实际: [{"_id": "c7", "categoryId": "cat3", "createdAt": 1789304458766, "createdBy": "u1", "enrolledCount": 0, "price": 0.1, "rating": 1.1, "secret": "SECRET-7", "status": "published", "summary": "base", "title": "基础数学", "updatedAt": 1789304458766}]
   期望: []
 - **G-06** `[sqlite]` group=G：期望抛错但未抛错
 - **G-07** `[sqlite]` group=G：行集不一致
-  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297961579, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789297961579}]
-  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789297948428, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789297948428}]
+  实际: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304458828, "createdBy": "u1", "enrolledCount": 0, "price": 9.9, "rating": 4.5, "secret": "SECRET-1", "status": "published", "summary": "必学", "title": "Python入门", "updatedAt": 1789304458828}]
+  期望: [{"_id": "c1", "categoryId": "cat2", "createdAt": 1789304445508, "createdBy": "u1", "enrolledCount": 0, "meta": {"cover": "c1.png", "level": "beginner", "seo": {"desc": "从零开始", "title": "看Python"}}, "price": 9.9, "rating": 4.5, "status": "published", "summary": "必学", "tags": ["python", "db"], "title": "Python入门", "updatedAt": 1789304445508}]
 - **H-07** `[sqlite]` group=H：执行报错: SQL 后端暂不支持的聚合阶段 $unwind：拒绝静默忽略后返回未聚合的原始行
 - **H-08** `[sqlite]` group=H：执行报错: table courses_deleted has no column named createdAt
 - **H-08** `[sqlite]` group=H：行集不一致

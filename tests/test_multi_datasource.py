@@ -184,8 +184,8 @@ def test_b4_same_sql_connection_two_namespaces():
         db = await aiosqlite.connect(':memory:')
         await db.execute("ATTACH ':memory:' AS app_a")
         await db.execute("ATTACH ':memory:' AS app_b")
-        await db.execute('CREATE TABLE app_a.b4_rows (_id TEXT PRIMARY KEY, tag TEXT)')
-        await db.execute('CREATE TABLE app_b.b4_rows (_id TEXT PRIMARY KEY, tag TEXT)')
+        await db.execute('CREATE TABLE app_a.b4_rows (_id TEXT PRIMARY KEY, tag TEXT, __present TEXT)')
+        await db.execute('CREATE TABLE app_b.b4_rows (_id TEXT PRIMARY KEY, tag TEXT, __present TEXT)')
         await db.commit()
 
         _sc.register({
@@ -266,8 +266,8 @@ def test_b8_route_override_multi_tenant():
     async def scenario():
         db = await aiosqlite.connect(':memory:')
         await db.execute("ATTACH ':memory:' AS tenant_42")
-        await db.execute('CREATE TABLE b8_rows (_id TEXT PRIMARY KEY, tag TEXT)')
-        await db.execute('CREATE TABLE tenant_42.b8_rows (_id TEXT PRIMARY KEY, tag TEXT)')
+        await db.execute('CREATE TABLE b8_rows (_id TEXT PRIMARY KEY, tag TEXT, __present TEXT)')
+        await db.execute('CREATE TABLE tenant_42.b8_rows (_id TEXT PRIMARY KEY, tag TEXT, __present TEXT)')
         await db.commit()
 
         _sc.register({
@@ -300,7 +300,7 @@ def test_b11_sync_schema_writes_namespace():
     async def scenario():
         db = await aiosqlite.connect(':memory:')
         await db.execute("ATTACH ':memory:' AS aux")
-        await db.execute('CREATE TABLE aux.b11_widgets (_id TEXT PRIMARY KEY, sku TEXT)')
+        await db.execute('CREATE TABLE aux.b11_widgets (_id TEXT PRIMARY KEY, sku TEXT, __present TEXT)')
         await db.commit()
 
         defs = await store.sync_schema(
