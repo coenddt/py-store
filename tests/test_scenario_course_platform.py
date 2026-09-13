@@ -11,7 +11,6 @@
 
 import asyncio
 import datetime
-import json
 import sys
 from pathlib import Path
 
@@ -63,21 +62,6 @@ async def _run_all():
         _RESULTS[kind] = res
 
 
-def _case_ids():
-    return [c['id'] for c in harness.load_cases()]
-
-
-def _tests_for_backend(kind):
-    res = _RESULTS.get(kind)
-    if res is None:
-        return
-    if not res.get('available'):
-        yield (kind, 'SKIP')
-        return
-    for r in res['results']:
-        yield (kind, r)
-
-
 @pytest.mark.parametrize('backend', BACKENDS)
 def test_backend_scenario(backend):
     res = _RESULTS.get(backend)
@@ -92,8 +76,6 @@ def test_backend_scenario(backend):
 
 def test_case_specific():
     """按用例 id 定位失败（例：-k 'E-07'）。每个失败用例为一个失败点。"""
-    for kind, r in _tests_for_backend('mongodb'):
-        pass
     # 聚合各后端失败用例作为可见失败
     any_fail = False
     for kind in BACKENDS:
@@ -155,7 +137,6 @@ def _write_report():
                 ag[kind]['pass'] += 1
             else:
                 ag[kind]['fail'] += 1
-    total_ids = len(_case_ids())
     for g in sorted(by_group):
         runs = by_group[g]
         max_fail = sum(runs[k]['fail'] for k in runs)
@@ -163,7 +144,7 @@ def _write_report():
         lines.append(f'| {g} | {n} | {",".join(runs)} | '
                      f'{sum(runs[k]["pass"] for k in runs)} | {max_fail} | - |')
     lines.append('')
-    lines.append(f'未覆盖组：**I(联邦)** —— 本场景为单源 harness（每个后端独立进程、`default` 源），'
+    lines.append('未覆盖组：**I(联邦)** —— 本场景为单源 harness（每个后端独立进程、`default` 源），'
                  '无法起双可写源；跨源联邦由 `tests/test_federation_e2e.py` 单独覆盖'
                  '（I-01..I-08 对应矩阵）。')
     lines.append('')
