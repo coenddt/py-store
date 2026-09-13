@@ -113,7 +113,10 @@ async def setup_backend(kind):
         await db.commit()
         return db, executors.create_connection('sqlite', db)
     if kind == 'mysql':
-        import asyncmy
+        try:
+            import asyncmy
+        except ImportError as e:
+            return None, f'缺少 asyncmy: {e}'
         try:
             pool = await asyncio.wait_for(
                 asyncmy.create_pool(autocommit=True, charset='utf8mb4',
@@ -130,7 +133,10 @@ async def setup_backend(kind):
                     await cur.execute(stmt)
         return pool, executors.create_connection('mysql', pool)
     if kind == 'postgres':
-        import asyncpg
+        try:
+            import asyncpg
+        except ImportError as e:
+            return None, f'缺少 asyncpg: {e}'
         try:
             pool = await asyncio.wait_for(asyncpg.create_pool(dsn=PG_URI, timeout=5), timeout=8)
             await pool.execute('SELECT 1')
@@ -140,7 +146,10 @@ async def setup_backend(kind):
             await pool.execute(stmt)
         return pool, executors.create_connection('postgres', pool)
     if kind == 'mongodb':
-        from pymongo import AsyncMongoClient
+        try:
+            from pymongo import AsyncMongoClient
+        except ImportError as e:
+            return None, f'缺少 pymongo: {e}'
         client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
         try:
             await client.admin.command({'ping': 1})
