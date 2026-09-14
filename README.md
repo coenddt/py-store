@@ -2,6 +2,12 @@
 
 **One data layer for MongoDB, MySQL, SQLite and PostgreSQL in Python asyncio — define models as pure JSON, query them with a MongoDB-style GQL tree syntax, and get role-based access control, computed columns and soft-delete out of the box.**
 
+![PyPI version](https://img.shields.io/pypi/v/storepy)
+![license](https://img.shields.io/pypi/l/storepy)
+![python versions](https://img.shields.io/pypi/pyversions/storepy)
+![backends](https://img.shields.io/badge/backends-MongoDB%20%7C%20MySQL%20%7C%20SQLite%20%7C%20PostgreSQL-blue)
+![query dialect](https://img.shields.io/badge/query%20dialect-GQL%20(MongoDB--flavoured)-green)
+
 `py-store` lets a Python service talk to MongoDB (native aggregation), MySQL, PostgreSQL and SQLite through a **single schema definition and a single query dialect**. Nested relations compile to **one native query per backend** — you never hand-write `$lookup` or raw SQL.
 
 > Also looking for the Node.js version? See [`nodejs-store`](https://github.com/coenddt/nodejs-store) (npm `nodejs-store`). Both are thin hosts over the shared Rust engine [`rust-store`](https://github.com/coenddt/rust-store).
@@ -53,6 +59,26 @@ A lightweight, backend-agnostic data layer for Python asyncio. You describe your
 
 MongoDB is the *primary dialect*: queries are written in a MongoDB-flavoured GQL, and the three relational backends adapt to it. That is what makes one schema portable across a document store and three relational stores.
 
+### How it relates to nodejs-store and rust-store
+
+```
+                 ┌──────────────────────────────┐
+   Node.js  ──▶  │  nodejs-store (npm, host)    │ ─┐
+                 └──────────────────────────────┘  │  rust-store-node (napi-rs)
+                                                   ▼
+                                     ┌───────────────────────────────┐
+                                     │ rust-store/core (pure logic)  │
+                                     │ GQL · permissions · computes  │
+                                     │ command planning · dialects   │
+                                     └───────────────────────────────┘
+                                                   ▲
+                 ┌──────────────────────────────┐  │  rust-store-py (PyO3)
+   Python   ──▶  │  py-store (pip, host)        │ ─┘
+                 └──────────────────────────────┘
+```
+
+The **Rust core** owns GQL parsing, permission checks, computed columns, command planning and SQL dialect translation — it never touches a database. The **hosts** (`py-store`, `nodejs-store`) own driver IO, callbacks and placeholder substitution. Behaviour therefore cannot drift between Python and Node.js: there is only one implementation.
+
 ## When to use it
 
 Reach for `py-store` when any of these describe your situation:
@@ -101,6 +127,15 @@ General positioning, not a benchmark — always verify against each tool's curre
 | Migration / DDL engine | ➖ (introspection read-only) | ✅ (Alembic) | ➖ | ✅ (Aerich) | ✅ (Alembic) | ✅ |
 | Framework coupling | none (asyncio) | none | none | none | none | Django |
 | Shared native core across Python & Node | ✅ (Rust `rust-store`) | ➖ | ➖ | ➖ | ➖ | ➖ |
+
+### How it differs from specific libraries
+
+Positioning only, based on those projects' public documentation at the time of writing — verify against your own requirements.
+
+- **vs SQLAlchemy / SQLModel / Django ORM** — all SQL-only and model-class-centric: they do not target MongoDB, and none of them ships schema-declared role/field access control or read-time computed columns. `py-store` compiles one GQL to native MongoDB aggregation or to parameterized SQL.
+- **vs Beanie / Motor** — MongoDB-only. `py-store` uses the same MongoDB-flavoured query style but the identical query also runs on MySQL, SQLite and PostgreSQL.
+- **vs Tortoise ORM / pyloquent** — async Python ORMs over SQL backends, with model classes and (in Tortoise's case) a migration tool. `py-store` has no migration engine — introspection reads physical structure only — and describes models as plain dicts, which is exactly what makes a schema portable to the Node.js host.
+- **vs `nodejs-store`** — the same engine and the same GQL, in JavaScript. Use whichever host matches your service; schemas and query semantics are interchangeable.
 
 Short version: use an ORM when you want **model classes, Pydantic validation and migrations**; use `py-store` when you want **one runtime schema + one query dialect spanning MongoDB and SQL**, with RBAC and computed columns built in.
 

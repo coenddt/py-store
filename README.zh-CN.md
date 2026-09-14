@@ -2,6 +2,12 @@
 
 **面向 Python asyncio 的统一数据层，覆盖 MongoDB、MySQL、SQLite 与 PostgreSQL —— 用纯 JSON 定义模型，用 MongoDB 风格的 GQL 树形语法查询，开箱即得基于角色的访问控制、计算列与软删除。**
 
+![PyPI version](https://img.shields.io/pypi/v/storepy)
+![license](https://img.shields.io/pypi/l/storepy)
+![python versions](https://img.shields.io/pypi/pyversions/storepy)
+![backends](https://img.shields.io/badge/backends-MongoDB%20%7C%20MySQL%20%7C%20SQLite%20%7C%20PostgreSQL-blue)
+![query dialect](https://img.shields.io/badge/query%20dialect-GQL%20(MongoDB--flavoured)-green)
+
 > English docs: [README.md](README.md)
 
 `py-store` 让 Python 服务通过**单一 schema 定义与单一查询方言**同时对接 MongoDB（原生聚合）、MySQL、PostgreSQL 与 SQLite。嵌套关系会编译为**每个后端各一条原生查询** —— 你永远不必手写 `$lookup` 或裸 SQL。
@@ -54,6 +60,26 @@ from py_store import init, store
 
 MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个关系型后端向它适配。正因如此，一份 schema 才能同时可移植到文档库与三种关系库。
 
+### 它与 nodejs-store 和 rust-store 的关系
+
+```
+                 ┌──────────────────────────────┐
+   Node.js  ──▶  │  nodejs-store (npm, host)    │ ─┐
+                 └──────────────────────────────┘  │  rust-store-node (napi-rs)
+                                                   ▼
+                                     ┌───────────────────────────────┐
+                                     │ rust-store/core (pure logic)  │
+                                     │ GQL · permissions · computes  │
+                                     │ command planning · dialects   │
+                                     └───────────────────────────────┘
+                                                   ▲
+                 ┌──────────────────────────────┐  │  rust-store-py (PyO3)
+   Python   ──▶  │  py-store (pip, host)        │ ─┘
+                 └──────────────────────────────┘
+```
+
+**Rust 核心**负责 GQL 解析、权限检查、计算列、命令规划与 SQL 方言翻译 —— 它从不接触数据库。**宿主**（`py-store`、`nodejs-store`）负责驱动 IO、回调与占位符替换。因此 Python 与 Node.js 之间的行为不会漂移：实现只有一份。
+
 ## 何时使用
 
 在下列任一情形成立时，就适合选用 `py-store`：
@@ -102,6 +128,15 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 | 迁移 / DDL 引擎 | ➖（内省只读） | ✅（Alembic） | ➖ | ✅（Aerich） | ✅（Alembic） | ✅ |
 | 框架耦合 | 无（asyncio） | 无 | 无 | 无 | 无 | Django |
 | Python 与 Node 共享原生核心 | ✅（Rust `rust-store`） | ➖ | ➖ | ➖ | ➖ | ➖ |
+
+### 它与具体库的差异
+
+以下仅为定位说明，基于这些项目在撰写时公开的文档 —— 请对照你自己的需求核实。
+
+- **对比 SQLAlchemy / SQLModel / Django ORM** —— 它们都只支持 SQL 并以模型类为中心：不面向 MongoDB，也都不提供 schema 声明的角色/字段级访问控制或读取时计算列。`py-store` 把同一段 GQL 编译为原生 MongoDB 聚合或参数化 SQL。
+- **对比 Beanie / Motor** —— 仅支持 MongoDB。`py-store` 采用相同的 MongoDB 风格查询写法，但同一条查询也能在 MySQL、SQLite 与 PostgreSQL 上运行。
+- **对比 Tortoise ORM / pyloquent** —— 基于 SQL 后端的异步 Python ORM，使用模型类，并且（就 Tortoise 而言）带有迁移工具。`py-store` 没有迁移引擎 —— 内省只读取物理结构 —— 且把模型描述为普通 dict，这恰恰是 schema 能移植到 Node.js 宿主的原因。
+- **对比 `nodejs-store`** —— 同一套引擎、同一套 GQL，只不过用 JavaScript。选择与你服务相匹配的宿主即可；schema 与查询语义可互换。
 
 一句话：想要**模型类、Pydantic 校验和迁移**就用 ORM；想要**一份运行时 schema + 一套横跨 MongoDB 与 SQL 的查询方言**，并且内置 RBAC 与计算列，就用 `py-store`。
 
