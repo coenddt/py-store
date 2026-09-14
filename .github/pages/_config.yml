@@ -1,0 +1,30 @@
+title: "py-store"
+tagline: "One data layer for MongoDB, MySQL, SQLite and PostgreSQL in Python asyncio"
+description: >-
+  py-store is an asyncio data layer for Python that defines each model once as a pure JSON
+  schema and queries it with one MongoDB-style GQL tree dialect across MongoDB, MySQL, SQLite
+  and PostgreSQL. Nested relations compile to a single native query per backend, with
+  role-based access control, computed columns and soft-delete built into the schema.
+url: "https://coenddt.github.io"
+baseurl: "/py-store"
+repository: "coenddt/py-store"
+registry_url: "https://pypi.org/project/storepy/"
+registry_label: "PyPI"
+install: "pip install storepy"
+lang: en
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor

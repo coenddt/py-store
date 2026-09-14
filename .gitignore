@@ -4,3 +4,8 @@ build/
 __pycache__/
 *.pyc
 .venv/
+
+# GitHub Pages build artifacts (see .github/pages/assemble.sh)
+/_config.yml
+/_site/
+/_site_src/

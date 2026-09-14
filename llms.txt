@@ -21,6 +21,7 @@
 
 ## Docs
 
+- [Documentation site](https://coenddt.github.io/py-store/): the scenario walkthroughs as individual, indexable pages — the fastest way in
 - [README](https://github.com/coenddt/py-store#readme): full overview, quick start, GQL syntax, API, schema reference, FAQ
 - [Chinese README](https://github.com/coenddt/py-store/blob/main/README.zh-CN.md): 中文文档
 - [Use cases](https://github.com/coenddt/py-store/tree/main/doc/use-cases): scenario walkthroughs (multi-tenant SaaS, AI data-QA, cross-database migration, admin CRUD, async ETL/batch writes, migrating from SQLAlchemy or Beanie)

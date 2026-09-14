@@ -13,6 +13,8 @@
 > Also looking for the Node.js version? See [`nodejs-store`](https://github.com/coenddt/nodejs-store) (npm `nodejs-store`). Both are thin hosts over the shared Rust engine [`rust-store`](https://github.com/coenddt/rust-store).
 > 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
+**Documentation site:** <https://coenddt.github.io/py-store/> — every scenario walkthrough with runnable code and the engine's exact limits, one indexable page per scenario.
+
 **Install:** the distribution name is `storepy`; the import package is `py_store`.
 
 ```bash
