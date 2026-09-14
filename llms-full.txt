@@ -495,3 +495,23 @@ with RBAC and computed columns built in.
 | Migration / DDL engine | no (introspection read-only) | yes (Alembic) | no | yes (Aerich) | yes (Alembic) | yes |
 | Framework coupling | none (asyncio) | none | none | none | none | Django |
 | Shared native core across Python and Node | yes (Rust `rust-store`) | no | no | no | no | no |
+
+---
+
+## 16. Scenario walkthroughs
+
+Step-by-step use cases live in
+[`doc/use-cases/`](https://github.com/coenddt/py-store/tree/main/doc/use-cases):
+
+1. **Multi-tenant SaaS** — one schema serving N tenants: bind models to
+   `(source, namespace, collection)` and re-target per request with a trusted route override.
+2. **AI data-QA agent** — compile and validate a GQL plan with `build_pipeline` before executing
+   it, and capture degraded-path events with `set_feedback_sink`.
+3. **MongoDB → PostgreSQL migration** — the same schema and the same GQL against MongoDB then
+   PostgreSQL; only the `init()` datasource changes.
+4. **FastAPI admin backend** — schema-driven CRUD with computed columns, soft-delete archives,
+   role whitelists and paginated reads.
+5. **Async ETL / batch writes** — page a source and write batches into another database through
+   one schema: idempotent upsert keys, per-source transactions, bounded memory.
+6. **Migrating from SQLAlchemy or Beanie** — concept mapping from model classes + sessions to
+   JSON schemas + GQL, with one schema and one dialect across MongoDB and SQL.

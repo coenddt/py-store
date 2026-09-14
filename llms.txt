@@ -23,7 +23,7 @@
 
 - [README](https://github.com/coenddt/py-store#readme): full overview, quick start, GQL syntax, API, schema reference, FAQ
 - [Chinese README](https://github.com/coenddt/py-store/blob/main/README.zh-CN.md): 中文文档
-- [Use cases](https://github.com/coenddt/py-store/tree/main/doc/use-cases): scenario walkthroughs (multi-tenant SaaS, AI data-QA, cross-database migration, admin CRUD)
+- [Use cases](https://github.com/coenddt/py-store/tree/main/doc/use-cases): scenario walkthroughs (multi-tenant SaaS, AI data-QA, cross-database migration, admin CRUD, async ETL/batch writes, migrating from SQLAlchemy or Beanie)
 - [Scenario test suite](https://github.com/coenddt/py-store/tree/main/example/course-platform): real-data, four-backend scenario cases (fields, relations, computes, permissions, aggregation, boundaries)
 - [CHANGELOG](https://github.com/coenddt/py-store/blob/main/CHANGELOG.md)
 

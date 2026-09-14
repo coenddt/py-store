@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use py-store in your work, please cite it as below."
+title: "py-store: multi-backend data layer for Python asyncio (MongoDB, MySQL, SQLite, PostgreSQL)"
+abstract: >-
+  A data layer for Python asyncio that defines each model once as a pure JSON schema and queries it
+  with one MongoDB-style GQL tree dialect across MongoDB, MySQL, SQLite and PostgreSQL. Nested
+  relation reads, GROUP BY/HAVING aggregation, computed columns, soft-delete and role-based access
+  control are resolved by the shared Rust core rust-store. Distributed on PyPI as storepy, imported
+  as py_store.
+type: software
+authors:
+  - name: "leo"
+    email: "coen_ddt@qq.com"
+repository-code: "https://github.com/coenddt/py-store"
+url: "https://pypi.org/project/storepy/"
+license: MIT
+version: "2.0.2"
+date-released: "2026-09-14"
+keywords:
+  - multi-backend
+  - mongodb
+  - mysql
+  - sqlite
+  - postgresql
+  - python
+  - asyncio
+  - data-layer
+  - query-builder
+  - gql
+  - json-schema
+  - rbac
+  - multi-tenant
+  - computed-columns
+  - soft-delete
