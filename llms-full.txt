@@ -1,0 +1,497 @@
+# py-store — full documentation for LLMs
+
+> Source of truth: https://github.com/coenddt/py-store
+> PyPI: `storepy` (import `py_store`) | Python 3.10+ | MIT
+> Backends: MongoDB, MySQL, SQLite, PostgreSQL
+
+This file is a single-file, plain-text snapshot of the py-store documentation, intended for
+direct ingestion by language models. It mirrors README.md plus the FAQ and use-case summaries.
+
+---
+
+## 1. What py-store is
+
+py-store is a lightweight, backend-agnostic **data layer** for Python asyncio (not a full ORM).
+
+You describe each model once as **pure JSON / dict** — `fields`, `relations`, `computes`,
+`indexes`, `read` / `write` role whitelists. From that description the library derives:
+
+- **command planning**: GQL → MongoDB command JSON (`find` / `aggregate` / `countDocuments` / …),
+- **dialect translation**: command JSON → parameterized SQL for MySQL / PostgreSQL / SQLite,
+- **permission checks**: schema-level and field-level read/write, owner-condition injection,
+- **computed columns**: `fn` (sync), `asyncFn` (async), `agg` (relation aggregation),
+- **soft-delete archives**: every schema auto-registers a `<Model>Deleted` collection/table,
+- **result rehydration**: flat JOIN rows → nested documents.
+
+MongoDB is the **primary dialect**: queries are written in a MongoDB-flavoured GQL, and the
+three relational backends adapt to it. That is what makes one schema portable across a
+document store and three relational stores.
+
+### Architecture: three repositories
+
+- `rust-store` — the shared **Rust core engine**: GQL parsing, permission engine, computed
+  columns, command planning, SQL dialect translation. Pure logic, **no IO, no clock, no random
+  source** (`now` / `newId` are passed in by the host).
+- `rust-store-py` (PyPI) — PyO3 binding exposing the core's command contract to Python hosts.
+- `py-store` (PyPI `storepy`) — **this package**: the Python host. Owns driver IO, callbacks
+  and placeholder substitution.
+- `nodejs-store` (npm) — the Node.js twin (camelCase API).
+
+Same schemas, same GQL, same semantics across Python and Node.
+
+---
+
+## 2. Installation
+
+```bash
+pip install storepy
+```
+
+```python
+from py_store import init, store
+```
+
+The distribution name on PyPI is `storepy`; the importable package is `py_store`.
+
+Requires Python 3.10+ and one supported backend (MongoDB / MySQL / SQLite / PostgreSQL).
+
+Optional driver extras:
+
+```bash
+pip install "storepy[mysql]"     # asyncmy
+pip install "storepy[postgres]"  # asyncpg
+pip install "storepy[sqlite]"    # aiosqlite
+```
+
+---
+
+## 3. Quick start
+
+```python
+from pymongo import AsyncMongoClient
+from py_store import init, store
+
+client = AsyncMongoClient("mongodb://localhost:27017")
+await init(client["mydb"])   # idempotently creates indexes for registered schemas
+
+store.register({
+    "name": "Post",
+    "collection": "posts",     # optional, defaults to name
+    "idPrefix": "PT",          # string _id: prefix + base36 timestamp + random
+    "fields": {
+        "title": {"type": "string", "default": ""},
+        "status": {"type": "string", "default": "draft"},
+        "tags": {"type": "array", "default": []},
+    },
+    "computes": {
+        "statusLabel": {"type": "string", "depends": ["status"],
+                        "fn": lambda doc: doc["status"].upper()},
+    },
+    "indexes": [{"keys": {"status": 1, "createdAt": -1}}],
+})
+
+doc = await store.insert("Post", {"title": "Hello"})
+
+items = await store.query(
+    "Post($condition:@c0,$sort:@s1,$limit:@l) { title, status, statusLabel }",
+    {"c0": {"status": "draft"}, "s1": {"createdAt": -1}, "l": 20},
+)
+```
+
+The same schema and query run against PostgreSQL — only the datasource changes:
+
+```python
+await init({"default": {"kind": "postgres", "exec": exec}})
+items = await store.query("Post($condition:@c0) { title, status }", {"c0": {"status": "draft"}})
+```
+
+---
+
+## 4. Supported backends
+
+| Backend | Notes |
+| --- | --- |
+| MongoDB | native aggregation pipeline (`find` / `aggregate` / `$lookup`), PyMongo `AsyncMongoClient` (pymongo >= 4.9) |
+| MySQL | parameterized SQL, `information_schema` introspection (`asyncmy`) |
+| SQLite | parameterized SQL, `sqlite_master` + `PRAGMA` introspection (`aiosqlite`) |
+| PostgreSQL | parameterized SQL (`$n`), `RETURNING` support (`asyncpg`) |
+
+GQL tree queries compile to a single native query per backend.
+
+---
+
+## 5. GQL tree syntax
+
+```text
+Model($condition:@c0,$sort:@s1,$skip:@sk,$limit:@l1) {
+  field1, field2, obj.subField,
+  Relation($condition:@c2,$sort:@s3,$limit:@l2) { f3, Nested { f4 } }
+}
+```
+
+- Parameter values are referenced from the params dict by `@key`: `{"c0": {...}, "s1": {...}}`.
+- Object sub-fields use dot notation.
+- Relations are declared in the schema (`type: "many" | "one"`) and resolved automatically —
+  never hand-write `$lookup`.
+- `many` relations return lists (`[]` when empty); `one` relations merge into the parent
+  document (`None` when missing).
+- Relation-level `$sort` / `$skip` / `$limit` are **per-parent top-N** (each parent gets its
+  own window; translated to a SQL window function).
+
+Fixed execution order for grouping queries:
+`$condition` (WHERE) → `$group` (GROUP BY) → `$having` (HAVING) → `$sort` → `$skip`/`$limit` → projection.
+
+> Removing an escape hatch: `$pipeline` passthrough and `store.aggregate()` were removed.
+> A GQL containing `$pipeline` fails explicitly instead of being silently ignored.
+
+---
+
+## 6. Aggregation
+
+Normalized aggregation lives **inside GQL** — there is no separate aggregate API.
+
+### 6.1 Root-level `$group` / `$having`
+
+```python
+rows = await store.query(
+    "Course($condition:@c0,$group:@g0,$having:@h0,$sort:@s0,$limit:@l0){ status, n, total }",
+    {
+        "c0": {"status": {"$ne": "deleted"}},
+        "g0": {"by": ["status"], "agg": {"n": {"$count": "*"}, "total": {"$sum": "price"}}},
+        "h0": {"n": {"$gt": 1}},
+        "s0": {"total": -1},
+        "l0": 20,
+    },
+)
+```
+
+- Whitelisted operators: `$count` / `$sum` / `$avg` / `$min` / `$max`.
+- `$count` accepts `"*"` (row count) or a scalar field name (non-null count).
+- Omit `by` (or pass `[]`) for a single all-table group; empty input still returns one row
+  (`$count` → `0`, others → `None`).
+- Sorting / pagination apply to the **grouped result**.
+- `$having` must be used with `$group`.
+
+### 6.2 Relation aggregate predicates (semi-join / anti-join)
+
+Filter parents by an aggregate over a relation, **without fanning out**:
+
+```python
+await store.query("Product($condition:@c0,$sort:@s0){ _id, name }", {
+    "c0": {
+        "$and": [
+            {"status": "onSale"},
+            {"orders": {"$count": {"$gt": 3}}},
+            {"$not": {"orders": {"$sum": {"$of": "amount", "$gt": 10000}}}},
+        ],
+    },
+    "s0": {"name": 1},
+})
+```
+
+- Shorthand form: `{"<relation>": {"$exists": true | false}}`,
+  `{"$count": {"$of"?: field, "<cmp>": value}}`,
+  `{"$sum" | "$avg" | "$min" | "$max": {"$of": field, "<cmp>": value}}`, optionally with a
+  `$filter` block.
+- Main form: `{ filter?, agg, having }`.
+- Comparison operators: `$gt` / `$gte` / `$lt` / `$lte` / `$eq` / `$ne`.
+- Semantics: semi-join — parent row count and document shape are unchanged.
+- `$not` around a single relation predicate, or `$exists: false`, means anti-join.
+- Translates to `EXISTS` / `NOT EXISTS` on SQL and `$lookup` + `$match` on MongoDB.
+- Only **one level** of relation is supported (`orders.items.price` is rejected).
+
+### 6.3 Relation-rolling computed columns
+
+```python
+"computes": {
+    "itemCount": {"type": "int", "agg": {"$count": "items"}},       # 0 when the relation is empty
+    "itemsTotal": {"type": "float", "agg": {"$sum": "items.qty"}},  # None when empty
+}
+```
+
+Supported `agg` operators: `$count` / `$sum` / `$avg` / `$min` / `$max`.
+
+---
+
+## 7. Query & write API
+
+```python
+items  = await store.query(gql, params)              # list[dict]
+one    = await store.query_one(gql, params)          # dict | None
+page   = await store.query_with_count(gql, params)   # {'items','total','hasMore','page','pageSize'}
+exists = await store.exists("Post", {"_id": pid})
+n      = await store.count("Post", {"status": "active"})
+
+doc    = await store.insert("Post", {...})           # auto _id / createdAt / updatedAt
+docs   = await store.insert_many("Post", [{...}, ...])
+await store.update("Post", {"_id": pid}, {"status": "live"})     # plain fields → $set
+await store.update("Post", {"_id": pid}, {"$inc": {"views": 1}}) # '$'-prefixed keys pass through as operators
+await store.update_many("Post", {"type": t}, {"status": "live"})
+r      = await store.remove("Post", {"_id": pid})    # archives to <collection>_deleted first
+await store.mutation("Post", {...})                  # smart upsert + recursive relation children
+await store.upsert("Post", {"code": "A1"}, {...})    # explicit-condition upsert (no relation handling)
+```
+
+Notes:
+
+- `None` values are stripped before persisting; `_id` cannot be changed via `update`.
+- `createdAt` / `updatedAt` are framework-maintained; the unit follows the schema's
+  `timestamps` setting (milliseconds by default, seconds when `timestamps: "s"`).
+- `query_with_count` accepts `page` / `page_size` or `$skip` / `$limit`; `pageSize` is capped
+  at 5000.
+- `update_many` / `remove` with an **empty condition** (`{}`, `None`, `{"$and": []}`) is
+  rejected outright — it never falls through to a full-table write.
+- Snake-case aliases available: `query_one`, `insert_many`, `update_many`, `build_pipeline`, …
+
+---
+
+## 8. Permissions
+
+```python
+store.set_context({"userId": uid, "roles": ["editor"]})          # once per request
+await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))  # system / cron jobs
+```
+
+- `super_admin` / `admin` / `internal` pass everything.
+- Other roles are checked against schema-level and field-level `read` / `write` whitelists.
+- `guest` can never write.
+- `creator` is a pseudo-role resolved by `doc.createdBy == ctx.userId`; schemas granting it
+  automatically get owner conditions injected on queries and ownership checks on update/remove.
+- No context set → permission checks disabled (backward compatible).
+- Denied access raises `store.PermissionError` with `status = 403`.
+
+### Fail-secure mode (opt-in)
+
+```python
+store.set_require_context(True)
+# every query/write without a context now raises `ERR_NO_CONTEXT:...`
+await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
+```
+
+`run_as_internal` marks the call as `{"internal": True}` (distinct from a missing context, and
+always passes). `set_require_context(False)` restores the default fail-open behaviour.
+
+---
+
+## 9. Multi-datasource and multi-tenant
+
+Every schema is located by the triple `(source, namespace, collection)`, which must be
+globally unique across the registry (duplicate registration raises instead of silently
+mis-routing).
+
+- `source` — connection key in `init({...})` (default `"default"`).
+- `namespace` — database/schema inside the connection: Mongo db name, PG schema, MySQL
+  database, SQLite attached db. Optional; `None` = connection default.
+- `collection` — table/collection name.
+
+```python
+await init({"mongo_main": db, "pg_a": {"kind": "postgres", "exec": exec}})
+
+await init({"cluster": client})
+store.register({"name": "User", "collection": "users", "datasource": "cluster",
+                "namespace": "tenant_42", ...})
+
+# SQL cross-namespace joins are pushed down natively; only Mongo cross-db relations
+# fall back to in-memory federation.
+```
+
+Multi-tenant route override — one schema definition, N tenants:
+
+```python
+await store.query('User($condition:@c0){...}', params, {"namespace": "tenant_42"})
+await store.insert("Order", data, {"source": "pg_cluster", "namespace": "tenant_7"})
+```
+
+**Security note**: `route_override` is a trusted server-side parameter with no origin check.
+Forwarding user-controlled input into it lets a caller re-target another tenant's
+`source` / `namespace` (CWE-639 authorization-bypass surface). Never pass raw request data.
+
+---
+
+## 10. Feedback events
+
+Degraded / pushdown-rejection paths never fail silently — they emit a structured event:
+
+```python
+{type, code, layer, message, hint, ...}   # federation_degraded / sql_pushdown_unsupported / ...
+```
+
+```python
+store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
+```
+
+SQL pushdown rejection raises `PushdownUnsupportedError` (a `RuntimeError`) **and** emits the
+event; catch it to re-run that segment on a Mongo source.
+
+---
+
+## 11. Schema reference
+
+```python
+{
+    "name": "Order",
+    "collection": "orders",
+    "idPrefix": "OD",
+    "timestamps": True,                # True (ms, default) | False | "ms" | "s" (seconds)
+    "fields": {
+        "_id": "string",                                            # shorthand
+        "title": {"type": "string", "default": ""},
+        "meta": {"type": "object", "default": {}, "fields": {...}},  # nested object fields
+    },
+    "relations": {
+        "items": {"model": "OrderItem", "type": "many",
+                  "localField": "_id", "foreignField": "orderId"},
+    },
+    "computes": {
+        "total": {"type": "float", "depends": ["amount"], "fn": lambda d: d["amount"] * 1.1},
+        "itemCount": {"type": "int", "agg": {"$count": "items"}},
+    },
+    "indexes": [
+        {"keys": {"status": 1}},
+        {"keys": {"code": 1}, "options": {"unique": True}},
+    ],
+    "read": ["editor", "viewer"],
+    "write": ["editor"],
+}
+```
+
+Types: `string | int | long | float | double | boolean | array | object | date | any`.
+
+Boundary rules (all fail explicitly, never silently degrade):
+
+- Filtering directly on array fields, on a whole object field, or on object dot-paths is
+  rejected on every backend. Model cross-entity semantics as `relations` instead.
+- Relation predicates support one level of relation only.
+- An unreadable relation is an error, not a silent `False`.
+
+---
+
+## 12. Advanced API
+
+### `store.build_pipeline(gql, params?)`
+
+Compiles GQL to the command plan **without executing it**. Permissions and computes are not
+applied. Useful for debugging query shape, asserting pushdown behaviour, or building tooling
+such as an AI query agent that validates a plan before running it.
+
+```python
+plan = store.build_pipeline("Post($condition:@c0){ title }", {"c0": {"status": "draft"}})
+```
+
+### `store.sync_schema(...)`
+
+Pulls a SQL backend's physical structure into the registry
+(`introspect → schema_from_rows → merge_schema(overlay) → register`). It only **reads**
+structure and never writes DDL back.
+
+Signature (positional; all after `driver` are keyword-able):
+
+```python
+await store.sync_schema(backend, driver, introspect_options=None, overlay=None,
+                        datasource=None, namespace=None, register_defs=True)
+```
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `backend` | `"mysql" \| "postgres" \| "sqlite"` | required |
+| `driver` | object | required; prefer a read-only account |
+| `introspect_options` | dict | passed through to introspection (e.g. PG `{"schema": "public"}`) |
+| `overlay` | list | local schemaJSON merged on top (permissions / computes / overrides) |
+| `datasource` | str | bind every merged def to this source |
+| `namespace` | str | bind every merged def to this namespace |
+| `register_defs` | bool (default `True`) | `False` = return defs without registering |
+
+Returns the merged schemaJSON list.
+
+---
+
+## 13. Transaction boundary
+
+- **Single SQL source**: `mutation` parent-child step sequences and `remove` (archive +
+  delete) run inside one driver transaction on one checked-out connection — any step failure
+  rolls back the whole sequence.
+- **Each SQL write command** is itself atomic (multi-statement plans are transaction-wrapped).
+- **Mongo sources**: single-document writes are atomic; multi-step `mutation` and `remove`
+  run sequentially and are **not** atomic across steps (Mongo transactions require a replica
+  set).
+- **Archive idempotency**: `remove` archives with upsert-by-`_id` semantics, so retries after
+  partial failure do not collide.
+- **Cross-source steps** cannot be atomic; they run sequentially by design.
+
+---
+
+## 14. FAQ
+
+**How do I use one schema for both MongoDB and PostgreSQL in Python?**
+Define the schema once as a dict, call `init()` with your datasource(s), and run the same GQL
+against either. MongoDB uses native aggregation; MySQL/PostgreSQL/SQLite get parameterized SQL.
+
+**How do I query nested / related data without writing `$lookup` or JOINs?**
+Declare the relation in `relations` (`{"model", "type": "many" | "one", "localField",
+"foreignField"}`) and reference the relation name in the GQL selection set. It becomes
+`$lookup` on Mongo and a `JOIN` on SQL, returned as nested documents.
+
+**Does it support GROUP BY / COUNT / SUM / AVG?**
+Yes — root-level `$group` / `$having` and relation aggregate predicates are part of GQL.
+Operators: `$count` / `$sum` / `$avg` / `$min` / `$max`, pushed down to all four backends.
+
+**Can I filter parents by an aggregate of their children ("products with more than 3 orders")?**
+Yes — relation aggregate predicates implement semi/anti-join without fanning out; SQL uses
+`EXISTS` / `NOT EXISTS`.
+
+**How do I implement row-level permissions?**
+`store.set_context({"userId": ..., "roles": [...]})` plus schema-level `read` / `write`
+whitelists. The `creator` pseudo-role adds automatic ownership checks and owner-condition
+injection. `guest` can never write. Enable `set_require_context(True)` for fail-secure
+behaviour.
+
+**How do I do soft delete?**
+Every registered model automatically gets a `<Model>Deleted` archive collection/table.
+`store.remove()` archives the document first, then deletes it; the archive write is
+upsert-by-`_id`, so re-creating the same `_id` does not collide.
+
+**Is it usable for multi-tenant applications?**
+Yes. Bind a schema to `(source, namespace, collection)` and pass a `{"source", "namespace"}`
+route override per request. Treat `route_override` as trusted server-side input only.
+
+**Does it run migrations?**
+No. `sync_schema()` only *reads* physical structure via introspection. Schema changes / DDL
+are your migration tool's job (Alembic, etc.).
+
+**Can I see the generated query without running it?**
+Yes — `store.build_pipeline(gql, params)` returns the compiled plan with no execution and no
+permission/compute application.
+
+**What happens when SQL pushdown isn't possible?**
+The command raises `PushdownUnsupportedError` **and** emits a `sql_pushdown_unsupported`
+feedback event. Cross-source pagination/sort degradations emit `federation_degraded` events.
+Nothing fails silently.
+
+**How is it related to nodejs-store and rust-store?**
+`rust-store` is the shared Rust engine (GQL parsing, permissions, computed columns, command
+planning, SQL dialect translation — pure logic, no IO). `py-store` and `nodejs-store` are
+thin hosts in front of it owning driver IO, callbacks and placeholder substitution.
+
+**Why is the pip package called `storepy` and the import `py_store`?**
+The distribution name on PyPI is `storepy`; the importable package is `py_store`.
+
+---
+
+## 15. Comparison positioning
+
+Short version: use an ORM when you want model classes, Pydantic validation and migrations;
+use py-store when you want one runtime schema and one query dialect spanning MongoDB and SQL,
+with RBAC and computed columns built in.
+
+| | py-store | SQLAlchemy | Beanie / Motor | Tortoise ORM | SQLModel | Django ORM |
+| --- | --- | --- | --- | --- | --- | --- |
+| Primary shape | JSON schema + GQL data layer | SQL toolkit + ORM | Async MongoDB ODM / driver | Async ORM | Pydantic + SQLAlchemy | ORM bundled with Django |
+| Backends | MongoDB, MySQL, SQLite, PostgreSQL | PostgreSQL, MySQL, SQLite, Oracle, MSSQL | MongoDB | PostgreSQL, MySQL, SQLite, Oracle, MSSQL | PostgreSQL, MySQL, SQLite, … | PostgreSQL, MySQL, SQLite, Oracle |
+| One query dialect across Mongo and SQL | yes | no (SQL only) | no (Mongo only) | no (SQL only) | no (SQL only) | no (SQL only) |
+| Nested relation reads in one query | yes | manual loading | yes | yes (`prefetch_related`) | via SQLAlchemy | yes (`prefetch_related`) |
+| Built-in role / field-level RBAC + owner injection | yes | no | no | no | no | no (app-level) |
+| Read-time computed columns (sync / async / relation-agg) | yes | hybrid properties | no | no | no | no |
+| Soft-delete archive table auto-provisioned | yes | no | no | no | no | no |
+| Migration / DDL engine | no (introspection read-only) | yes (Alembic) | no | yes (Aerich) | yes (Alembic) | yes |
+| Framework coupling | none (asyncio) | none | none | none | none | Django |
+| Shared native core across Python and Node | yes (Rust `rust-store`) | no | no | no | no | no |
