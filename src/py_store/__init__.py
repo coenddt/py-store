@@ -27,6 +27,7 @@ from pymongo.errors import PyMongoError
 from . import (
     crud,
     datasource,
+    ddl,
     feedback,
     permission,
     schema,
@@ -37,6 +38,7 @@ from . import (
 from . import (
     introspect as introspect,
 )
+from .datasource import RawSqlError
 from .sync import sync_schema
 
 
@@ -120,6 +122,29 @@ class Store:
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
 
+    # ── 事务 + 原生 SQL（复用 datasource.run_in_transaction；见 README「事务边界」）──
+    async def transaction(self, source: str, fn) -> Any:
+        """事务作用域：单 SQL 源「同连接 + 同事务」执行 fn（复用 run_in_transaction）
+
+        fn 内 execute_raw / CRUD 均落到该源的事务连接（commit/rollback 一体）；
+        Mongo 源或执行器未实现事务时按原样执行（跨源无法原子），绝不静默假装已事务化。
+        单源场景 source 传 ``'default'``。
+        """
+        return await datasource.run_in_transaction(source, fn)
+
+    async def execute_raw(self, source: str, sql: str, params: list | None = None,
+                          is_write: bool = False) -> dict[str, Any]:
+        """在指定 SQL 源执行原生 SQL（事务内可用；占位符按各后端原生风格）
+
+        mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``；仅支持 SQL 源（Mongo 源抛
+        RawSqlError）。``is_write=False`` 取行（rows），``True`` 取影响行数（affectedRows）。
+        """
+        return await datasource.execute_raw(source, sql, params, is_write)
+
+    def generate_ddl(self, backend: str, names: list | None = None) -> str:
+        """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
+        return ddl.generate(backend, names)
+
     # ── 驼峰别名（与上方同名蛇形方法为**同一实现**，仅命名差异）──
     queryOne = query_one
     queryWithCount = query_with_count
@@ -128,6 +153,8 @@ class Store:
     updateMany = update_many
     syncSchema = sync_schema
     buildPipeline = build_pipeline
+    executeRaw = execute_raw
+    generateDdl = generate_ddl
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
@@ -148,6 +175,8 @@ class Store:
     run_as_internal = staticmethod(permission.run_as_internal)
     # 自定义权限错误（实例可被 store.PermissionError 捕获）
     PermissionError = permission.PermissionError
+    # 原生 SQL 入口错误（实例可被 store.RawSqlError 捕获）
+    RawSqlError = datasource.RawSqlError
     # 上下文强制开关（fail-secure：开启后 ctx 缺失报 ERR_NO_CONTEXT，内部调用走 run_as_internal）
     setRequireContext = staticmethod(schema.set_require_context)
     set_require_context = staticmethod(schema.set_require_context)
