@@ -239,3 +239,30 @@ async def exec_sql(source, connection, cmd):
             f'SQL 数据源 {source}({_kind_of(connection)}) 的执行器未接入（见执行文档 Phase 4）')
     out = await exec_fn(plan)
     return executors.shape_result(cmd, out)
+
+
+class RawSqlError(RuntimeError):
+    """原生 SQL 入口的显式错误（非 SQL 源 / 执行器未接入）"""
+
+
+async def execute_raw(source, sql, params=None, is_write=False):
+    """
+    在指定 SQL 源上执行原生 SQL（Host 层逃生口，绕开 core 的 dialect_translate）
+
+      - 事务作用域内经 ``connection_for`` 落到事务专用连接 → 支持 SELECT ... FOR UPDATE；
+      - 占位符沿用各后端原生风格（mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``）；
+      - 仅支持 SQL 源；Mongo 源显式报错（绝不静默）；
+      - ``is_write=False`` 视为读（取行）；``True`` 视为写（取影响行数）；
+      - 返回 ``{'rows': list|None, 'affectedRows': int}``。
+    """
+    conn = connection_for(source)
+    if not is_sql(conn):
+        raise RawSqlError(
+            f'数据源 {source} 不是 SQL 源（原生 SQL 入口仅支持 mysql/postgres/sqlite）')
+    exec_fn = _exec_of(conn)
+    if not callable(exec_fn):
+        raise RawSqlError(
+            f'SQL 数据源 {source}({_kind_of(conn)}) 的执行器未接入')
+    stmt = {'text': sql, 'params': list(params or []), 'isWrite': bool(is_write)}
+    out = await exec_fn({'stmts': [stmt]})
+    return {'rows': out.get('rows'), 'affectedRows': int(out.get('affectedRows') or 0)}
