@@ -107,7 +107,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 
 把边界说清楚能帮你省时间：
 
-- **你想要带迁移引擎的完整 ORM（Alembic、Django migrations）。** `py-store` 是*数据层*，不是迁移工具。它能**读取** SQL 后端的物理结构（`sync_schema` → 内省），但从不回写 DDL。
+- **你想要带迁移引擎的完整 ORM（Alembic、Django migrations）。** `py-store` 是*数据层*，不是迁移工具。它能**读取** SQL 后端的物理结构（`sync_schema` → 内省），但从不回写 DDL。另有一个可选的 `generate_ddl()`，可从已注册 schema 渲染出 `CREATE TABLE` 文本 —— 纯文本，绝不连接或写入数据库。
 - **你想要以 Pydantic 模型为中心的 ORM。** 这里的 schema 是运行时 JSON dict，带来的是跨语言一致性（同一 schema 可在 Python 与 Node.js 中运行），而非 Pydantic 类型校验。
 - **你只用一种数据库，且很少做关联。** 直接用驱动（或单库 ODM/ORM）会更简单。
 - **你需要裸聚合的逃生通道。** `$pipeline` 透传与 `store.aggregate()` 已被有意移除。请使用 `$condition` / `$group` / `$having` / relations；任何无法被安全翻译的东西都会**显式失败**，而不是静默处理。
@@ -125,7 +125,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 | 内置角色 / 字段级 RBAC + 属主注入 | ✅ | ➖ | ➖ | ➖ | ➖ | ➖（权限在应用层） |
 | 读取时计算列（同步 / 异步 / 关系聚合） | ✅ | ➖（hybrid property） | ➖ | ➖ | ➖ | ➖ |
 | 自动开通软删除归档表 | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ |
-| 迁移 / DDL 引擎 | ➖（内省只读） | ✅（Alembic） | ➖ | ✅（Aerich） | ✅（Alembic） | ✅ |
+| 迁移 / DDL 引擎 | ➖（内省只读；可选 `generate_ddl` 文本） | ✅（Alembic） | ➖ | ✅（Aerich） | ✅（Alembic） | ✅ |
 | 框架耦合 | 无（asyncio） | 无 | 无 | 无 | 无 | Django |
 | Python 与 Node 共享原生核心 | ✅（Rust `rust-store`） | ➖ | ➖ | ➖ | ➖ | ➖ |
 
@@ -135,7 +135,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 
 - **对比 SQLAlchemy / SQLModel / Django ORM** —— 它们都只支持 SQL 并以模型类为中心：不面向 MongoDB，也都不提供 schema 声明的角色/字段级访问控制或读取时计算列。`py-store` 把同一段 GQL 编译为原生 MongoDB 聚合或参数化 SQL。
 - **对比 Beanie / Motor** —— 仅支持 MongoDB。`py-store` 采用相同的 MongoDB 风格查询写法，但同一条查询也能在 MySQL、SQLite 与 PostgreSQL 上运行。
-- **对比 Tortoise ORM / pyloquent** —— 基于 SQL 后端的异步 Python ORM，使用模型类，并且（就 Tortoise 而言）带有迁移工具。`py-store` 没有迁移引擎 —— 内省只读取物理结构 —— 且把模型描述为普通 dict，这恰恰是 schema 能移植到 Node.js 宿主的原因。
+- **对比 Tortoise ORM / pyloquent** —— 基于 SQL 后端的异步 Python ORM，使用模型类，并且（就 Tortoise 而言）带有迁移工具。`py-store` 没有迁移引擎 —— 内省只读取物理结构，`generate_ddl()` 也只*渲染* `CREATE TABLE` 文本而不触碰数据库 —— 且把模型描述为普通 dict，这恰恰是 schema 能移植到 Node.js 宿主的原因。
 - **对比 `nodejs-store`** —— 同一套引擎、同一套 GQL，只不过用 JavaScript。选择与你服务相匹配的宿主即可；schema 与查询语义可互换。
 
 一句话：想要**模型类、Pydantic 校验和迁移**就用 ORM；想要**一份运行时 schema + 一套横跨 MongoDB 与 SQL 的查询方言**，并且内置 RBAC 与计算列，就用 `py-store`。
@@ -316,6 +316,37 @@ await store.upsert("Post", {"code": "A1"}, {...})    # 显式条件 upsert（不
 - 带**空条件**（`{}`、`None`、`{"$and": []}`）的 `update_many` / `remove` 会被直接拒绝 —— 它绝不会退化为全表写入。
 - 提供蛇形别名：`query_one`、`insert_many`、`update_many`、`build_pipeline`、…
 
+### 事务与原生 SQL
+
+```python
+async def transfer():
+    rows = await store.execute_raw(
+        "default", "SELECT * FROM accounts WHERE _id = ? FOR UPDATE", [acc_id])
+    await store.execute_raw(
+        "default", "UPDATE accounts SET balance = ? WHERE _id = ?", [new_balance, acc_id],
+        is_write=True)
+
+await store.transaction("default", transfer)
+```
+
+- `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源或不支持事务的执行器会按原样执行 `fn` —— 绝不假装已原子。
+- `store.execute_raw(source, sql, params=None, is_write=False)` 执行原生 SQL，绕开 GQL 解析与方言翻译。占位符沿用各后端原生风格：MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
+- `is_write=False`（默认）返回 `{"rows", "affectedRows"}` 含结果集行；`is_write=True` 返回影响行数。
+
+### DDL 生成
+
+```python
+sql = store.generate_ddl("mysql")                       # 所有已注册模型
+sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
+```
+
+`store.generate_ddl(backend, names=None)` 把一个已注册 schema def 映射为一条 `CREATE TABLE` —— 是 `sync_schema()`（只*读取*）的逆操作。生成器是**纯文本**：它绝不连接、也绝不写入数据库（铁律 6 依然成立）。
+
+- 只有标量字段成为列；`object` / `array` 字段不建列。
+- 每张表都会获得 `__present` 哨兵列；`timestamps` 模型还会获得 `createdAt` / `updatedAt`；`<collection>_deleted` 归档表与其它已注册 def 一样生成。
+- 不生成 `CREATE INDEX` —— SQL 后端仅把索引保留为元数据。
+- MySQL 的 `__present` 为 `VARCHAR(255)`；若某 schema 的 present 令牌串会超限，则发出 `ddlPresentOverflow` 反馈事件，而非静默失败。
+
 ## 多数据源连接
 
 每个 schema 通过三元组 `(source, namespace, collection)` 定位 —— 该三元组在注册表中必须全局唯一（重复注册会报错，而不是静默错误路由）。
@@ -462,7 +493,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 可以。把 schema 绑定到 `(source, namespace, collection)`，并按请求传入 `{"source", "namespace"}` 路由覆盖。只把 `route_override` 当作受信的服务端输入。
 
 **它会执行迁移吗？**
-不会。`sync_schema()` 只通过内省*读取*物理结构（introspect → 合并 overlay → 注册）。schema 变更 / DDL 是你迁移工具的职责（如 Alembic）。
+不会。`sync_schema()` 只通过内省*读取*物理结构（introspect → 合并 overlay → 注册）。schema 变更 / DDL 是你迁移工具的职责（如 Alembic）。若想要一个起点，`store.generate_ddl(backend)` 可从已注册 schema 渲染 `CREATE TABLE` 文本 —— 但它只是纯文本生成：绝不执行、也不写入 DDL。
 
 **能在不执行的情况下查看生成的查询吗？**
 可以 —— `store.build_pipeline(gql, params)` 返回编译后的计划，不执行、也不应用权限/计算列。

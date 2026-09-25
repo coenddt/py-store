@@ -108,7 +108,7 @@ Typical concrete scenarios (see [`doc/use-cases/`](doc/use-cases/) for full walk
 
 Being explicit about the boundary saves you time:
 
-- **You want a full ORM with a migration engine (Alembic, Django migrations).** `py-store` is a *data layer*, not a migration tool. It can **read** a SQL backend's physical structure (`sync_schema` → introspection) but it never writes DDL back.
+- **You want a full ORM with a migration engine (Alembic, Django migrations).** `py-store` is a *data layer*, not a migration tool. It can **read** a SQL backend's physical structure (`sync_schema` → introspection) but it never writes DDL back. There is an optional `generate_ddl()` that renders `CREATE TABLE` text from your registered schemas — pure text, it never connects to or writes to the database.
 - **You want a Pydantic-model-centric ORM.** Schemas here are runtime JSON dicts, giving you cross-language parity (the same schema runs in Python and Node.js) rather than Pydantic type validation.
 - **You only ever use one database and rarely join.** A plain driver (or a single-database ODM/ORM) will be simpler.
 - **You need raw aggregation escape hatches.** `$pipeline` passthrough and `store.aggregate()` were deliberately removed. Use `$condition` / `$group` / `$having` / relations; anything that cannot be safely translated fails **explicitly** rather than silently.
@@ -126,7 +126,7 @@ General positioning, not a benchmark — always verify against each tool's curre
 | Built-in role / field-level RBAC + owner injection | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ (permissions are app-level) |
 | Read-time computed columns (sync / async / relation-agg) | ✅ | ➖ (hybrid properties) | ➖ | ➖ | ➖ | ➖ |
 | Soft-delete archive table auto-provisioned | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ |
-| Migration / DDL engine | ➖ (introspection read-only) | ✅ (Alembic) | ➖ | ✅ (Aerich) | ✅ (Alembic) | ✅ |
+| Migration / DDL engine | ➖ (introspection read-only; optional `generate_ddl` text) | ✅ (Alembic) | ➖ | ✅ (Aerich) | ✅ (Alembic) | ✅ |
 | Framework coupling | none (asyncio) | none | none | none | none | Django |
 | Shared native core across Python & Node | ✅ (Rust `rust-store`) | ➖ | ➖ | ➖ | ➖ | ➖ |
 
@@ -136,7 +136,7 @@ Positioning only, based on those projects' public documentation at the time of w
 
 - **vs SQLAlchemy / SQLModel / Django ORM** — all SQL-only and model-class-centric: they do not target MongoDB, and none of them ships schema-declared role/field access control or read-time computed columns. `py-store` compiles one GQL to native MongoDB aggregation or to parameterized SQL.
 - **vs Beanie / Motor** — MongoDB-only. `py-store` uses the same MongoDB-flavoured query style but the identical query also runs on MySQL, SQLite and PostgreSQL.
-- **vs Tortoise ORM / pyloquent** — async Python ORMs over SQL backends, with model classes and (in Tortoise's case) a migration tool. `py-store` has no migration engine — introspection reads physical structure only — and describes models as plain dicts, which is exactly what makes a schema portable to the Node.js host.
+- **vs Tortoise ORM / pyloquent** — async Python ORMs over SQL backends, with model classes and (in Tortoise's case) a migration tool. `py-store` has no migration engine — introspection only reads physical structure, and `generate_ddl()` only *renders* `CREATE TABLE` text without touching the database — and describes models as plain dicts, which is exactly what makes a schema portable to the Node.js host.
 - **vs `nodejs-store`** — the same engine and the same GQL, in JavaScript. Use whichever host matches your service; schemas and query semantics are interchangeable.
 
 Short version: use an ORM when you want **model classes, Pydantic validation and migrations**; use `py-store` when you want **one runtime schema + one query dialect spanning MongoDB and SQL**, with RBAC and computed columns built in.
@@ -317,6 +317,37 @@ Notes:
 - `update_many` / `remove` with an **empty condition** (`{}`, `None`, `{"$and": []}`) is rejected outright — it never falls through to a full-table write.
 - Snake-case aliases available: `query_one`, `insert_many`, `update_many`, `build_pipeline`, ...
 
+### Transactions and raw SQL
+
+```python
+async def transfer():
+    rows = await store.execute_raw(
+        "default", "SELECT * FROM accounts WHERE _id = ? FOR UPDATE", [acc_id])
+    await store.execute_raw(
+        "default", "UPDATE accounts SET balance = ? WHERE _id = ?", [new_balance, acc_id],
+        is_write=True)
+
+await store.transaction("default", transfer)
+```
+
+- `store.transaction(source, fn)` opens a transaction scope on one SQL source: every `execute_raw` / CRUD call inside `fn` lands on that source's transaction connection, with `commit` / `rollback` as one unit (reuses the internal `run_in_transaction`). Mongo sources or executors without transactions run `fn` as-is — it never pretends to be atomic.
+- `store.execute_raw(source, sql, params=None, is_write=False)` runs raw SQL, bypassing GQL parsing and dialect translation. Placeholders follow each backend's native style: `?` for MySQL / SQLite, `$1..$n` for PostgreSQL. SQL sources only — a Mongo source raises `RawSqlError` (`py_store.RawSqlError` / `store.RawSqlError`).
+- `is_write=False` (default) returns `{"rows", "affectedRows"}` with the result-set rows; `is_write=True` returns the affected-row count.
+
+### DDL generation
+
+```python
+sql = store.generate_ddl("mysql")                       # every registered model
+sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
+```
+
+`store.generate_ddl(backend, names=None)` maps one registered schema def to one `CREATE TABLE` — the inverse of `sync_schema()`, which only *reads*. The generator is **pure text**: it never connects to, or writes to, the database (iron rule 6 still holds).
+
+- Only scalar fields become columns; `object` / `array` fields do not.
+- Every table gets the `__present` sentinel column; `timestamps` models also get `createdAt` / `updatedAt`; the `<collection>_deleted` archive table is generated like any other registered def.
+- No `CREATE INDEX` is emitted — SQL backends keep indexes as metadata only.
+- MySQL `__present` is `VARCHAR(255)`; a schema whose present-token string would overflow emits a `ddlPresentOverflow` feedback event rather than failing silently.
+
 ## Multi-datasource connections
 
 Every schema is located by the triple `(source, namespace, collection)` — the triple must be
@@ -474,7 +505,7 @@ Every registered model automatically gets a `<Model>Deleted` archive collection/
 Yes. Bind a schema to `(source, namespace, collection)` and pass a `{"source", "namespace"}` route override per request. Treat `route_override` as trusted server-side input only.
 
 **Does it run migrations?**
-No. `sync_schema()` only *reads* physical structure via introspection (introspect → merge overlay → register). Schema changes / DDL are your migration tool's job (Alembic, etc.).
+No. `sync_schema()` only *reads* physical structure via introspection (introspect → merge overlay → register). Schema changes / DDL are your migration tool's job (Alembic, etc.). If you want a starting point, `store.generate_ddl(backend)` renders `CREATE TABLE` text from the registered schemas — but it is pure text generation: it never runs or writes DDL.
 
 **Can I see the generated query without running it?**
 Yes — `store.build_pipeline(gql, params)` returns the compiled plan with no execution and no permission/compute application.
