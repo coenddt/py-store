@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# 覆盖率产物（pytest-cov；配置见 pyproject.toml [tool.coverage]）
+.coverage
+
 # GitHub Pages build artifacts (see .github/pages/assemble.sh)
 /_config.yml
 /_site/
