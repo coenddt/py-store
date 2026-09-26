@@ -2,7 +2,7 @@
 
 逐后端调用 ``example/course-platform/impl/harness.py`` 的 ``run_backend``：
 先跑 MongoDB 产出 oracle，再跑三个 SQL 后端与 oracle 对拍；把结果写进
-``py-store/doc/test-eval/<YYYY>/<MM>/`` 报告（未处理- 前缀）并转成 pytest 判定。
+``py-store/doc/test-eval/<YYYY>/<MM>/`` 报告（测试报告不带「是否已完成」概念，无状态前缀）并转成 pytest 判定。
 
 后端不可达 → ``pytest.skip``，原因写入报告，绝不静默。
 
@@ -96,7 +96,7 @@ def _write_report():
     year, month = datetime.date.today().strftime('%Y %m').split()
     out_dir = Path(__file__).resolve().parent.parent / 'doc' / 'test-eval' / year / month
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f'未处理-course-platform-场景矩阵-{datetime.date.today().isoformat()}.md'
+    path = out_dir / f'course-platform-场景矩阵-{datetime.date.today().isoformat()}.md'
     lines = []
     lines.append(f'# course-platform 场景矩阵 · 多后端对拍报告（{datetime.date.today().isoformat()}）')
     lines.append('')
