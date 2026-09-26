@@ -386,6 +386,9 @@ async def _run_backend_inner(kind, oracle):
             h.case_policy = case.get('sqlPolicy')  # case 级 sqlPolicy 透传给各 step
             # 快照开关，用例结束复原（E-13 会改 require_context）
             _saved_require = store.require_context()
+            # 档位按用例声明切换（缺省 standard）；text2query 用例显式声明，结束复原
+            _saved_profile = sc.get_profile()
+            sc.set_profile(case.get('profile') or 'standard')
             steps_out = []
             case_oracle_steps = []
             try:
@@ -415,6 +418,7 @@ async def _run_backend_inner(kind, oracle):
                                       'op': step['op'], 'expectKind': step.get('expect', {}).get('kind')})
             finally:
                 store.set_require_context(_saved_require)
+                sc.set_profile(_saved_profile)
             results.append({'id': case['id'], 'backend': kind, 'group': case.get('group'),
                             'status': 'pass' if all(s['ok'] for s in steps_out) else 'fail',
                             'steps': steps_out})
