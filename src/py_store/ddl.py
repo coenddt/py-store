@@ -2,7 +2,9 @@
 DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回写）
 
 与 core 契约严格对齐（schema→DDL 单向映射）：
-  - 只对 scalar 字段建列（object/array 不建列；同 core dialect::scalar_column）；
+  - 标量字段按声明类型建列；object/array 字段建 **JSON 列**（MySQL `JSON` / PG `jsonb` /
+    SQLite `TEXT`，同 core dialect::Backend::json_type_name）——落单列存 JSON 文本，
+    读侧由 core row::parse_json_col 还原为嵌套对象，跨后端对齐 Mongo 嵌套文档；
   - 每表必建 __present 哨兵列（形态 ,f1,f2,；同 core write/insert.rs::present_value）；
   - timestamps !== false → 追加 createdAt / updatedAt（同 core schema/registry.rs::add_timestamp_fields）；
   - 归档表 <collection>_deleted 由 registry 自动派生，本模块按已注册 def 逐表生成（不特判）；
@@ -32,6 +34,8 @@ _TYPES = {
     'date': ('BIGINT', 'BIGINT', 'INTEGER'),
 }
 _NON_COLUMN = ('object', 'array')
+# object/array 字段的列类型（JSON 文本列；同 core Backend::json_type_name）
+_JSON_TYPE = ('JSON', 'jsonb', 'TEXT')
 _ID_TYPE = ('VARCHAR(64)', 'TEXT', 'TEXT')
 _PRESENT_TYPE = ('VARCHAR(255)', 'TEXT', 'TEXT')
 _TIMESTAMP_FIELDS = ('createdAt', 'updatedAt')
@@ -56,16 +60,18 @@ def _declared_type(field_def):
 
 
 def _columns(defn, backend):
-    """返回 [(name, sql_type, pk)]，顺序：声明的标量字段 → timestamps → __present"""
+    """返回 [(name, sql_type, pk)]，顺序：声明的字段（标量 / object·array JSON 列）→ timestamps → __present"""
     i = _idx(backend)
     cols = []
     fields = defn.get('fields') or {}
     for name, fdef in fields.items():
         ftype = _declared_type(fdef)
-        if ftype in _NON_COLUMN:
-            continue
         if name == '_id':
             cols.append((name, _ID_TYPE[i], True))
+            continue
+        if ftype in _NON_COLUMN:
+            # object/array → 单列 JSON 文本（同 core field_column_ref::Json）
+            cols.append((name, _JSON_TYPE[i], False))
             continue
         if ftype not in _TYPES:
             raise ValueError(

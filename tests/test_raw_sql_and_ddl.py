@@ -117,7 +117,7 @@ def test_transaction_without_with_transaction_runs_plainly():
 
 # ─── ② ddl.generate ─────────────────────────────────────────
 
-def test_ddl_scalar_only_present_and_archive():
+def test_ddl_present_and_archive_includes_json_columns():
     store.register({
         'name': 'DdlProbe', 'collection': 'ddl_probes', 'idPrefix': 'd',
         'timestamps': False,
@@ -135,9 +135,9 @@ def test_ddl_scalar_only_present_and_archive():
     assert '`__present` VARCHAR(255)' in sql
     assert '`deletedAt` BIGINT' in sql
     assert 'PRIMARY KEY (`_id`)' in sql
-    # object / array 不建列（同 core scalar_column）
-    assert '`nested`' not in sql
-    assert '`tags`' not in sql
+    # object / array 建 JSON 列（同 core field_column_ref::Json）
+    assert '`nested` JSON' in sql
+    assert '`tags` JSON' in sql
 
 
 def test_ddl_timestamps_and_no_index():
@@ -175,6 +175,24 @@ def test_ddl_backend_types():
     assert '"s" TEXT' in pg and '"f" DOUBLE PRECISION' in pg and '"ok" BOOLEAN' in pg
     assert '"s" TEXT' in lite and '"f" REAL' in lite and '"ok" INTEGER' in lite
     assert '"at" INTEGER' in lite
+
+
+def test_ddl_json_column_types_per_backend():
+    store.register({
+        'name': 'DdlJson', 'collection': 'ddl_json', 'idPrefix': 'j', 'timestamps': False,
+        'fields': {
+            '_id': {'type': 'string'},
+            'obj': {'type': 'object'},
+            'arr': {'type': 'array'},
+        },
+    })
+    my = store.generate_ddl('mysql', ['DdlJson'])
+    pg = store.generate_ddl('postgres', ['DdlJson'])
+    lite = store.generate_ddl('sqlite', ['DdlJson'])
+
+    assert '`obj` JSON' in my and '`arr` JSON' in my
+    assert '"obj" jsonb' in pg and '"arr" jsonb' in pg
+    assert '"obj" TEXT' in lite and '"arr" TEXT' in lite
 
 
 def test_ddl_unknown_backend_raises():
