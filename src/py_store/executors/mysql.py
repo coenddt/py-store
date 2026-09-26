@@ -96,9 +96,17 @@ def create(driver, options=None):
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
 
     async def exec_(plan):
-        # 整个 plan 固定在同一连接上执行（池路径也保持语句顺序与连接一致性）
+        """非事务路径：整个 plan 固定在同一连接执行，成功后显式 commit
+        （池 autocommit=True 时为幂等 no-op；单连接 autocommit=False 时杜绝「只执行不提交」）；
+        失败则 rollback 后上抛，绝不提交半截写入"""
         async with acquire(driver) as conn:
-            return await run_stmts(conn, plan)
+            try:
+                out = await run_stmts(conn, plan)
+            except BaseException:
+                await conn.rollback()
+                raise
+            await conn.commit()
+            return out
 
     async def with_transaction(body):
         """事务执行：显式 BEGIN + commit/rollback（对 autocommit 任意配置均确定成立）；
