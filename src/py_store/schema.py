@@ -74,7 +74,13 @@ def _to_core_defn(defn):
 
 
 def register(defn):
-    """注册一个 schema（自动派生 `<Name>Deleted` 归档表镜像），返回 Host 侧元数据"""
+    """注册一个 schema（core 注册 + Host 侧元数据镜像）
+
+    归档表 `<Name>Deleted` 由 core 在 register 内**自动派生并注册**
+    （rust-store/core/src/schema/registry.rs:52-55）；Host 只补 Host 侧镜像，
+    **不再调用 core.register** —— 否则同名条目二次进入 core.order，使 list()/
+    generate_ddl() 出现重复表（基线实测 list=['User','UserDeleted','UserDeleted']）。
+    """
     core.register(_to_core_defn(defn))
 
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
@@ -106,19 +112,24 @@ def register(defn):
         'datasource': defn.get('datasource'),
     }
 
-    # 归档表镜像（与 core register 的自动派生保持一致，供 Host 查询元数据）
+    # 归档表镜像（形状对齐 core archive_defn：registry.rs:395-417）
+    # —— 字段 + deletedAt、collection=<c>_deleted、idPrefix=''、timestamps 默认 true
     if not defn.get('_isArchive') and not defn['name'].endswith('Deleted'):
-        register({
+        _schemas[f"{defn['name']}Deleted"] = {
             'name': f"{defn['name']}Deleted",
             'collection': f"{defn.get('collection') or defn['name']}_deleted",
-            'idPrefix': '',
-            '_isArchive': True,
-            # 归档表与原表同 (source, namespace)
-            'datasource': defn.get('datasource'),
             'namespace': defn.get('namespace') or None,
+            'idPrefix': '',
+            'timestamps': True,
+            'timestampUnit': 'ms',
             'fields': {**(defn.get('fields') or {}), 'deletedAt': {'type': 'number'}},
+            'relations': {},
+            'computes': {},
             'indexes': defn.get('indexes') or [],
-        })
+            'read': None,
+            'write': None,
+            'datasource': defn.get('datasource'),
+        }
 
     return _schemas[defn['name']]
 
