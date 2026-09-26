@@ -10,7 +10,8 @@ import asyncio
 import aiosqlite
 import pytest
 
-from py_store import datasource, executors, feedback, schema as schema_mod, store
+from py_store import datasource, executors, feedback, store
+from py_store import schema as schema_mod
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +64,7 @@ def test_sqlite_plan_failure_rolls_back(tmp_path):
         datasource.set_connections({'default': conn})
         await store.execute_raw('default', 'CREATE TABLE t (_id TEXT PRIMARY KEY)', is_write=True)
 
-        with pytest.raises(Exception):
+        with pytest.raises(aiosqlite.OperationalError):
             await conn['exec']({'stmts': [
                 {'text': "INSERT INTO t (_id) VALUES ('x')"},
                 {'text': 'THIS IS NOT SQL'},
