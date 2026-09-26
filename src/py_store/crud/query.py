@@ -6,8 +6,39 @@ import inspect
 
 from ..feedback import emit as _emit_feedback
 from ..schema import core as _core
-from ..schema import get_async_fn
-from .exec import _call, _ctx, _exec, _exec_on, resolve_placeholders
+from ..schema import get_async_fn, get_profile
+from .exec import (
+    _PROFILE_HINT,
+    ProfileViolation,
+    _call,
+    _ctx,
+    _exec,
+    _exec_on,
+    resolve_placeholders,
+)
+
+
+def _guard_route_override(route_override):
+    """Host 兜底：text2query 档禁用 ``route_override``（受信参数，禁 AI 侧指定）
+
+    判决唯一在 core（执行文档 §4.2 ⑤：各 ``plan_query*`` 入口已判并 Err）；此为
+    第二层防护——即使 core 判决被绕过，Host 也不放行受信参数（CWE-639）。命中即
+    emit ``profile_blocked``，``layer='host'`` 本身即反馈：core 层未拦住，须回溯加固
+    （自动反馈原则：允许拦截，禁止静默）。
+    """
+    if route_override is None or get_profile() != 'text2query':
+        return
+    detail = 'text2query 档禁用 route_override（受信参数，禁 AI 侧指定）'
+    _emit_feedback({
+        'type': 'profile_blocked',
+        'code': 'profileBlocked',
+        'layer': 'host',
+        'profile': 'text2query',
+        'feature': 'route_override',
+        'message': detail,
+        'hint': _PROFILE_HINT,
+    })
+    raise ProfileViolation(detail)
 
 
 async def _run_query_plan(plan):
@@ -50,6 +81,7 @@ async def query(gql, params=None, route_override=None):
     权限/计算列仍按结构 schema 判定（见 multi-datasource-routing-plan.md §6）。
     注意：``route_override`` 为**受信服务端参数**，禁止透传用户输入（否则可被用于跨源路由，CWE-639）。
     """
+    _guard_route_override(route_override)
     plan = _call(lambda: _core.plan_query(
         gql, params if params is not None else {}, _ctx(), route_override))
     return await _finalize(plan, await _run_query_plan(plan))
@@ -61,6 +93,7 @@ async def query_one(gql, params=None, route_override=None):
     走 core ``plan_query_one``：用户未显式 ``$limit`` 时强制下推 ``$limit(1)``，
     大集合不再全量取回后取首条（对齐 PyMongo ``find_one`` 的 limit-1 语义）。
     """
+    _guard_route_override(route_override)
     plan = _call(lambda: _core.plan_query_one(
         gql, params if params is not None else {}, _ctx(), route_override))
     items = await _finalize(plan, await _run_query_plan(plan))
@@ -118,6 +151,7 @@ async def query_with_count(gql, params=None, route_override=None):
       2. 传统 $skip/$limit — 从 GQL 参数推导 page/pageSize
     pageSize 上限 5000，防止拖库。
     """
+    _guard_route_override(route_override)
     plan = _call(lambda: _core.plan_query_with_count(
         gql, params if params is not None else {}, _ctx(), None, route_override))
     items = await _finalize(plan, await _run_query_plan(plan))

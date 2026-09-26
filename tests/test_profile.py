@@ -5,7 +5,9 @@
   2. ``text2query()`` 上下文：进入设档、退出恢复原档（token-set/reset，嵌套安全）；
   3. text2query 档强制 ctx：无 ctx 即 ``ProfileViolation`` + emit ``profile_blocked``（禁静默）；
   4. ``_call`` 前缀映射：``ERR_TEXT2QUERY:`` → ``ProfileViolation``（400）并提取 feature；
-  5. standard 档 fail-open：无 ctx 照常查询（既有调用方零感知）。
+  5. standard 档 fail-open：无 ctx 照常查询（既有调用方零感知）；
+  6. ``route_override`` 受信来源 Host 兜底：text2query 档非空即拒 + emit（layer='host'）；
+     standard 档放行（判决唯一在 core，Host 仅兜底）。
 
 运行：$env:LOCAL_CORE='1'; $env:PYTHONPATH='src'; python -m pytest tests/test_profile.py -q
 """
@@ -19,6 +21,7 @@ from py_store import feedback, store
 from py_store import permission as perm
 from py_store import schema as _sc
 from py_store.crud import exec as _exec_mod
+from py_store.crud.query import _guard_route_override
 
 _sc.register({
     'name': 'PqModel', 'collection': 'pq_model', 'idPrefix': 'PQ', 'timestamps': False,
@@ -195,3 +198,45 @@ def test_standard_profile_fail_open_without_ctx():
     assert _sc.get_profile() == 'standard'
     items = _run(_crud_mod.query('PqModel{title}'))
     assert len(items) == 1 and items[0]['title'] == 'a'
+
+
+# ── 6. route_override 受信来源 Host 兜底 ──────────────────────
+
+def test_text2query_blocks_route_override_and_emits_host():
+    _mock()
+    events = []
+    feedback.set_sink(events.append)
+    with store.text2query():
+        with pytest.raises(store.ProfileViolation) as ei:
+            _run(_crud_mod.query('PqModel{title}', route_override={'source': 'x'}))
+    # 档位拒绝 = 调用方合约违反（400）
+    assert ei.value.status == 400
+    assert 'route_override' in str(ei.value)
+    # 兜底命中必产反馈：layer='host' 表明 core 层未拦住（自动反馈原则）
+    assert len(events) == 1
+    ev = events[0]
+    assert ev['type'] == 'profile_blocked'
+    assert ev['code'] == 'profileBlocked'
+    assert ev['layer'] == 'host'
+    assert ev['profile'] == 'text2query'
+    assert ev['feature'] == 'route_override'
+    assert ev['hint']
+
+
+def test_standard_route_override_not_blocked_by_host_guard():
+    # standard 档：受信可用，Host 兜底放行；未携带（None）同样放行
+    events = []
+    feedback.set_sink(events.append)
+    _guard_route_override({'source': 'x'})
+    _guard_route_override(None)
+    assert events == []
+
+
+def test_text2query_query_one_and_with_count_also_blocked():
+    _mock()
+    feedback.set_sink(lambda _e: None)
+    with store.text2query():
+        with pytest.raises(store.ProfileViolation):
+            _run(_crud_mod.query_one('PqModel{title}', route_override={'source': 'x'}))
+        with pytest.raises(store.ProfileViolation):
+            _run(_crud_mod.query_with_count('PqModel{title}', route_override={'source': 'x'}))

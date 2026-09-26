@@ -36,6 +36,10 @@ _PROFILE_PREFIX = 'ERR_TEXT2QUERY:'
 # 不伪造 feature —— 缺值必须显式暴露（禁静默兜底）。
 _FEATURE_RE = re.compile(r'\[(.+?)\]')
 
+# 档位拦截反馈的统一提示（反馈事件契约 §4.6 的一部分；单点定义防文案漂移）
+_PROFILE_HINT = ('上游（LLM 产出的 GQL / 调用方入参）越界；'
+                 'text2query 档白名单见 SKILL.md §后端无关性与边界')
+
 
 class ProfileViolation(Exception):
     """档位（profile）拒绝：text2query 档违反功能收缩 / 硬限制
@@ -99,8 +103,7 @@ def _call(fn):
                 'profile': 'text2query',
                 'feature': m.group(1) if m else None,
                 'message': detail,
-                'hint': ('上游（LLM 产出的 GQL / 调用方入参）越界；'
-                         'text2query 档白名单见 SKILL.md §后端无关性与边界'),
+                'hint': _PROFILE_HINT,
             })
             raise ProfileViolation(detail) from e
         raise
