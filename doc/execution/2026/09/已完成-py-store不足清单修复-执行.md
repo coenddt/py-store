@@ -536,50 +536,78 @@ stress\stress.py:261:29: RUF100 [*] Unused `noqa` directive (non-enabled: `BLE00
 6. **覆盖率口径**：本机实测（Python 3.14.4，驱动全装）语句 **90%**（1083 stmts / 107 miss）；语句+分支合并 **88%**（362 分支 / 55 miss）。门禁取语句口径 90%（`--cov-fail-under` 在未启用 branch 时即语句口径），分支口径由单独一步出具（非门禁）。
 7. **金额/类型契约**：`executors/_values.py` 的 DECIMAL/NUMERIC 归一已修，本轮仅复核，不重复改（见 §9 #24）。
 
-## 9. 清单条目处置对照（29 条 + 待核实 → 本轮执行 / 受限项 / 已核对）
+## 9. 清单条目处置对照（用户裁决权确立后的重新评估 · 29 条 + 待核实）
+
+> **本节已按「用户裁决权」元规则重评**：原先以「零 parity 税 / 本轮不碰 core / 受限项 / 设计内 / 能力缺口 / 下游」**终止执行**的 18 条，不再据此终止 —— 改为「应修（分批进入 core）/ 可修（Host 侧）/ 定位裁决（已给倾向推荐，待你裁决）」。原处置仅作历史留痕，理由与批次见 §10。
 
 | # | 清单条目 | 处置 | 依据 / 落点 |
 |---|---|---|---|
-| 1 | SQL 单条写命令不提交事务（P0） | **本轮执行** | 步骤 1–2；契约 §4.1–4.2 |
-| 2 | 归档表被重复注册（P0） | **本轮执行** | 步骤 3–5；契约 §4.3–4.4；基线实测复现 |
-| 3 | object/array 字段 SQL 后端不支持读写 | 受限项（core） | 需 core `dialect` 落 JSON 列（MySQL JSON/PG jsonb/SQLite TEXT+JSON1），本轮不碰 core |
-| 4 | 关系谓词仅一级；数组/对象点号过滤被拒 | 受限项（core） | 需 core CTE/嵌套 EXISTS 下推；本轮不碰 core |
-| 5 | 移除了 `$pipeline` 与 `store.aggregate()` | 受限项（core） | `pipeline/parse.rs:62-69` 显式拒绝；逃生舱属 core 设计 |
-| 6 | `route_override` 无来源校验（CWE-639 面） | 受限项（core） | 需 core 加来源签名/受限注入；本轮不碰 core |
-| 7 | 无 CI 测试工作流，质量门禁为零 | **本轮执行** | 步骤 8；新增 `ci.yml`（`release-pypi.yml` 仅在 tag/dispatch 跑门禁，push/PR 无） |
-| 8 | 版本节奏带破坏性变更 | 下游 | 项目内适配层隔离 API，见下文「下游适配建议」 |
-| 9 | schema 是运行时 dict，无静态类型与校验 | 下游 | 下游用 Pydantic 做业务校验，见「下游适配建议」 |
-| 10 | 分发名 `storepy` ≠ import `py_store` ≠ 仓库名 `py-store` | **已核对（无需改）** | `README.md:18/150/519-520` 已标注；分发名受 PyPI 近似名规则限制（`release-pypi.yml:13-14` 备注） |
-| 11 | 无迁移/DDL 引擎 | 下游 | 接 Alembic；py-store 只做运行时访问层 |
-| 12 | SQL 后端索引仅元数据 | 受限项（设计内） | 铁律 6：SQL 后端不建索引，`ddl.py` 明确不生成 `CREATE INDEX` |
-| 13 | 无 identity map / 变更跟踪 / 懒加载 | 受限项（设计内） | 薄数据层定位，非 ORM |
-| 14 | 无 session 级工作单元 / savepoint | 受限项（设计内） | 事务仅单 SQL 源（`datasource.run_in_transaction`） |
-| 15 | Mongo 多步写非原子 | 受限项（设计内） | 需 replica set；文档已述 |
-| 16 | 无悲观锁 API | **已缓解** | `store.execute_raw`（事务内）可 `SELECT ... FOR UPDATE`（`datasource.py:248-268`） |
-| 17 | 无查询构建器链（GQL 为字符串） | 受限项（能力缺口） | 属新增能力，非修复 |
-| 18 | 后端仅 4 种；Mongo 跨库联邦上限 10 万行 | 受限项（能力缺口） | 属新增能力，非修复 |
-| 19 | 权限默认 fail-open | **已具备开关** | `schema.set_require_context` / `store.set_require_context` 已有；下游须启动即开启（见「下游适配建议」） |
-| 20 | 权限错误靠字符串前缀 `ERR_PERMISSION:` 映射 | 受限项（core） | 需 core 出结构化错误码（`crud/exec.py:24-27` 现按前缀映射） |
-| 21 | 角色为字符串、未归一默认放行 | 受限项（core） | 需 core 显式枚举角色 |
-| 22 | 大结果集读慢（FFI 逐行 `restore_rows`） | 受限项（core） | 需 core 批量编码/一次 FFI；`executors/sqlite.py:43` 现为逐计划调用 |
-| 23 | 批量写吞吐偏低 | 受限项（core） | 需 core 多值 INSERT / 批量绑定 |
+| 1 | SQL 单条写命令不提交事务（P0） | **已修（本轮）** | 步骤 1–2；契约 §4.1–4.2 |
+| 2 | 归档表被重复注册（P0） | **已修（本轮）** | 步骤 3–5；契约 §4.3–4.4；基线实测复现 |
+| 3 | object/array 字段 SQL 后端不支持读写 | **应修（批 3，进入 core）** | 需 core `dialect` 落 JSON 列（MySQL JSON / PG jsonb / SQLite TEXT+JSON1）；原以"不碰 core"搁置，现解除 |
+| 4 | 关系谓词仅一级；数组/对象点号过滤被拒 | **应修（批 3，进入 core）** | 需 core CTE/嵌套 EXISTS 下推；依赖 #3 的 JSON 列 |
+| 5 | 移除了 `$pipeline` 与 `store.aggregate()` | 定位裁决（倾向：受控恢复只读逃生舱） | `pipeline/parse.rs:62-69` 现显式拒绝；是否恢复属产品边界裁决 |
+| 6 | `route_override` 无来源校验（CWE-639 面） | **应修（批 1，Host 侧）** | 在 Host 入参处加受信来源签名/上下文校验（`crud/exec.py`），不等 core；见 §10 批 1 |
+| 7 | 无 CI 测试工作流，质量门禁为零 | **已修（本轮）** | 步骤 8；新增 `ci.yml` |
+| 8 | 版本节奏带破坏性变更 | 定位裁决（倾向：维持下游适配） | py-store 侧已给下游适配路线；是否内置 semver 兼容层待你裁决 |
+| 9 | schema 是运行时 dict，无静态类型与校验 | 定位裁决（倾向：Host 侧可选 Pydantic 校验） | 原判"下游"；若你要 py-store 内置校验，可在 Host 加（批 1 可并入） |
+| 10 | 分发名 `storepy` ≠ import `py_store` ≠ 仓库名 `py-store` | **已核对（无需改）** | `README.md:18/150/519-520` 已标注；分发名受 PyPI 近似名规则限制（`release-pypi.yml:13-14`） |
+| 11 | 无迁移/DDL 引擎 | 定位裁决（倾向：维持不内置） | py-store 定位为运行时访问层；迁移接 Alembic |
+| 12 | SQL 后端索引仅元数据 | 定位裁决（倾向：维持，铁律 6） | 铁律 6：绝不写 DDL 回库；除非你要 py-store 管 schema 生命周期 |
+| 13 | 无 identity map / 变更跟踪 / 懒加载 | 定位裁决（倾向：不引入） | 属 ORM 领域，与"薄数据层"定位冲突 |
+| 14 | 无 session 级工作单元 / savepoint | **可修（批 1，Host 侧）** | `datasource.run_in_transaction` 现同源嵌套"并入外层"（`datasource.py:190-193`）；可补 `SAVEPOINT` —— 事务控制语句由执行器直发是既有先例（`executors/sqlite.py:62-73` 的 `BEGIN`/`COMMIT`），不触铁律 1 |
+| 15 | Mongo 多步写非原子 | 定位裁决（倾向：维持现状） | Mongo 事务需副本集；文档已述 |
+| 16 | 无悲观锁 API | **已具备（本轮核对）** | `execute_raw`（事务内）可 `SELECT ... FOR UPDATE`（`datasource.py:248-268`） |
+| 17 | 无查询构建器链（GQL 为字符串） | 定位裁决（倾向：不做） | GQL 字符串为既定交互面；builder 属新增能力 |
+| 18 | 后端仅 4 种；Mongo 跨库联邦上限 10 万行 | 定位裁决（倾向：上限可调，按需扩后端） | 联邦上限为 core 常量，可配置化 |
+| 19 | 权限默认 fail-open | **已具备开关（本轮核对）** | `schema.set_require_context` / `store.set_require_context`；下游须启动即开 |
+| 20 | 权限错误靠字符串前缀 `ERR_PERMISSION:` 映射 | **应修（批 2，进入 core）** | 需 core 出结构化错误码；现 `crud/exec.py:24-27` 按前缀映射，Py 侧随之改结构化读取 |
+| 21 | 角色为字符串、未归一默认放行 | **应修（批 2，进入 core）** | 需 core 显式枚举角色；与 #20 同模块，一次动 |
+| 22 | 大结果集读慢（FFI 逐行 `restore_rows`） | **应修（批 4，进入 core）** | 需 core 批量编码 / 一次 FFI；现 `executors/sqlite.py:43` 逐计划调用 |
+| 23 | 批量写吞吐偏低 | **应修（批 4，进入 core）** | 需 core 多值 INSERT / 批量绑定 |
 | 24 | 绑定层类型契约脆弱（DECIMAL/NUMERIC） | **已修（本轮复核）** | `executors/_values.py` 已归一 |
-| 25 | 覆盖率 88% 未达 90%，无分支口径 | **本轮执行** | 步骤 7–9；门禁 90% + 分支口径单独出具 |
-| 26 | E2E 用固定表名 + 破坏性 DDL，多进程互踩 | **已修复（本轮核对）** | `tests/test_real_backends_e2e.py:33`、`test_federation_e2e.py:32` 已用随机 `E2E_TOKEN` 后缀，逐实例只建/清自己的表 |
-| 27 | 测试用 `:memory:` 掩盖「不提交」缺陷 | **本轮执行** | 步骤 6：新增「落盘 + 跨连接读回」用例 |
-| 28 | 缺事务失败注入 / 边界极值 / 超深超批量载荷 | **部分本轮** | 步骤 6 覆盖「事务失败注入（回滚）」；超深/超批量载荷属受限项（后续专项） |
-| 29 | `stress/stress.py` 游离于 lint 范围（7 处） | **本轮执行** | 步骤 10–11 |
+| 25 | 覆盖率未达 90%，无分支口径 | **已修（本轮）** | 步骤 7–9；语句 92%、分支口径单独出具 |
+| 26 | E2E 固定表名 + 破坏性 DDL，多进程互踩 | **已修复（本轮核对）** | 随机 `E2E_TOKEN` 后缀 |
+| 27 | 测试用 `:memory:` 掩盖「不提交」缺陷 | **已修（本轮）** | 步骤 6：新增「落盘 + 跨连接读回」用例 |
+| 28 | 缺事务失败注入 / 边界极值 / 超深超批量载荷 | **部分已修；剩余应修（批 1，Host 侧）** | 事务失败注入已覆盖；超深/超批量载荷校验可在 Host 加 |
+| 29 | `stress/stress.py` 游离于 lint 范围（7 处） | **已修（本轮）** | 步骤 10–11 |
 
-### 待核实（本轮不涉及，改造前需实测）
+### 待核实（改造前需实测）
 - **D-07**：`$limit`/`$skip` 非数值是否校验——源码层未见校验（core `pipeline/util.rs`），需实测。
 - **D-03**：无 `idPrefix` 且无 `_id` 时的最终行为（core `command/mutate/mod.rs` 要求 `idPrefix` 非空）。
 - **MySQL/PostgreSQL 提交语义**：本轮由 CI 真实库 e2e 覆盖（步骤 8）；性能绝对值不测。
 - **下游项目 MySQL 池是否显式 `autocommit=True`**：由下游自测。
 
-### 下游适配建议（不属于本仓库执行，供「另一项目」参考路线）
+### 下游适配建议（仍适用，供「另一项目」参考路线）
 1. 锁版本 + 加 DataLayer 适配层，业务不直连 GQL/API；
 2. 启动即 `set_require_context(True)`，内部任务走 `run_as_internal`；
 3. 所有 SQL 源统一走 `transaction()` 或确保 autocommit，杜绝静默不落盘（本仓库已修 `exec_`，下游仍建议显式事务）；
 4. 迁移/DDL 交给 Alembic，py-store 只做运行时访问层；
 5. 性能分层：报表大结果读与批量 ETL 走原生 SQL / SQLAlchemy Core，高频点查 + 权限 + AI 问数走 py-store；
 6. 自建 CI 门禁并补齐测试缺口（本仓库 `ci.yml` 可作蓝本）。
+
+## 10. 突破自设规则后的重新评估（用户裁决权确立）
+
+**被撤销的自设约束**（此前据此把 18 条划为"不予执行"，现依「用户裁决权」元规则解除）：
+
+- ❌「零 parity 税」——不再作为"不碰 core"的理由；改 core 需 py/node 两端同步，属**成本告知**，非"不做"的理由。
+- ❌「本轮不碰 core」——改为"按批次进入 core"。
+- ❌「受限项 / 设计内 / 能力缺口 / 下游」——仅可用于**分类**，不得用于**终止**。
+
+**推荐执行路线（唯一，分批；每批可独立交付）**：
+
+| 批次 | 内容 | 涉及端 | 依赖 |
+|---|---|---|---|
+| 批 1 | #6 route_override 来源校验、#14 SAVEPOINT、#28 超深/超批量载荷校验（#9 若采纳亦然） | 仅 `py-store` Host 侧，零 core | 无 |
+| 批 2 | #21 角色枚举归一 → #20 结构化权限错误码（Py 侧映射同步改为结构化读取） | `rust-store/core` + py/node 两端 | 同模块一次动 |
+| 批 3 | #3 object/array 落 JSON 列 → #4 关系谓词多级下推 | `rust-store/core` + 两端 | #4 依赖 #3 |
+| 批 4 | #22 批量 FFI 编码 → #23 多值 INSERT / 批量绑定 | `rust-store/core` + 两端 | 同模块一次动 |
+| 定位裁决项 | #5 / #8 / #9 / #11 / #12 / #13 / #15 / #17 / #18 | 视裁决结果并入上列批次 | — |
+
+**影响面告知（成本，非阻拦）**：
+
+- 批 2–4 触及 `rust-store/core`（Rust），须在同一改动内同步 `py-store`（Python 绑定）+ `nodejs-store`（Node 绑定）以保 parity；发布走各仓库 tag（crates.io / PyPI / npm）。
+- 批 1 仅动 `py-store/src/py_store/**` + 测试，可独立发版（`2.1.1` 或 `2.2.0`）。
+- 本仓库（py-store）已修部分可先行发版，不必等 core 批次。
+
+**我的推进建议**：从**批 1** 起（零 core、收益确定、可独立发版），批 2–4 与定位裁决项按你的裁决结果排期。定位裁决项每条已在上表给出倾向推荐。
