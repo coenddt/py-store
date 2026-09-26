@@ -33,6 +33,7 @@ Schema 管理 — 薄适配层
 """
 
 from .core import core
+from .feedback import emit as _emit_feedback
 
 # 缓存内置 list 类型（本模块的 list() 函数会遮蔽内置名）
 _LIST_TYPES = (list, tuple)
@@ -147,9 +148,38 @@ def has(name):
     return core.has(name)
 
 
+# 去重告警签名（同一重复形态只告警一次，避免 list() 高频调用刷屏）
+_dup_signatures: set = set()
+
+
 def list():
-    """所有已注册 schema 名称（core 侧，含归档表，按注册顺序）"""
-    return core.list()
+    """所有已注册 schema 名称（core 侧，含归档表，按注册顺序；同名只保留首次出现）
+
+    去重是纵深防御的第二层：一旦检出重复即说明上游（register/core）失守，
+    去重同时 emit 告警（同签名只告警一次），禁静默。
+    """
+    names = core.list()
+    seen = set()
+    out = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    if len(out) != len(names):
+        sig = tuple(names)
+        if sig not in _dup_signatures:
+            _dup_signatures.add(sig)
+            _emit_feedback({
+                'type': 'schema_duplicate_name',
+                'code': 'schemaDuplicateName',
+                'layer': 'host',
+                'message': f'schema 注册表存在重复名（多 {len(names) - len(out)} 条），已顺序去重',
+                'hint': ('上游注册逻辑失守（core.order 同名两次）；'
+                         '核查 register 是否重复调用 core.register，或 core.register 未对同名去重'),
+                'names': names,
+            })
+    return out
 
 
 def set_require_context(require=True):
