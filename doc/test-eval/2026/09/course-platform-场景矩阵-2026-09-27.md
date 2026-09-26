@@ -2,10 +2,10 @@
 
 ## 一、环境与后端可达性
 
-- `mongodb`：可达，通过 93/93
-- `postgres`：可达，通过 93/93
-- `mysql`：可达，通过 93/93
-- `sqlite`：可达，通过 93/93
+- `mongodb`：可达，通过 95/95
+- `postgres`：可达，通过 95/95
+- `mysql`：可达，通过 95/95
+- `sqlite`：可达，通过 95/95
 
 > 本报告只出证据，不修实现。判定规则：SQL 结果集与 Mongo(oracle) 逐行相等或显式 Err/unsupported+告警；静默不一致判缺陷。
 
@@ -19,9 +19,9 @@
 | D | 7 | mongodb,postgres,mysql,sqlite | 28 | 0 | - |
 | E | 15 | mongodb,postgres,mysql,sqlite | 60 | 0 | - |
 | F | 8 | mongodb,postgres,mysql,sqlite | 32 | 0 | - |
-| G | 4 | mongodb,postgres,mysql,sqlite | 16 | 0 | - |
+| G | 5 | mongodb,postgres,mysql,sqlite | 20 | 0 | - |
 | H | 10 | mongodb,postgres,mysql,sqlite | 40 | 0 | - |
-| J | 11 | mongodb,postgres,mysql,sqlite | 44 | 0 | - |
+| J | 12 | mongodb,postgres,mysql,sqlite | 48 | 0 | - |
 
 未覆盖组：**I(联邦)** —— 本场景为单源 harness（每个后端独立进程、`default` 源），无法起双可写源；跨源联邦由 `tests/test_federation_e2e.py` 单独覆盖（I-01..I-08 对应矩阵）。
 
