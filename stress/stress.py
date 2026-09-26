@@ -25,12 +25,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from py_store import executors, init, permission, schema as _sc, store  # noqa: E402
+import aiosqlite
+import asyncmy
+import asyncpg
+from pymongo import AsyncMongoClient
 
-import aiosqlite  # noqa: E402
-import asyncmy  # noqa: E402
-import asyncpg  # noqa: E402
-from pymongo import AsyncMongoClient  # noqa: E402
+from py_store import executors, init, permission, store
+from py_store import schema as _sc
 
 
 def _arg(name, default):
@@ -258,6 +259,6 @@ async def main():
 if __name__ == '__main__':
     try:
         asyncio.run(main())
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f'[stress py-store] FAIL: {e}', file=sys.stderr)
         sys.exit(1)
