@@ -48,7 +48,16 @@ def create(db, options=None):
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
 
     async def exec_(plan):
-        return await run_stmts(plan)
+        """非事务路径：plan 成功后显式提交（aiosqlite 默认非 autocommit，
+        不提交则仅当前连接可见 —— 落盘场景会丢数据/读到幻象，且无任何告警）；
+        失败则回滚后上抛，绝不提交半截写入"""
+        try:
+            out = await run_stmts(plan)
+        except BaseException:
+            await db.rollback()
+            raise
+        await db.commit()
+        return out
 
     async def with_transaction(body):
         """事务执行：显式 BEGIN + commit/rollback（先清理遗留隐式事务，保证 BEGIN 干净）；
