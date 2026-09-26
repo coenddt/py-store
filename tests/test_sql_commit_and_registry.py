@@ -99,7 +99,9 @@ def test_generate_ddl_has_no_duplicate_table():
         'name': 'RegDdl', 'collection': 'reg_ddl', 'idPrefix': 'rd',
         'fields': {'_id': {'type': 'string'}},
     })
-    sql = store.generate_ddl('sqlite')
+    # 显式 names：core 注册表在同进程内被其它测试文件共享，全量生成会被无关 schema 干扰
+    sql = store.generate_ddl('sqlite', ['RegDdl', 'RegDdlDeleted'])
+    assert sql.count('CREATE TABLE "reg_ddl"') == 1
     assert sql.count('CREATE TABLE "reg_ddl_deleted"') == 1
 
 
