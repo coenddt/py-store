@@ -117,8 +117,32 @@ def _create_table(defn, backend):
 
 
 def generate(backend, names=None):
-    """生成 DDL 文本（多表以空行分隔）；backend ∈ mysql/postgres/sqlite"""
+    """生成 DDL 文本（多表以空行分隔）；backend ∈ mysql/postgres/sqlite
+
+    按表名去重：同名表只出一次 CREATE TABLE（防御 core 注册表出现重复名 ——
+    上游失守即告警，禁静默）。
+    """
     if backend not in _BACKENDS:
         raise ValueError(f'DDL 生成：不支持的后端 {backend!r}（支持 {list(_BACKENDS)}）')
     targets = list(names) if names else list(_list_schema())
-    return '\n\n'.join(_create_table(_get_schema(n), backend) for n in targets)
+    blocks = []
+    seen_tables = set()
+    dup = []
+    for n in targets:
+        defn = _get_schema(n)
+        table = defn.get('collection') or n
+        if table in seen_tables:
+            dup.append(table)
+            continue
+        seen_tables.add(table)
+        blocks.append(_create_table(defn, backend))
+    if dup:
+        _emit_feedback({
+            'type': 'ddl_duplicate_table',
+            'code': 'ddlDuplicateTable',
+            'layer': 'host',
+            'message': f'DDL 生成：表 {sorted(set(dup))} 重复注册，已去重',
+            'hint': 'schema 注册表出现重复名（见 schemaDuplicateName 告警）；修复注册侧根因',
+            'backend': backend,
+        })
+    return '\n\n'.join(blocks)
