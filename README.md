@@ -333,6 +333,7 @@ await store.transaction("default", transfer)
 - `store.transaction(source, fn)` opens a transaction scope on one SQL source: every `execute_raw` / CRUD call inside `fn` lands on that source's transaction connection, with `commit` / `rollback` as one unit (reuses the internal `run_in_transaction`). Mongo sources or executors without transactions run `fn` as-is — it never pretends to be atomic.
 - `store.execute_raw(source, sql, params=None, is_write=False)` runs raw SQL, bypassing GQL parsing and dialect translation. Placeholders follow each backend's native style: `?` for MySQL / SQLite, `$1..$n` for PostgreSQL. SQL sources only — a Mongo source raises `RawSqlError` (`py_store.RawSqlError` / `store.RawSqlError`).
 - `is_write=False` (default) returns `{"rows", "affectedRows"}` with the result-set rows; `is_write=True` returns the affected-row count.
+- **The non-transactional path commits explicitly**: on SQL sources, a write plan that runs outside `store.transaction` is committed by the executor (`commit` on success; `rollback` then re-raise on failure). `aiosqlite` is not autocommit by default, so without that commit the write would be visible only on the current connection while `execute_raw` still reported success — a silent data-loss hazard. Multi-statement writes that must be atomic as a group belong inside `store.transaction`.
 
 ### DDL generation
 
@@ -345,6 +346,7 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 
 - Only scalar fields become columns; `object` / `array` fields do not.
 - Every table gets the `__present` sentinel column; `timestamps` models also get `createdAt` / `updatedAt`; the `<collection>_deleted` archive table is generated like any other registered def.
+- The `<Name>Deleted` archive def is **derived by the Rust core when the model is registered**; the Python host only mirrors it (`collection` `<c>_deleted`, the `deletedAt` field, empty `idPrefix`) and never re-registers it into the core. So `schema.list()` and `generate_ddl()` contain each archive table exactly once; if a duplicate ever appears (upstream regression), they deduplicate and emit a `schemaDuplicateName` / `ddlDuplicateTable` feedback event instead of silently emitting duplicate `CREATE TABLE`s.
 - No `CREATE INDEX` is emitted — SQL backends keep indexes as metadata only.
 - MySQL `__present` is `VARCHAR(255)`; a schema whose present-token string would overflow emits a `ddlPresentOverflow` feedback event rather than failing silently.
 

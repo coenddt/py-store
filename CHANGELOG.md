@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.1 (未发布)
+
+### Bug Fixes
+
+- **SQL 非事务写路径未提交（P0）**：`sqlite` / `mysql` 执行器的非事务路径此前只执行、不提交 —— `aiosqlite` 默认非 autocommit，写入仅当前连接可见却对外报成功（静默丢数据 / 读取幻象）。现改为成功后显式 `commit`、失败先 `rollback` 再上抛，绝不提交半截写入。（`postgres` 的 `asyncpg` 在无显式事务块时逐语句隐式提交，语义已满足，不改。）
+- **归档表被重复注册（P0）**：`schema.register` 曾在建镜像后递归调用 `core.register(归档 def)`，而 core 在注册业务表时**已自动派生** `<Name>Deleted`，导致 `store.list()` 出现重复名、`generate_ddl()` 产出重复 `CREATE TABLE`。现改为 Host 仅直接写镜像、不再二次注册 core。
+- **纵深防御告警**：`schema.list()` / `ddl.generate()` 现按序去重；一旦仍检出重复（上游失守）即发出 `schemaDuplicateName` / `ddlDuplicateTable` 反馈事件（同签名只告警一次），不静默。
+
+### Tooling
+
+- 新增 `.github/workflows/ci.yml`：ruff + mypy + pytest，语句覆盖率门禁 ≥90%（分支口径单独出具）。
+- 新增回归用例 `tests/test_sql_commit_and_registry.py`（提交契约 + 归档唯一性）与覆盖率余量用例 `tests/test_coverage_margin.py`。
+- `stress/stress.py` 清理 7 处多余 `noqa` 及导入排序；lint 范围扩至 `src tests stress`。
+- `.coverage` 移出版本库并加入 `.gitignore`。
+
 ## 2.0.0 (2026-09-14)
 
 ### Breaking Changes

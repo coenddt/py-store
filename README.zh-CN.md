@@ -332,6 +332,7 @@ await store.transaction("default", transfer)
 - `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源或不支持事务的执行器会按原样执行 `fn` —— 绝不假装已原子。
 - `store.execute_raw(source, sql, params=None, is_write=False)` 执行原生 SQL，绕开 GQL 解析与方言翻译。占位符沿用各后端原生风格：MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
 - `is_write=False`（默认）返回 `{"rows", "affectedRows"}` 含结果集行；`is_write=True` 返回影响行数。
+- **非事务路径显式提交**：在 SQL 源上，`store.transaction` 之外的写命令由执行器显式提交（成功 `commit`；失败先 `rollback` 再上抛）。`aiosqlite` 默认非 autocommit，若缺少这次提交，写入只在当前连接可见、而 `execute_raw` 仍报成功 —— 是静默丢数据的隐患。需要整组原子的多语句写入，请放进 `store.transaction`。
 
 ### DDL 生成
 
@@ -344,6 +345,7 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 
 - 只有标量字段成为列；`object` / `array` 字段不建列。
 - 每张表都会获得 `__present` 哨兵列；`timestamps` 模型还会获得 `createdAt` / `updatedAt`；`<collection>_deleted` 归档表与其它已注册 def 一样生成。
+- `<Name>Deleted` 归档 def 由 **Rust core 在注册模型时自动派生**；Python Host 只补镜像（`collection` 为 `<c>_deleted`、含 `deletedAt` 字段、`idPrefix` 为空），**绝不把它再注册进 core**。因此 `schema.list()` 与 `generate_ddl()` 中每张归档表只出现一次；一旦真的出现重复（上游回归），它们会去重并发出 `schemaDuplicateName` / `ddlDuplicateTable` 反馈事件，而不是静默产出重复的 `CREATE TABLE`。
 - 不生成 `CREATE INDEX` —— SQL 后端仅把索引保留为元数据。
 - MySQL 的 `__present` 为 `VARCHAR(255)`；若某 schema 的 present 令牌串会超限，则发出 `ddlPresentOverflow` 反馈事件，而非静默失败。
 
