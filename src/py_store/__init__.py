@@ -38,7 +38,7 @@ from . import (
 from . import (
     introspect as introspect,
 )
-from .datasource import RawSqlError
+from .datasource import RawSqlError as RawSqlError
 from .sync import sync_schema
 
 
