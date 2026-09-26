@@ -15,6 +15,7 @@ import time
 
 from .. import datasource as _datasource
 from ..executors.mongo import exec_mongo as _exec_mongo
+from ..feedback import emit as _emit_feedback
 from ..permission import PermissionError, get_context
 from ..schema import get as _schema_get
 
@@ -25,6 +26,27 @@ _STEP_PH = re.compile(r'^\{\{step\.(\d+)\._id\}\}$')
 # `command/mod.rs::ERR_PERM_PREFIX`），按**前缀**映射而非具体文案 —— core 文案
 # 可自由调整，映射不随文案漂移而静默失效。构造 PermissionError 时剥离前缀。
 _PERM_PREFIX = 'ERR_PERMISSION:'
+
+# 档位类错误识别：core text2query 档门禁统一携带 `ERR_TEXT2QUERY:` 稳定前缀
+# （见 core `command/mod.rs::ERR_TEXT2QUERY`），同上按前缀映射。命中即 emit
+# 反馈事件 `profile_blocked`（自动反馈原则：允许拦截，禁止静默）。
+_PROFILE_PREFIX = 'ERR_TEXT2QUERY:'
+
+# 从 core 文案 `... [$feature]（功能收缩）` 中提取门禁项名；无 `[..]` 时留白（None），
+# 不伪造 feature —— 缺值必须显式暴露（禁静默兜底）。
+_FEATURE_RE = re.compile(r'\[(.+?)\]')
+
+
+class ProfileViolation(Exception):
+    """档位（profile）拒绝：text2query 档违反功能收缩 / 硬限制
+
+    与权限错误（``PermissionError``，403）区分：档位拒绝是**调用方合约违反**（400），
+    非授权问题（见执行文档 §4.4）。实参 ``status`` 供上层（HTTP 网关等）映射响应码。
+    """
+
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
 
 
 def set_db(db):
@@ -53,13 +75,34 @@ def _ctx():
 
 
 def _call(fn):
-    """绑定层调用包装：权限类错误（``ERR_PERMISSION:`` 前缀）映射为 PermissionError"""
+    """绑定层调用包装：
+
+      - 权限类错误（``ERR_PERMISSION:`` 前缀）→ ``PermissionError``
+      - 档位类错误（``ERR_TEXT2QUERY:`` 前缀）→ emit ``profile_blocked`` 反馈 + ``ProfileViolation``
+
+    按前缀映射而非具体文案（core 文案可自由调整，映射不随文案漂移而静默失效）。
+    其余异常原样上抛（不吞错）。
+    """
     try:
         return fn()
     except Exception as e:
         msg = str(e)
         if msg.startswith(_PERM_PREFIX):
             raise PermissionError(msg[len(_PERM_PREFIX):]) from e
+        if msg.startswith(_PROFILE_PREFIX):
+            detail = msg[len(_PROFILE_PREFIX):]
+            m = _FEATURE_RE.search(detail)
+            _emit_feedback({
+                'type': 'profile_blocked',
+                'code': 'profileBlocked',
+                'layer': 'core',
+                'profile': 'text2query',
+                'feature': m.group(1) if m else None,
+                'message': detail,
+                'hint': ('上游（LLM 产出的 GQL / 调用方入参）越界；'
+                         'text2query 档白名单见 SKILL.md §后端无关性与边界'),
+            })
+            raise ProfileViolation(detail) from e
         raise
 
 

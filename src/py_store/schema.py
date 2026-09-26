@@ -198,6 +198,20 @@ def require_context():
     return core.require_context()
 
 
+def set_profile(profile):
+    """设置查询档位：'standard'（默认，功能最大化 + 跨 DB 对齐）/
+    'text2query'（功能收缩 + 硬限制）
+
+    判决唯一在 core；未知档位由 core 抛 ValueError 上抛（禁静默回落到默认档）。
+    """
+    core.set_profile(profile)
+
+
+def get_profile():
+    """当前档位字符串（'standard' / 'text2query'）"""
+    return core.profile()
+
+
 def get_async_fn(fn_ref):
     """取 asyncFn 计算列实现（fnRef 缺省 = 计算列 key 名）"""
     return _async_fns.get(fn_ref)

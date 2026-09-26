@@ -20,6 +20,7 @@ py-store — 轻量多后端数据层（Python 版，Rust 单核心架构；支�
 """
 
 from collections.abc import Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from pymongo.errors import PyMongoError
@@ -46,6 +47,21 @@ def _build_pipeline(gql, params=None):
     """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
     return schema.core.build_pipeline(
         gql, params if params is not None else {}, permission.get_context())
+
+
+@contextmanager
+def text2query():
+    """以 text2query 档执行（功能收缩 + 硬限制），退出恢复原档位。
+
+    AI 问数链路入口；与 ``permission.scoped_roles`` 同构（token-set/reset，嵌套安全）。
+    进入档位即等效强制携带用户上下文（core `ensure_profile_ctx`，见执行文档 §4.2）。
+    """
+    prev = schema.get_profile()
+    schema.set_profile('text2query')
+    try:
+        yield
+    finally:
+        schema.set_profile(prev)
 
 
 class Store:
@@ -182,6 +198,16 @@ class Store:
     set_require_context = staticmethod(schema.set_require_context)
     requireContext = staticmethod(schema.require_context)
     require_context = staticmethod(schema.require_context)
+    # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
+    # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
+    setProfile = staticmethod(schema.set_profile)
+    set_profile = staticmethod(schema.set_profile)
+    getProfile = staticmethod(schema.get_profile)
+    get_profile = staticmethod(schema.get_profile)
+    # 档位拒绝错误（实例可被 store.ProfileViolation 捕获；权限错误另见 PermissionError）
+    ProfileViolation = crud.ProfileViolation
+    # text2query 便捷上下文（进入设档、退出恢复；同 scoped_roles 的 token-set/reset）
+    text2query = staticmethod(text2query)
     # 反馈事件通道（兜底/降级/拦截的统一出口，接入自动反馈闭环）
     setFeedbackSink = staticmethod(feedback.set_sink)
     set_feedback_sink = staticmethod(feedback.set_sink)

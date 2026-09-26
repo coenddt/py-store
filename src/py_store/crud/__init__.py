@@ -7,12 +7,13 @@ CRUD 包 —— 薄 Host 适配层（对齐 nodejs-store/src/crud.js 的分工�
   - 写入时不补默认值（DB 存最少数据）；读取时由 core 补默认值 + 计算列
 """
 
-from .exec import _get_db, set_connections, set_db
+from .exec import ProfileViolation, _get_db, set_connections, set_db
 from .mutation import mutation, upsert
 from .query import query, query_federated, query_one, query_with_count
 from .write import count, exists, insert, insert_many, remove, update, update_many
 
 __all__ = [
+    'ProfileViolation',
     '_get_db',
     'count',
     'exists',
