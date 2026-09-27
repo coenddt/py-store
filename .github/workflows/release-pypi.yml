@@ -29,19 +29,67 @@ permissions:
 
 jobs:
   # 质量门禁（m-12）：ruff / mypy / pytest 全部通过才允许 build & publish。
-  # CI 无本地外部库，需 MySQL/PG/Mongo 的 e2e 用例按测试内 skip 条件自动跳过；
-  # core 走 PyPI 发布的 rust-store-py wheel（依赖随 `pip install -e .[dev]` 安装），无需 LOCAL_CORE。
+  # 环境与 ci.yml 完全对齐（同样起 MySQL/PG/Mongo 三服务 + 装全 DB extras）：
+  #   - tests/test_scenario_course_platform.py 的 SQL 后端以 Mongo 产出的 oracle 对拍，
+  #     缺 Mongo 时 sqlite 仍可跑却拿不到 oracle → 判定失败（不是 skip）；
+  #   - tests/test_coverage_margin.py 与 tests/test_sql_commit_and_registry.py 在**收集期**
+  #     即 `import aiosqlite`，缺该依赖是 collection error 而非 skip。
+  # 故不能只装 `.[dev]`：v2.2.0 / v2.3.0 的 release-pypi 均因此全红（PyPI 停在 2.1.0）。
+  # core 走 PyPI 发布的 rust-store-py wheel（随 extras 安装），无需 LOCAL_CORE。
   test:
     name: quality gate (ruff + mypy + pytest)
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: e2e
+          MYSQL_PASSWORD: e2e123
+          MYSQL_DATABASE: mongo_store_e2e
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: e2e
+          POSTGRES_PASSWORD: e2e123
+          POSTGRES_DB: mongo_store_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -h 127.0.0.1 -U e2e"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # 必须装全 DB extras（对齐 ci.yml）：tests/test_coverage_margin.py 与
-      # tests/test_sql_commit_and_registry.py 在**收集期**即 `import aiosqlite`，
-      # 缺该依赖不是 skip 而是 collection error，会把 publish 挡死（v2.2.0 即因此未发布）。
+      # 测试用独立库（real / fed）需先建库并授权；服务镜像只创建了 mongo_store_e2e
+      - name: Prepare MySQL databases
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE IF NOT EXISTS mongo_store_e2e_real;
+            CREATE DATABASE IF NOT EXISTS mongo_store_e2e_fed;
+            GRANT ALL ON mongo_store_e2e_real.* TO 'e2e'@'%';
+            GRANT ALL ON mongo_store_e2e_fed.*  TO 'e2e'@'%';
+            FLUSH PRIVILEGES;"
+      - name: Prepare PostgreSQL databases
+        env:
+          PGPASSWORD: e2e123
+        run: |
+          psql -h 127.0.0.1 -U e2e -d postgres -c 'CREATE DATABASE mongo_store_e2e_real';
       - name: Install with dev + db extras
         run: python -m pip install -e ".[dev,mysql,postgres,sqlite]"
       - name: Ruff check

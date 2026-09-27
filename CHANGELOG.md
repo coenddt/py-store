@@ -4,11 +4,13 @@
 
 ### Bug Fixes
 
-- **发布流水线修通（release-pypi 质量门禁）**：门禁此前以 `pip install -e .[dev]` 装依赖，而
-  `tests/test_coverage_margin.py` / `tests/test_sql_commit_and_registry.py` 在**收集期**即
-  `import aiosqlite` —— 缺依赖不是 skip 而是 collection error，直接挡死 publish，导致
-  `v2.2.0` / `v2.3.0` 两次 release-pypi 全红、PyPI 最新仍停在 `2.1.0`。现改为
-  `.[dev,mysql,postgres,sqlite]`（对齐 `ci.yml`）。
+- **发布流水线修通（release-pypi 质量门禁）**：门禁环境此前与 `ci.yml` 不一致，直接挡死 publish，
+  导致 `v2.2.0` / `v2.3.0` 两次 release-pypi 全红、PyPI 最新仍停在 `2.1.0`。两处根因：
+  ① 只装 `.[dev]`，而 `tests/test_coverage_margin.py` / `tests/test_sql_commit_and_registry.py`
+  在**收集期**即 `import aiosqlite` —— 缺依赖不是 skip 而是 collection error；
+  ② 不起 MySQL / PG / Mongo 服务，而 `tests/test_scenario_course_platform.py` 的 SQL 后端以
+  Mongo 产出的 oracle 对拍，缺 Mongo 时 sqlite 仍可跑却拿不到 oracle → 直接判失败（不是 skip）。
+  现与 `ci.yml` 完全对齐：起三服务 + 建测试库 + 装 `.[dev,mysql,postgres,sqlite]`。
   本版**能力与 2.3.0 完全一致**，仅修复发布门禁；PyPI 首个 2.3.x 即本版。
 
 ## 2.3.0 (2026-09-27)
