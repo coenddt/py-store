@@ -33,6 +33,33 @@ _connections: dict = {}
 _tx_override: contextvars.ContextVar = contextvars.ContextVar(
     'py_store_tx_override', default=None)
 
+# 当前会话：优先于 _tx_override（会话内部自持事务连接）
+_current_session: contextvars.ContextVar = contextvars.ContextVar(
+    'py_store_current_session', default=None)
+
+# 写命令 kind（与 crud 侧 Command.kind 一致）
+WRITE_KINDS = frozenset({'insertOne', 'insertMany', 'updateMany', 'findOneAndUpdate', 'deleteMany'})
+
+
+def is_write_cmd(cmd):
+    """命令是否为写命令（跨源写 fail-closed 判定用）"""
+    return (cmd or {}).get('kind') in WRITE_KINDS
+
+
+class NonAtomicWriteError(RuntimeError):
+    """会话内写入了多个数据源：跨源写无法原子（fail-closed，绝不静默提交半截）"""
+
+    def __init__(self, sources):
+        self.sources = sorted(sources)
+        super().__init__(
+            '会话内写入了多个数据源（%s）：跨源写无法原子（Phase 1 未提供分布式事务）；'
+            '请拆分为多个会话，或改用单一数据源' % ', '.join(self.sources))
+
+
+def current_session():
+    """当前生效会话（无则 None）"""
+    return _current_session.get()
+
 
 class PushdownUnsupportedError(RuntimeError):
     """SQL 下推遇到无法安全翻译的组合（core 标记 unsupported）
@@ -174,15 +201,32 @@ def connection_for(source):
     return get_connection(source)
 
 
+async def resolve_connection(source, is_write=False):
+    """会话感知的连接解析：会话内返回事务覆盖，否则返回全局连接
+
+    ``crud.exec._exec_on`` 与 ``execute_raw`` 共用此入口，保证会话内命令
+    （含跨多次调用的 CRUD 与原生 SQL）落到同一事务连接。
+    """
+    session = _current_session.get()
+    if session is not None:
+        override = await session.conn_for(source, is_write)
+        if override is not None:
+            return override
+    return connection_for(source)
+
+
 async def run_in_transaction(source, fn):
     """
     事务作用域：在单个 SQL 源上以「同连接 + 同事务」执行 fn 内的全部命令
 
+      - 会话内调用：并入会话（事务边界由会话统一管理），不另开事务；
       - fn 内经 ``_exec`` 路由到该 source 的命令全部落到事务连接（commit/rollback 一体）；
       - Mongo 源 / 执行器未实现 with_transaction / 多源混合时按原样执行
         （跨源无法原子 —— 信任边界见 README「事务边界」），绝不静默假装已事务化；
       - 事务体抛错统一 rollback 后原样上抛。
     """
+    if _current_session.get() is not None:
+        return await fn()
     conn = get_connection(source)
     with_tx = conn.get('with_transaction') if isinstance(conn, Mapping) else None
     if not callable(with_tx):
@@ -249,13 +293,13 @@ async def execute_raw(source, sql, params=None, is_write=False):
     """
     在指定 SQL 源上执行原生 SQL（Host 层逃生口，绕开 core 的 dialect_translate）
 
-      - 事务作用域内经 ``connection_for`` 落到事务专用连接 → 支持 SELECT ... FOR UPDATE；
+      - 事务 / 会话作用域内经 ``resolve_connection`` 落到事务专用连接 → 支持 SELECT ... FOR UPDATE；
       - 占位符沿用各后端原生风格（mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``）；
       - 仅支持 SQL 源；Mongo 源显式报错（绝不静默）；
       - ``is_write=False`` 视为读（取行）；``True`` 视为写（取影响行数）；
       - 返回 ``{'rows': list|None, 'affectedRows': int}``。
     """
-    conn = connection_for(source)
+    conn = await resolve_connection(source, is_write=bool(is_write))
     if not is_sql(conn):
         raise RawSqlError(
             f'数据源 {source} 不是 SQL 源（原生 SQL 入口仅支持 mysql/postgres/sqlite）')
@@ -266,3 +310,188 @@ async def execute_raw(source, sql, params=None, is_write=False):
     stmt = {'text': sql, 'params': list(params or []), 'isWrite': bool(is_write)}
     out = await exec_fn({'stmts': [stmt]})
     return {'rows': out.get('rows'), 'affectedRows': int(out.get('affectedRows') or 0)}
+
+
+class Session:
+    """显式会话（工作单元）
+
+    - 惰性开事务：命令真正落到某 SQL 源时才 checkout 并 BEGIN（空会话不占连接）；
+    - Mongo 源 / 缺 open_transaction 的执行器 → 直通 + 告警一次（绝不静默）；
+    - 跨源写 fail-closed：≥2 个源发生写命令 → 退出时全部 rollback 并抛
+      NonAtomicWriteError；
+    - 嵌套会话：内层并入外层（不做保存点；SAVEPOINT 属 Phase 2）。
+    """
+
+    def __init__(self):
+        self._views = {}     # source -> {'kind','exec'} | None（None=直通）
+        self._txs = {}       # source -> 显式事务句柄
+        self._opened = []    # 开启顺序
+        self._wrote = set()  # 发生过写命令的 source
+        self._warned = set()
+        self._outer = None
+        self._token = None
+
+    # ---------- 生命周期 ----------
+
+    async def __aenter__(self):
+        parent = _current_session.get()
+        if parent is not None:
+            self._outer = parent          # 嵌套：生命周期交外层
+            return self
+        self._token = _current_session.set(self)
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._outer is not None:
+            return False
+        try:
+            if exc_type is not None:
+                await self._finalize(commit=False)
+                return False
+            if len(self._wrote) > 1:
+                await self._finalize(commit=False)
+                raise NonAtomicWriteError(self._wrote)
+            await self._finalize(commit=True)
+            return False
+        finally:
+            _current_session.reset(self._token)
+
+    async def _finalize(self, commit):
+        errors = []
+        if commit:
+            for source in self._opened:
+                try:
+                    await self._txs[source]['commit']()
+                except BaseException as exc:          # 提交失败：其余全部回滚
+                    errors.append((source, exc))
+                    for other in self._opened:
+                        if other == source:
+                            continue
+                        try:
+                            await self._txs[other]['rollback']()
+                        except BaseException as exc2:
+                            errors.append((other, exc2))
+                    break
+        else:
+            for source in reversed(self._opened):
+                try:
+                    await self._txs[source]['rollback']()
+                except BaseException as exc:
+                    errors.append((source, exc))
+        for source in self._opened:
+            try:
+                await self._txs[source]['release']()
+            except BaseException as exc:
+                errors.append((source, exc))
+        self._views.clear()
+        self._txs.clear()
+        self._opened.clear()
+        for source, exc in errors:
+            self._warn_finalize_failure(source, commit, exc)
+        if errors:
+            raise errors[0][1]
+
+    # ---------- 连接解析（供 crud.exec / execute_raw 调用） ----------
+
+    async def conn_for(self, source, is_write=False):
+        """命令落到该源时解析连接：事务视图 / None（直通，用原始连接）"""
+        if is_write:
+            self._wrote.add(source)
+        if source in self._views:
+            return self._views[source]
+        override = _tx_override.get()
+        if override and source in override and override[source].get('exec') is not None:
+            # 外层事务（run_in_transaction / 外层会话）已绑定该源 → 复用，不新开事务、不告警
+            return override[source]
+        connection = get_connection(source)
+        if isinstance(connection, Mapping) and callable(connection.get('open_transaction')):
+            tx = await connection['open_transaction']()
+            self._views[source] = {'kind': connection['kind'], 'exec': tx['exec']}
+            self._txs[source] = tx
+            self._opened.append(source)
+            return self._views[source]
+        self._views[source] = None
+        if isinstance(connection, Mapping):
+            self._warn_not_atomic(source, connection.get('kind'))
+        return None
+
+    # ---------- 告警（自动反馈：允许降级、禁止静默） ----------
+
+    def _warn_not_atomic(self, source, kind):
+        if source in self._warned:
+            return
+        self._warned.add(source)
+        _emit_feedback({
+            'type': 'session_not_atomic',
+            'code': 'sessionNotAtomic',
+            'layer': 'datasource',
+            'message': ('数据源 %s(%s) 未实现 open_transaction：'
+                        '会话内该源命令按原样执行（非原子）' % (source, kind)),
+            'hint': '为该执行器实现 open_transaction，或将该源的写命令移出会话',
+            'source': source,
+            'kind': kind,
+        })
+
+    def _warn_finalize_failure(self, source, commit, exc):
+        _emit_feedback({
+            'type': 'session_finalize_failed',
+            'code': 'sessionFinalizeFailed',
+            'layer': 'datasource',
+            'message': ('会话收尾失败（%s，数据源 %s）：%s'
+                        % ('commit' if commit else 'rollback', source, exc)),
+            'hint': '检查该数据源连接状态；rollback 失败可能意味着连接已失效',
+            'source': source,
+        })
+
+    # ---------- 会话 API（与 Store 同名同形，委托 crud） ----------
+
+    async def query(self, *a, **kw):
+        from . import crud
+        return await crud.query(*a, **kw)
+
+    async def query_one(self, *a, **kw):
+        from . import crud
+        return await crud.query_one(*a, **kw)
+
+    async def query_with_count(self, *a, **kw):
+        from . import crud
+        return await crud.query_with_count(*a, **kw)
+
+    async def insert(self, *a, **kw):
+        from . import crud
+        return await crud.insert(*a, **kw)
+
+    async def insert_many(self, *a, **kw):
+        from . import crud
+        return await crud.insert_many(*a, **kw)
+
+    async def update(self, *a, **kw):
+        from . import crud
+        return await crud.update(*a, **kw)
+
+    async def update_many(self, *a, **kw):
+        from . import crud
+        return await crud.update_many(*a, **kw)
+
+    async def upsert(self, *a, **kw):
+        from . import crud
+        return await crud.upsert(*a, **kw)
+
+    async def remove(self, *a, **kw):
+        from . import crud
+        return await crud.remove(*a, **kw)
+
+    async def exists(self, *a, **kw):
+        from . import crud
+        return await crud.exists(*a, **kw)
+
+    async def count(self, *a, **kw):
+        from . import crud
+        return await crud.count(*a, **kw)
+
+    async def mutation(self, *a, **kw):
+        from . import crud
+        return await crud.mutation(*a, **kw)
+
+    async def execute_raw(self, *a, **kw):
+        return await execute_raw(*a, **kw)
