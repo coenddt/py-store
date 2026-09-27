@@ -237,7 +237,7 @@ async def run_in_transaction(source, fn):
         return await fn()
     tx_desc = {'kind': conn['kind'], 'exec': None}
 
-    async def _body(exec_on_tx):
+    async def _body(exec_on_tx, _tx=None):
         tx_desc['exec'] = exec_on_tx
         return await fn()
 

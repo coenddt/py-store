@@ -73,7 +73,7 @@ def test_sqlite_with_transaction_rolls_back(tmp_path):
         await db.commit()
         desc = create_connection('sqlite', db)
 
-        async def body(exec_on_tx):
+        async def body(exec_on_tx, _tx=None):
             await exec_on_tx({'stmts': [{'text': "INSERT INTO t (_id) VALUES ('y')"}]})
             raise RuntimeError('boom')
 
@@ -391,6 +391,7 @@ class _MyCursor:
 
     async def execute(self, _sql, _params=None):
         self.conn.exec_count += 1
+        self.conn.executed.append(_sql)
         if self.conn.fail and self.conn.exec_count > self.conn.fail_after:
             raise RuntimeError('模拟语句失败')
 
@@ -404,6 +405,7 @@ class _MyConn:
         # 第 fail_after+1 次 execute 起失败（with_transaction 的 BEGIN 占第 1 次）
         self.fail_after = fail_after
         self.exec_count = 0
+        self.executed = []
         self.committed = 0
         self.rolled = 0
 
@@ -433,7 +435,7 @@ def test_mysql_executor_commit_and_rollback():
 
 
 def test_mysql_executor_transaction_commit_and_rollback():
-    async def body(exec_on_tx):
+    async def body(exec_on_tx, _tx=None):
         return await exec_on_tx(_WRITE_PLAN)
 
     conn = _MyConn()
@@ -493,11 +495,103 @@ def test_postgres_executor_single_connection_transaction():
     desc = pg_exec.create(conn)
     assert _run(desc['exec'](_WRITE_PLAN))['affectedRows'] == 2
 
-    async def body(exec_on_tx):
+    async def body(exec_on_tx, _tx=None):
         return await exec_on_tx(_WRITE_PLAN)
 
     assert _run(desc['with_transaction'](body))['affectedRows'] == 2
     assert len(conn.executed) == 2, '单连接事务路径应复用同一连接（不另开池连接）'
+
+
+# ─── 保存点原语：SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT ──
+
+def test_sqlite_savepoint_primitives(tmp_path):
+    """真实 aiosqlite：SAVEPOINT / ROLLBACK TO / RELEASE 行为可观测"""
+    db_path = tmp_path / 'sp.db'
+
+    async def scenario():
+        db = await aiosqlite.connect(db_path)
+        await db.execute('CREATE TABLE sp_t (_id TEXT PRIMARY KEY)')
+        await db.commit()
+        desc = create_connection('sqlite', db)
+
+        def ins(v):
+            return {'stmts': [{'text': 'INSERT INTO sp_t (_id) VALUES (?)',
+                               'params': [v], 'isWrite': True}]}
+
+        tx = await desc['open_transaction']()
+        await tx['exec'](ins('a'))
+        await tx['savepoint']('sp_1')
+        await tx['exec'](ins('b'))
+        await tx['rollback_to_savepoint']('sp_1')
+        await tx['release_savepoint']('sp_1')
+        await tx['exec'](ins('c'))
+        await tx['commit']()
+        await tx['release']()
+        await db.close()
+
+        db2 = await aiosqlite.connect(db_path)
+        try:
+            cur = await db2.execute('SELECT _id FROM sp_t ORDER BY _id')
+            rows = [r[0] for r in await cur.fetchall()]
+            await cur.close()
+        finally:
+            await db2.close()
+        return rows
+
+    assert _run(scenario()) == ['a', 'c'], '回滚到保存点后 b 不可见，保存点之后的 c 保留'
+
+
+def test_mysql_savepoint_primitives():
+    conn = _MyConn()
+    tx = _run(mysql_exec.create(conn)['open_transaction']())
+
+    async def drive():
+        await tx['savepoint']('sp_1')
+        await tx['release_savepoint']('sp_1')
+        await tx['rollback_to_savepoint']('sp_1')
+
+    _run(drive())
+    assert conn.executed == [
+        'BEGIN', 'SAVEPOINT sp_1', 'RELEASE SAVEPOINT sp_1', 'ROLLBACK TO SAVEPOINT sp_1']
+
+
+def test_postgres_savepoint_primitives():
+    conn = _PgConn()
+    tx = _run(pg_exec.create(conn)['open_transaction']())
+
+    async def drive():
+        await tx['savepoint']('sp_1')
+        await tx['release_savepoint']('sp_1')
+        await tx['rollback_to_savepoint']('sp_1')
+
+    _run(drive())
+    assert conn.executed == [
+        'SAVEPOINT sp_1', 'RELEASE SAVEPOINT sp_1', 'ROLLBACK TO SAVEPOINT sp_1']
+
+
+def test_with_transaction_passes_tx_handle_to_body(tmp_path):
+    """with_transaction 向 body 追加第二参数（事务句柄，供上层读保存点原语）"""
+    db_path = tmp_path / 'sp_handle.db'
+
+    async def scenario():
+        db = await aiosqlite.connect(db_path)
+        desc = create_connection('sqlite', db)
+        seen = {}
+
+        async def body(exec_on_tx, tx=None):
+            seen['tx'] = tx
+            return await exec_on_tx({'stmts': [{'text': 'SELECT 1', 'params': []}]})
+
+        out = await desc['with_transaction'](body)
+        await db.close()
+        return out, seen
+
+    out, seen = _run(scenario())
+    assert out is not None
+    handle = seen['tx']
+    assert callable(handle.get('savepoint')), '第二参数须为事务句柄（含保存点原语）'
+    assert callable(handle.get('release_savepoint'))
+    assert callable(handle.get('rollback_to_savepoint'))
 
 
 # ─── 嵌套事务：同源内层并入外层（不新开事务） ─────────────────
