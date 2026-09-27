@@ -18,6 +18,7 @@ Mongo 连接支持两种形态（绝不猜，按命令的 namespace 严格校验
 """
 
 import contextvars
+import weakref
 from collections.abc import Mapping
 
 from . import executors
@@ -39,6 +40,13 @@ _current_session: contextvars.ContextVar = contextvars.ContextVar(
 
 # 写命令 kind（与 crud 侧 Command.kind 一致）
 WRITE_KINDS = frozenset({'insertOne', 'insertMany', 'updateMany', 'findOneAndUpdate', 'deleteMany'})
+
+# SQL 后端 kind 白名单（Mongo 驱动实例 / Mongo 事务视图一律非 SQL）
+SQL_KINDS = frozenset({'mysql', 'postgres', 'sqlite'})
+
+_MISSING = object()
+# Mongo 事务能力缓存：client -> True/False（探测失败不写缓存，下次重探）
+_mongo_tx_cap = weakref.WeakKeyDictionary()
 
 
 def is_write_cmd(cmd):
@@ -147,6 +155,42 @@ def mongo_db(connection, source, namespace):
     return connection
 
 
+def _mongo_client_of(connection):
+    """Mongo 连接的 client：db 实例取 ``.client``；MongoClient 返回自身；其余 None"""
+    if _is_mongo_client(connection):
+        return connection
+    return getattr(connection, 'client', None)
+
+
+async def mongo_transactable(connection):
+    """探测 Mongo 部署是否支持多文档事务（四态，绝不猜；结果按 client 缓存）
+
+      - True : 支持（replica set 的 ``setName``，或 sharded 的 ``msg == 'isdbgrid'``）
+      - False: 不支持（standalone）
+      - None : 探测失败 / 无法探测（unknown；不写缓存，下次重探）
+
+    经 ``admin`` 库的 ``hello`` 命令探测（只读、幂等、驱动无关）。
+    """
+    client = _mongo_client_of(connection)
+    if client is None:
+        return None
+    cached = _mongo_tx_cap.get(client, _MISSING)
+    if cached is not _MISSING:
+        return cached
+    try:
+        hello = await client.admin.command('hello')
+    except BaseException:
+        return None
+    cap = bool(hello.get('setName')) or hello.get('msg') == 'isdbgrid'
+    _mongo_tx_cap[client] = cap
+    return cap
+
+
+def is_mongo_source(source):
+    """数据源名是否绑定 Mongo 源（非 SQL 描述符即 Mongo 驱动实例 / Mongo 事务视图）"""
+    return not is_sql(get_connection(source))
+
+
 def source_of_schema(name):
     """schema 声明的数据源名（缺省 ``default``）"""
     return _get_schema(name).get('datasource') or DEFAULT_SOURCE
@@ -183,8 +227,12 @@ def _kind_of(connection):
 
 
 def is_sql(connection):
-    """判定连接是否为 SQL 数据源描述符（Mongo 驱动实例一律视作 Mongo 源）"""
-    return _kind_of(connection) is not None
+    """判定连接是否为 SQL 数据源描述符
+
+    仅 ``kind ∈ SQL_KINDS`` 才算 SQL —— Mongo 驱动实例（``kind`` 为 None）与
+    Mongo 事务视图（``kind='mongo'``）一律非 SQL。
+    """
+    return _kind_of(connection) in SQL_KINDS
 
 
 def is_sql_source(source):
@@ -239,6 +287,23 @@ def _warn_savepoint_failed(source, name, exc):
         'hint': '检查该数据源连接与事务状态；该嵌套作用域可能未能独立回滚',
         'source': source,
         'savepoint': name,
+    })
+
+
+def _warn_mongo_unsupported(source, deployment):
+    """Mongo 部署不支持事务 → 降级按原样执行（允许降级，禁止静默）
+
+    ``deployment``: ``'standalone'``（探测为不支持）| ``'unknown'``（探测失败/无法探测）。
+    """
+    _emit_feedback({
+        'type': 'mongo_transaction_unsupported',
+        'code': 'mongoTransactionUnsupported',
+        'layer': 'datasource',
+        'deployment': deployment,
+        'message': ('数据源 %s 的 Mongo 部署不支持多文档事务（%s）：'
+                    '本次调用按原样执行（非原子）' % (source, deployment)),
+        'hint': '将 MongoDB 部署为 replica set 或 sharded cluster 以启用 session 事务；standalone 无此能力',
+        'source': source,
     })
 
 
