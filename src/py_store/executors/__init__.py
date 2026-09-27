@@ -23,6 +23,53 @@ def create_connection(kind, driver, options=None):
     return mod.create(driver, options)
 
 
+async def _noop_release():
+    """单连接形态的 release 占位（幂等 no-op，不关闭连接）"""
+    return None
+
+
+async def open_acquire(driver):
+    """显式 checkout：返回 ``(conn, release)``；``release`` 为 async 幂等函数
+
+    三形态统一（与 ``mysql.acquire`` 上下文管理器语义一致，仅改为「显式持有」）：
+      - 池且 ``acquire()`` 返回 async 上下文管理器（asyncpg）→ 显式进出取专用连接；
+      - 池且 ``acquire()`` 返回协程（asyncmy）→ await 取连接，用毕交回池；
+      - 单连接（无 ``acquire``）→ 直用 driver，release 为 no-op。
+    asyncpg / mysql 执行器的显式事务句柄均以此为基础（禁第二套 checkout 路径）。
+    """
+    acquire_fn = getattr(driver, 'acquire', None)
+    if acquire_fn is None:
+        return driver, _noop_release
+
+    got = acquire_fn()
+    if hasattr(got, '__aenter__'):
+        conn = await got.__aenter__()
+        released = False
+
+        async def release():
+            nonlocal released
+            if released:
+                return
+            released = True
+            await got.__aexit__(None, None, None)
+
+        return conn, release
+
+    conn = await got
+    released = False
+
+    async def release():
+        nonlocal released
+        if released:
+            return
+        released = True
+        release_fn = getattr(driver, 'release', None)
+        if release_fn is not None:
+            await release_fn(conn)
+
+    return conn, release
+
+
 class UpdateResult:
     """PyMongo ``UpdateResult`` 的最小等价物（SQL 路径回喂给 ``crud/write.py``）"""
 
@@ -84,6 +131,7 @@ __all__ = [
     'create_connection',
     'mongo',
     'mysql',
+    'open_acquire',
     'postgres',
     'shape_result',
     'sqlite',
