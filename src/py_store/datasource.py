@@ -295,8 +295,10 @@ async def run_in_transaction(source, fn):
         外层可继续）；句柄无保存点原语则降级并入外层发 nested_savepoint_unsupported；
       - 事务体抛错统一 rollback 后原样上抛。
     """
-    if _current_session.get() is not None:
-        return await fn()
+    session = _current_session.get()
+    if session is not None:
+        # 会话内：事务边界由会话统一管理；本层作为嵌套作用域开保存点（失败只回滚本层）
+        return await session.nested_scope(fn)
     conn = get_connection(source)
     with_tx = conn.get('with_transaction') if isinstance(conn, Mapping) else None
     if not callable(with_tx):
@@ -390,30 +392,38 @@ class Session:
     - Mongo 源 / 缺 open_transaction 的执行器 → 直通 + 告警一次（绝不静默）；
     - 跨源写 fail-closed：≥2 个源发生写命令 → 退出时全部 rollback 并抛
       NonAtomicWriteError；
-    - 嵌套会话：内层并入外层（不做保存点；SAVEPOINT 属 Phase 2）。
+    - 嵌套会话 / 会话内 transaction：作为嵌套作用域在已有事务上开保存点
+      （内层失败只回滚本层；SAVEPOINT 名字形如 sp_<n>）。
     """
 
     def __init__(self):
-        self._views = {}     # source -> {'kind','exec'} | None（None=直通）
+        self._views = {}     # source -> {'kind','exec','tx'} | None（None=直通）
         self._txs = {}       # source -> 显式事务句柄
         self._opened = []    # 开启顺序
         self._wrote = set()  # 发生过写命令的 source
         self._warned = set()
         self._outer = None
         self._token = None
+        self._scopes = []        # 嵌套作用域栈（仅最外层会话持有）
+        self._sp_seq = 0         # 保存点命名序号（sp_<n>）
+        self._sp_warned = set()  # 无保存点原语的告警去重
+        self._scope = None       # 本内层会话对应的作用域（嵌套时）
 
     # ---------- 生命周期 ----------
 
     async def __aenter__(self):
         parent = _current_session.get()
         if parent is not None:
-            self._outer = parent          # 嵌套：生命周期交外层
+            self._outer = parent                 # 嵌套：生命周期交外层
+            self._scope = parent.push_scope()    # 内层作用域在已有事务上开保存点
             return self
         self._token = _current_session.set(self)
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         if self._outer is not None:
+            # 嵌套：只收束本层（失败回滚到本层保存点），生命周期仍交外层
+            await self._outer.pop_scope(self._scope, rollback=exc_type is not None)
             return False
         try:
             if exc_type is not None:
@@ -465,11 +475,21 @@ class Session:
     # ---------- 连接解析（供 crud.exec / execute_raw 调用） ----------
 
     async def conn_for(self, source, is_write=False):
-        """命令落到该源时解析连接：事务视图 / None（直通，用原始连接）"""
+        """命令落到该源时解析连接：事务视图 / None（直通，用原始连接）
+
+        嵌套作用域内首次**写**某源时，在该事务连接上开保存点（惰性，只读不开）。
+        """
         if is_write:
             self._wrote.add(source)
-        if source in self._views:
-            return self._views[source]
+        if source not in self._views:
+            self._views[source] = await self._open_view(source)
+        view = self._views[source]
+        if is_write and self._scopes:
+            await self._scope_savepoints(source, view)
+        return view
+
+    async def _open_view(self, source):
+        """解析并缓存该源的事务视图；返回 ``{'kind','exec','tx'}`` 或 None（直通）"""
         override = _tx_override.get()
         if override and source in override and override[source].get('exec') is not None:
             # 外层事务（run_in_transaction / 外层会话）已绑定该源 → 复用，不新开事务、不告警
@@ -477,14 +497,71 @@ class Session:
         connection = get_connection(source)
         if isinstance(connection, Mapping) and callable(connection.get('open_transaction')):
             tx = await connection['open_transaction']()
-            self._views[source] = {'kind': connection['kind'], 'exec': tx['exec']}
             self._txs[source] = tx
             self._opened.append(source)
-            return self._views[source]
-        self._views[source] = None
+            return {'kind': connection['kind'], 'exec': tx['exec'], 'tx': tx}
         if isinstance(connection, Mapping):
             self._warn_not_atomic(source, connection.get('kind'))
         return None
+
+    # ---------- 嵌套作用域（嵌套会话 / 会话内 transaction） ----------
+
+    def push_scope(self):
+        """进入嵌套作用域（内层 session / 会话内 transaction）"""
+        scope = {'savepoints': {}, 'txs': {}}
+        self._scopes.append(scope)
+        return scope
+
+    async def pop_scope(self, scope, rollback):
+        """退出嵌套作用域：按成败回滚到保存点或释放（失败发反馈，不掩盖原异常）"""
+        try:
+            for source in reversed(list(scope['savepoints'])):
+                name = scope['savepoints'][source]
+                if name is None:
+                    continue
+                tx = scope['txs'][source]
+                try:
+                    if rollback:
+                        await tx['rollback_to_savepoint'](name)
+                    await tx['release_savepoint'](name)
+                except BaseException as exc:
+                    _warn_savepoint_failed(source, name, exc)
+        finally:
+            # 按身份（is）移出本层，避免同内容的空作用域按值误删外层
+            self._scopes[:] = [s for s in self._scopes if s is not scope]
+
+    async def nested_scope(self, fn):
+        """会话内以嵌套作用域执行 fn（保存点隔离；失败只回滚本层）"""
+        scope = self.push_scope()
+        try:
+            out = await fn()
+        except BaseException:
+            await self.pop_scope(scope, rollback=True)
+            raise
+        await self.pop_scope(scope, rollback=False)
+        return out
+
+    async def _scope_savepoints(self, source, view):
+        """嵌套作用域首次写到某源时开保存点（惰性；句柄无原语 → 降级 + 告警一次）"""
+        tx = view.get('tx') if isinstance(view, Mapping) else None
+        for scope in self._scopes:
+            if source in scope['savepoints']:
+                continue
+            if tx is None or not callable(tx.get('savepoint')):
+                self._warn_scope_no_savepoint(source)
+                scope['savepoints'][source] = None
+                continue
+            self._sp_seq += 1
+            name = 'sp_%d' % self._sp_seq
+            await tx['savepoint'](name)     # 创建失败直接上抛（可见错误）
+            scope['savepoints'][source] = name
+            scope['txs'][source] = tx
+
+    def _warn_scope_no_savepoint(self, source):
+        if source in self._sp_warned:
+            return
+        self._sp_warned.add(source)
+        _warn_savepoint_unavailable(source)
 
     # ---------- 告警（自动反馈：允许降级、禁止静默） ----------
 
