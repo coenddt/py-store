@@ -1,9 +1,8 @@
 """写路径 —— 单条/批量插入、更新、删除归档、存在性与计数"""
 
-from .. import datasource as _datasource
 from ..schema import core as _core
 from ..schema import get as _get_schema
-from .exec import _call, _ctx, _exec, _now_for
+from .exec import _call, _ctx, _exec, _now_for, _sources_of, run_atomic
 from .id import _generate_id
 
 
@@ -52,12 +51,27 @@ async def update(schema_name, condition, data, options=None, route_override=None
 
     data 的 key 以 '$' 开头 → 原生 MongoDB 操作符（$set/$inc/$unset 等）直接透传。
     否则自动包装为 $set 模式。``route_override`` 可选（多租户路由）。
+
+    「权限探针 + 写」整体纳入同一原子作用域（``run_atomic``）：单一 SQL 源时探针与写
+    同连接同事务，消除二者之间的并发窗口；``now`` 只取一次，两次规划共用（调用级确定性）。
     """
-    out = await _plan_with_probe(lambda found, doc: _call(lambda: _core.plan_update(
-        schema_name, condition, data, options, _now_for(schema_name), _ctx(), found, doc,
-        route_override)))
-    result = await _exec(out['command'])
-    return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
+    now = _now_for(schema_name)
+    ctx = _ctx()
+    first = _call(lambda: _core.plan_update(
+        schema_name, condition, data, options, now, ctx, None, None, route_override))
+    sources = _sources_of(first)
+
+    async def _do():
+        out = first
+        if out.get('needsProbe'):
+            probe_doc = await _exec(out['needsProbe'])
+            out = _call(lambda: _core.plan_update(
+                schema_name, condition, data, options, now, ctx,
+                probe_doc is not None, probe_doc, route_override))
+        result = await _exec(out['command'])
+        return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
+
+    return await run_atomic(sources, _do)
 
 
 async def update_many(schema_name, condition, data, route_override=None):
@@ -88,14 +102,8 @@ async def remove(schema_name, condition, route_override=None):
         result = await _exec(out['deleteCommand'])
         return {'deletedCount': result.deleted_count, 'archivedCount': archived_count}
 
-    sources = {out['deleteCommand'].get('source') or _datasource.DEFAULT_SOURCE}
-    if out.get('findCommand'):
-        sources.add(out['findCommand'].get('source') or _datasource.DEFAULT_SOURCE)
-    if len(sources) == 1:
-        source = next(iter(sources))
-        if _datasource.is_sql_source(source):
-            return await _datasource.run_in_transaction(source, _do_remove)
-    return await _do_remove()
+    sources = _sources_of(out)
+    return await run_atomic(sources, _do_remove)
 
 
 async def exists(schema_name, condition, route_override=None):
