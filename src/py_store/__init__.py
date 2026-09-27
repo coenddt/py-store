@@ -255,8 +255,17 @@ async def _create_indexes_if_needed():
 
                 await coll.create_index(list(keys.items()), **final_options)
             except PyMongoError as e:
-                import sys
-                print(f'[py-store] 创建索引失败 {s["collection"]}: {e}', file=sys.stderr)
+                # 索引创建失败不阻塞 init（辅助动作），但必须走统一反馈通道：
+                # 无 sink 时由 feedback 默认落 stderr（不双份打印），宿主可 set_sink 接管。
+                # 对齐 nodejs-store/src/index.js（评审项 R7-m1）。
+                feedback.emit({
+                    'type': 'index_create_failed',
+                    'code': 'indexCreateFailed',
+                    'layer': 'host',
+                    'message': f'创建索引失败 {s["collection"]}: {e}',
+                    'hint': ('检查该集合的索引定义与连接权限；'
+                             '索引缺失不影响读写，相关查询将退化为全表扫描'),
+                })
 
 
 async def init(connections):
