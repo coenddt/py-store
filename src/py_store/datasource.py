@@ -215,6 +215,74 @@ async def resolve_connection(source, is_write=False):
     return connection_for(source)
 
 
+def _warn_savepoint_unavailable(source):
+    """嵌套作用域无保存点原语 → 降级并入外层（允许降级，禁止静默）"""
+    _emit_feedback({
+        'type': 'nested_savepoint_unsupported',
+        'code': 'nestedSavepointUnsupported',
+        'layer': 'datasource',
+        'message': ('数据源 %s 的事务句柄未提供保存点原语：嵌套作用域并入外层'
+                    '（该层失败将回滚整个外层事务）' % source),
+        'hint': ('为执行器 open_transaction 句柄补 '
+                 'savepoint / release_savepoint / rollback_to_savepoint'),
+        'source': source,
+    })
+
+
+def _warn_savepoint_failed(source, name, exc):
+    """错误路径保存点回滚 / 释放失败：发反馈，绝不掩盖原始错误"""
+    _emit_feedback({
+        'type': 'savepoint_failed',
+        'code': 'savepointFailed',
+        'layer': 'datasource',
+        'message': '保存点回滚/释放失败（%s，数据源 %s）：%s' % (name, source, exc),
+        'hint': '检查该数据源连接与事务状态；该嵌套作用域可能未能独立回滚',
+        'source': source,
+        'savepoint': name,
+    })
+
+
+async def _rollback_savepoint(tx, source, name):
+    """回滚到保存点并释放；任一失败发 savepoint_failed（不掩盖原始错误）"""
+    errors = []
+    for op in ('rollback_to_savepoint', 'release_savepoint'):
+        try:
+            await tx[op](name)
+        except BaseException as exc:
+            errors.append(exc)
+    if errors:
+        _warn_savepoint_failed(source, name, errors[0])
+
+
+async def _nested_savepoint_scope(source, outer, fn):
+    """同源嵌套事务作用域：在已持有的事务连接上开保存点
+
+      - 外层句柄无 ``savepoint`` 原语 → 降级并入外层（同一外层作用域只告警一次）；
+      - 成功 ``RELEASE``；失败 ``ROLLBACK TO`` + ``RELEASE`` 后原样上抛（外层可继续）。
+    """
+    tx = outer.get('tx')
+    open_sp = tx.get('savepoint') if isinstance(tx, Mapping) else None
+    if not callable(open_sp):
+        if not outer.get('sp_warned'):
+            outer['sp_warned'] = True
+            _warn_savepoint_unavailable(source)
+        return await fn()
+    depth = int(outer.get('sp_depth') or 0) + 1
+    outer['sp_depth'] = depth
+    name = 'sp_%d' % depth
+    await open_sp(name)          # 创建失败直接上抛（保存点不存在，无需回滚）
+    try:
+        out = await fn()
+    except BaseException:
+        await _rollback_savepoint(tx, source, name)
+        raise
+    else:
+        await tx['release_savepoint'](name)
+        return out
+    finally:
+        outer['sp_depth'] = depth - 1
+
+
 async def run_in_transaction(source, fn):
     """
     事务作用域：在单个 SQL 源上以「同连接 + 同事务」执行 fn 内的全部命令
@@ -223,6 +291,8 @@ async def run_in_transaction(source, fn):
       - fn 内经 ``_exec`` 路由到该 source 的命令全部落到事务连接（commit/rollback 一体）；
       - Mongo 源 / 执行器未实现 with_transaction / 多源混合时按原样执行
         （跨源无法原子 —— 信任边界见 README「事务边界」），绝不静默假装已事务化；
+      - 同源嵌套：在已持有的事务连接上开 SAVEPOINT ``sp_<n>``（内层失败 ROLLBACK TO 本层，
+        外层可继续）；句柄无保存点原语则降级并入外层发 nested_savepoint_unsupported；
       - 事务体抛错统一 rollback 后原样上抛。
     """
     if _current_session.get() is not None:
@@ -233,12 +303,13 @@ async def run_in_transaction(source, fn):
         return await fn()
     parent = _tx_override.get() or {}
     if source in parent:
-        # 同源嵌套事务：外层已持有该源的事务连接，内层并入外层（不做保存点）
-        return await fn()
-    tx_desc = {'kind': conn['kind'], 'exec': None}
+        # 同源嵌套事务：在已持有的事务连接上开保存点（内层失败只回滚本层，外层可继续）
+        return await _nested_savepoint_scope(source, parent[source], fn)
+    tx_desc = {'kind': conn['kind'], 'exec': None, 'tx': None}
 
-    async def _body(exec_on_tx, _tx=None):
+    async def _body(exec_on_tx, tx=None):
         tx_desc['exec'] = exec_on_tx
+        tx_desc['tx'] = tx
         return await fn()
 
     token = _tx_override.set({**parent, source: tx_desc})
