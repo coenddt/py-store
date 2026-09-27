@@ -113,8 +113,8 @@ def _call(fn):
 
 async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
-    事务作用域内经 datasource.connection_for 落到事务专用连接）"""
-    connection = _datasource.connection_for(source)
+    事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
+    connection = await _datasource.resolve_connection(source, _datasource.is_write_cmd(cmd))
     db = _datasource.mongo_db(connection, source, cmd.get('namespace'))
     if db is not None:
         return await _exec_mongo(db, cmd)
