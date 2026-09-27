@@ -59,17 +59,52 @@ def create(db, options=None):
         await db.commit()
         return out
 
-    async def with_transaction(body):
-        """事务执行：显式 BEGIN + commit/rollback（先清理遗留隐式事务，保证 BEGIN 干净）；
-        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+    async def open_transaction():
+        """显式事务句柄（aiosqlite 单连接）
+
+        - 进入前先 ``commit()`` 清理遗留隐式事务（与既有 ``with_transaction`` 一致）；
+        - ``commit`` / ``rollback`` 幂等；``release`` 为 no-op（单连接不归还）。
+        """
         await db.commit()
         await db.execute('BEGIN')
-        try:
-            out = await body(run_stmts)
+        closed = False
+
+        async def commit():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
             await db.commit()
+
+        async def rollback():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await db.rollback()
+
+        async def release():
+            return None
+
+        return {'exec': run_stmts, 'commit': commit, 'rollback': rollback, 'release': release}
+
+    async def with_transaction(body):
+        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
+        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+        tx = await open_transaction()
+        try:
+            out = await body(tx['exec'])
+            await tx['commit']()
             return out
         except BaseException:
-            await db.rollback()
+            await tx['rollback']()
             raise
+        finally:
+            await tx['release']()
 
-    return {'kind': 'sqlite', 'exec': exec_, 'with_transaction': with_transaction}
+    return {
+        'kind': 'sqlite',
+        'exec': exec_,
+        'with_transaction': with_transaction,
+        'open_transaction': open_transaction,
+    }
