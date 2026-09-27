@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.0 (未发布)
+## 2.3.0 (2026-09-27)
 
 ### New Features
 
@@ -25,7 +25,22 @@
 - **根级 `$pipeline` 按档分流**：`standard` 档放行（Mongo 源可用；SQL 源逐阶段翻译、无法映射即
   `PushdownUnsupportedError`），`text2query` 档 `ProfileViolation`；`$out` / `$merge` 写副作用阶段两档均拒。
 
-## 2.1.1 (未发布)
+### Bug Fixes
+
+- **索引创建失败改走统一反馈通道（对齐 nodejs-store，评审项 R7-m1）**：`init()` 建索引失败此前直接
+  `print` 到 stderr —— 宿主 `set_sink` 无法接管，且绕过了统一反馈通道。现改为
+  `feedback.emit({'type': 'index_create_failed', ...})`（无 sink 时仍由 feedback 默认落 stderr，
+  不双份打印）。索引创建失败依旧不阻塞 `init`，语义不变。
+
+### Tooling
+
+- 新增 `tests/test_host_paths.py`：两阶段读路径（取 ID → 回表 → 还原排序）、联邦降级告警、
+  `init` 入参校验等 Host 执行路径补测。
+- `tests/test_coverage_margin.py` 扩充：原生核心加载器（生产禁从相邻仓库兜底）、数据源路由守卫、
+  MySQL / PG / Mongo 执行器守卫与事务提交回滚、introspection 后端分发、DDL 边界、权限包装、
+  嵌套同源事务并入等此前未覆盖分支。
+
+## 2.2.0 (2026-09-27)
 
 ### Bug Fixes
 
