@@ -144,11 +144,27 @@ def _sources_of(plan):
     return out or {_datasource.DEFAULT_SOURCE}
 
 
+def _warn_multi_source(sources):
+    """多源写：无法原子 → 程序化声明 nonAtomic（允许顺序执行，禁止静默）"""
+    listed = sorted(sources)
+    _emit_feedback({
+        'type': 'non_atomic_write',
+        'code': 'nonAtomic',
+        'layer': 'crud',
+        'message': ('本次写调用跨 %d 个数据源（%s）：无法原子，按顺序执行（非原子）'
+                    % (len(listed), ', '.join(listed))),
+        'hint': '把写操作收敛到单源；或在 store.session() 内执行以便跨源写被拒（fail-closed）',
+        'sources': listed,
+    })
+
+
 async def run_atomic(sources, fn):
     """顶层 API 调用的原子包络：无会话 + 单一 SQL 源 → 包事务；否则原样执行
 
     - 会话内：事务边界由会话统一管理，直接执行（不嵌套）；
-    - 多源 / Mongo 源 / 未配置源：按原样执行（跨源无法原子，绝不静默假装）；
+    - 单一 SQL 源：包事务（原子）；
+    - 多源：无法原子 → 程序化声明 ``nonAtomic``（反馈通道），再按顺序原样执行；
+    - 单一 Mongo 源 / 未配置源：按原样执行（单源 Mongo 事务属 Phase 3，不在此声明）；
     - sources 由调用方从「规划结果」中提取（``_sources_of``），命令源与事务源一致。
     """
     if _datasource.current_session() is not None:
@@ -158,6 +174,8 @@ async def run_atomic(sources, fn):
         source = next(iter(uniq))
         if _datasource.has_connection(source) and _datasource.is_sql_source(source):
             return await _datasource.run_in_transaction(source, fn)
+    elif len(uniq) > 1:
+        _warn_multi_source(uniq)
     return await fn()
 
 
