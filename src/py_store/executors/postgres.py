@@ -44,14 +44,57 @@ def create(driver, options=None):
     async def exec_(plan):
         return await run_stmts(driver, plan)
 
-    async def with_transaction(body):
-        """事务执行：pool → acquire 专用连接 + ``conn.transaction()``；单连接直接用；
-        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
-        if hasattr(driver, 'acquire'):
-            async with driver.acquire() as conn:
-                async with conn.transaction():
-                    return await body(lambda plan: run_stmts(conn, plan))
-        async with driver.transaction():
-            return await body(lambda plan: run_stmts(driver, plan))
+    async def open_transaction():
+        """显式事务句柄（asyncpg）
 
-    return {'kind': 'postgres', 'exec': exec_, 'with_transaction': with_transaction}
+        必须用 ``conn.transaction()`` 的显式 ``start/commit/rollback``；
+        asyncpg 不允许手写 BEGIN/COMMIT 与 ``transaction()`` 混用。
+        """
+        from . import open_acquire  # 延迟导入：避免与包 __init__ 相互导入
+
+        conn, release = await open_acquire(driver)
+        tx = conn.transaction()
+        await tx.start()
+        closed = False
+
+        async def commit():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await tx.commit()
+
+        async def rollback():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await tx.rollback()
+
+        return {
+            'exec': lambda plan: run_stmts(conn, plan),
+            'commit': commit,
+            'rollback': rollback,
+            'release': release,
+        }
+
+    async def with_transaction(body):
+        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
+        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+        tx = await open_transaction()
+        try:
+            out = await body(tx['exec'])
+            await tx['commit']()
+            return out
+        except BaseException:
+            await tx['rollback']()
+            raise
+        finally:
+            await tx['release']()
+
+    return {
+        'kind': 'postgres',
+        'exec': exec_,
+        'with_transaction': with_transaction,
+        'open_transaction': open_transaction,
+    }

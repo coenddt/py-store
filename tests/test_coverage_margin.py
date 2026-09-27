@@ -447,6 +447,23 @@ def test_mysql_executor_transaction_commit_and_rollback():
 
 
 class _PgTx:
+    """asyncpg ``Transaction`` 桩：显式 start/commit/rollback（另保留上下文管理器形态）"""
+
+    def __init__(self):
+        self.started = 0
+        self.committed = 0
+        self.rolled = 0
+
+    async def start(self):
+        self.started += 1
+        return self
+
+    async def commit(self):
+        self.committed += 1
+
+    async def rollback(self):
+        self.rolled += 1
+
     async def __aenter__(self):
         return self
 
