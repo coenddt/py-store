@@ -71,19 +71,33 @@ def create(driver, options=None):
             closed = True
             await tx.rollback()
 
+        async def savepoint(name):
+            """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
+            await conn.execute('SAVEPOINT %s' % name)
+
+        async def release_savepoint(name):
+            await conn.execute('RELEASE SAVEPOINT %s' % name)
+
+        async def rollback_to_savepoint(name):
+            await conn.execute('ROLLBACK TO SAVEPOINT %s' % name)
+
         return {
             'exec': lambda plan: run_stmts(conn, plan),
             'commit': commit,
             'rollback': rollback,
             'release': release,
+            'savepoint': savepoint,
+            'release_savepoint': release_savepoint,
+            'rollback_to_savepoint': rollback_to_savepoint,
         }
 
     async def with_transaction(body):
         """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
-        body(execute_on_tx) 的全部 plan 落在同一事务，任一失败整体回滚"""
+        body(execute_on_tx, tx=None) 的全部 plan 落在同一事务，任一失败整体回滚。
+        第二参数为事务句柄（供上层读保存点原语），可选——旧单参写法继续可用"""
         tx = await open_transaction()
         try:
-            out = await body(tx['exec'])
+            out = await body(tx['exec'], tx)
             await tx['commit']()
             return out
         except BaseException:
