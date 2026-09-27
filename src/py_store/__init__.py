@@ -39,7 +39,9 @@ from . import (
 from . import (
     introspect as introspect,
 )
+from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
+from .datasource import Session as Session
 from .sync import sync_schema
 
 
@@ -147,6 +149,21 @@ class Store:
         单源场景 source 传 ``'default'``。
         """
         return await datasource.run_in_transaction(source, fn)
+
+    def session(self):
+        """会话（工作单元）：``async with`` 语法，退出统一提交 / 异常统一回滚
+
+        用法::
+
+            async with store.session() as s:
+                await s.insert('Order', {...})
+                await s.update('Account', cond, {...})
+                await s.execute_raw('pg_main', 'SELECT ... FOR UPDATE', [1])
+
+        约束：同一会话内写命令只允许落在**单一数据源**；跨源写退出时抛
+        ``NonAtomicWriteError``（先全部回滚，绝不提交半截）。
+        """
+        return Session()
 
     async def execute_raw(self, source: str, sql: str, params: list | None = None,
                           is_write: bool = False) -> dict[str, Any]:
