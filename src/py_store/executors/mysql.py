@@ -108,18 +108,57 @@ def create(driver, options=None):
             await conn.commit()
             return out
 
-    async def with_transaction(body):
-        """事务执行：显式 BEGIN + commit/rollback（对 autocommit 任意配置均确定成立）；
-        body(execute_on_tx) 的全部 plan 落在同一连接同一事务，任一失败整体回滚"""
-        async with acquire(driver) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute('BEGIN')
-            try:
-                out = await body(lambda plan: run_stmts(conn, plan))
-                await conn.commit()
-                return out
-            except BaseException:
-                await conn.rollback()
-                raise
+    async def open_transaction():
+        """显式事务句柄（asyncmy）
 
-    return {'kind': 'mysql', 'exec': exec_, 'with_transaction': with_transaction}
+        池形态经 ``open_acquire`` checkout 专用连接后 ``BEGIN``，
+        commit/rollback 后由 release 归还连接。
+        """
+        from . import open_acquire  # 延迟导入：避免与包 __init__ 相互导入
+
+        conn, release = await open_acquire(driver)
+        async with conn.cursor() as cur:
+            await cur.execute('BEGIN')
+        closed = False
+
+        async def commit():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await conn.commit()
+
+        async def rollback():
+            nonlocal closed
+            if closed:
+                return
+            closed = True
+            await conn.rollback()
+
+        return {
+            'exec': lambda plan: run_stmts(conn, plan),
+            'commit': commit,
+            'rollback': rollback,
+            'release': release,
+        }
+
+    async def with_transaction(body):
+        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
+        body(execute_on_tx) 的全部 plan 落在同一连接同一事务，任一失败整体回滚"""
+        tx = await open_transaction()
+        try:
+            out = await body(tx['exec'])
+            await tx['commit']()
+            return out
+        except BaseException:
+            await tx['rollback']()
+            raise
+        finally:
+            await tx['release']()
+
+    return {
+        'kind': 'mysql',
+        'exec': exec_,
+        'with_transaction': with_transaction,
+        'open_transaction': open_transaction,
+    }
