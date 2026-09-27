@@ -161,7 +161,7 @@ def create(driver, options=None):
     async def with_transaction(body):
         """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
         body(execute_on_tx, tx=None) 的全部 plan 落在同一连接同一事务，任一失败整体回滚。
-        第二参数为事务句柄（供上层读保存点原语），可选——旧单参写法继续可用"""
+        第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数"""
         tx = await open_transaction()
         try:
             out = await body(tx['exec'], tx)

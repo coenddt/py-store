@@ -330,7 +330,7 @@ async def transfer():
 await store.transaction("default", transfer)
 ```
 
-- `store.transaction(source, fn)` opens a transaction scope on one SQL source: every `execute_raw` / CRUD call inside `fn` lands on that source's transaction connection, with `commit` / `rollback` as one unit (reuses the internal `run_in_transaction`). Mongo sources or executors without transactions run `fn` as-is — it never pretends to be atomic.
+- `store.transaction(source, fn)` opens a transaction scope on one SQL source: every `execute_raw` / CRUD call inside `fn` lands on that source's transaction connection, with `commit` / `rollback` as one unit (reuses the internal `run_in_transaction`). Mongo sources or executors without transactions run `fn` as-is — it never pretends to be atomic. A nested same-source transaction opens a savepoint (an inner failure rolls back only that scope); without savepoint primitives it degrades by joining the outer transaction and emits `nested_savepoint_unsupported`.
 - `store.execute_raw(source, sql, params=None, is_write=False)` runs raw SQL, bypassing GQL parsing and dialect translation. Placeholders follow each backend's native style: `?` for MySQL / SQLite, `$1..$n` for PostgreSQL. SQL sources only — a Mongo source raises `RawSqlError` (`py_store.RawSqlError` / `store.RawSqlError`).
 - `is_write=False` (default) returns `{"rows", "affectedRows"}` with the result-set rows; `is_write=True` returns the affected-row count.
 - **The non-transactional path commits explicitly**: on SQL sources, a write plan that runs outside `store.transaction` is committed by the executor (`commit` on success; `rollback` then re-raise on failure). `aiosqlite` is not autocommit by default, so without that commit the write would be visible only on the current connection while `execute_raw` still reported success — a silent data-loss hazard. Multi-statement writes that must be atomic as a group belong inside `store.transaction`.
@@ -348,7 +348,7 @@ async with store.session() as s:
 - **Lazy transaction start**: a session with no commands never checks out a connection.
 - **Cross-source writes fail closed**: if a session writes to ≥2 datasources, it rolls everything back and raises `NonAtomicWriteError` on exit (no distributed transaction — it never commits a half-done unit of work).
 - Mongo sources run as-is inside a session (non-atomic) and emit one `session_not_atomic` feedback event.
-- Sessions nest: an inner session joins the outer one, with no savepoints (SAVEPOINT is planned for a later version).
+- Sessions nest: an inner scope opens a savepoint (`SAVEPOINT sp_<n>`) on the outer transaction and, on exit, `RELEASE`s it (success) or `ROLLBACK TO`s and releases it (failure) — **an inner failure rolls back only the inner scope while the outer one continues**. When the transaction handle has no savepoint primitives, the nested scope degrades by joining the outer one and emits one `nested_savepoint_unsupported` feedback event.
 
 ### DDL generation
 
@@ -495,7 +495,7 @@ Boundary rules worth knowing up front (all **fail explicitly**, never silently d
 | Scenario | Atomicity |
 |---|---|
 | Single-command API (`insert` / `insert_many` / `update_many` / `upsert` / `remove` / `count` / `exists`) | Naturally atomic within one SQL source (a single statement); single documents are atomic on Mongo |
-| `store.transaction(source, fn)` | Atomic within one SQL source: every command in the scope shares one connection and one transaction |
+| `store.transaction(source, fn)` | Atomic within one SQL source: every command in the scope shares one connection and one transaction; nested same-source scopes use a savepoint (an inner failure rolls back only that scope) |
 | `store.session(...)` | Atomic **across multiple calls** on one SQL source inside the session; cross-source writes are rejected explicitly (`NonAtomicWriteError`) |
 | Cross-source multi-write without a session | Not atomic (no 2PC / Saga), executed datasource by datasource, and declares `nonAtomic` via the feedback channel (event `non_atomic_write`, with the sources) |
 | Multi-step writes on Mongo | Not atomic (Mongo transactions are planned for a later version) |
