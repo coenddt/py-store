@@ -39,8 +39,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install with dev extras
-        run: python -m pip install -e .[dev]
+      # 必须装全 DB extras（对齐 ci.yml）：tests/test_coverage_margin.py 与
+      # tests/test_sql_commit_and_registry.py 在**收集期**即 `import aiosqlite`，
+      # 缺该依赖不是 skip 而是 collection error，会把 publish 挡死（v2.2.0 即因此未发布）。
+      - name: Install with dev + db extras
+        run: python -m pip install -e ".[dev,mysql,postgres,sqlite]"
       - name: Ruff check
         run: python -m ruff check src tests stress
       - name: Mypy check
