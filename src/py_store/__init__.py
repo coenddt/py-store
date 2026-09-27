@@ -147,6 +147,9 @@ class Store:
         fn 内 execute_raw / CRUD 均落到该源的事务连接（commit/rollback 一体）；
         Mongo 源或执行器未实现事务时按原样执行（跨源无法原子），绝不静默假装已事务化。
         单源场景 source 传 ``'default'``。
+
+        同源嵌套 transaction 会开保存点（内层失败只回滚本层）；句柄无保存点原语时
+        降级并入外层并发 ``nested_savepoint_unsupported``。
         """
         return await datasource.run_in_transaction(source, fn)
 
@@ -162,6 +165,9 @@ class Store:
 
         约束：同一会话内写命令只允许落在**单一数据源**；跨源写退出时抛
         ``NonAtomicWriteError``（先全部回滚，绝不提交半截）。
+
+        嵌套：内层会话作为嵌套作用域在已有事务上开保存点，内层失败只回滚本层
+        （生命周期仍交外层）。
         """
         return Session()
 
