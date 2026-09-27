@@ -12,6 +12,7 @@ Mongo 走原生驱动，SQL 走 ``translate → exec``。对齐 ``nodejs-store/s
 
 import re
 import time
+from collections.abc import Mapping
 
 from .. import datasource as _datasource
 from ..executors.mongo import exec_mongo as _exec_mongo
@@ -115,6 +116,10 @@ async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
     connection = await _datasource.resolve_connection(source, _datasource.is_write_cmd(cmd))
+    if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
+        # Mongo 事务视图：db 按命令 namespace 解析，session 透传给驱动
+        db = _datasource.mongo_db(connection['conn'], source, cmd.get('namespace'))
+        return await _exec_mongo(db, cmd, session=connection.get('session'))
     db = _datasource.mongo_db(connection, source, cmd.get('namespace'))
     if db is not None:
         return await _exec_mongo(db, cmd)
@@ -159,12 +164,13 @@ def _warn_multi_source(sources):
 
 
 async def run_atomic(sources, fn):
-    """顶层 API 调用的原子包络：无会话 + 单一 SQL 源 → 包事务；否则原样执行
+    """顶层 API 调用的原子包络：无会话 + 单一源（SQL 或 Mongo）→ 包事务；否则原样执行
 
     - 会话内：事务边界由会话统一管理，直接执行（不嵌套）；
     - 单一 SQL 源：包事务（原子）；
     - 多源：无法原子 → 程序化声明 ``nonAtomic``（反馈通道），再按顺序原样执行；
-    - 单一 Mongo 源 / 未配置源：按原样执行（单源 Mongo 事务属 Phase 3，不在此声明）；
+    - 单一 Mongo 源：按探测结果包 session 事务或降级声明（见 ``run_in_transaction``）；
+    - 未配置源：按原样执行；
     - sources 由调用方从「规划结果」中提取（``_sources_of``），命令源与事务源一致。
     """
     if _datasource.current_session() is not None:
@@ -172,7 +178,8 @@ async def run_atomic(sources, fn):
     uniq = {s or _datasource.DEFAULT_SOURCE for s in sources}
     if len(uniq) == 1:
         source = next(iter(uniq))
-        if _datasource.has_connection(source) and _datasource.is_sql_source(source):
+        if _datasource.has_connection(source) and (
+                _datasource.is_sql_source(source) or _datasource.is_mongo_source(source)):
             return await _datasource.run_in_transaction(source, fn)
     elif len(uniq) > 1:
         _warn_multi_source(uniq)

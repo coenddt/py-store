@@ -80,8 +80,10 @@ async def open_transaction(connection):
         层走降级声明（``nested_savepoint_unsupported``），不在此伪造。
     """
     client = _client_of(connection)
-    session = await client.start_session()
-    session.start_transaction()
+    # PyMongo async：``start_session`` 为同步方法，返回 AsyncClientSession；
+    # ``start_transaction`` / ``commit_transaction`` / ``abort_transaction`` / ``end_session`` 为协程。
+    session = client.start_session()
+    await session.start_transaction()
     closed = False
 
     async def commit():

@@ -349,15 +349,13 @@ async def _nested_savepoint_scope(source, outer, fn):
 
 
 async def run_in_transaction(source, fn):
-    """
-    事务作用域：在单个 SQL 源上以「同连接 + 同事务」执行 fn 内的全部命令
+    """事务作用域：在单个源上以「同连接 + 同事务」执行 fn 内的全部命令
 
       - 会话内调用：并入会话（事务边界由会话统一管理），不另开事务；
-      - fn 内经 ``_exec`` 路由到该 source 的命令全部落到事务连接（commit/rollback 一体）；
-      - Mongo 源 / 执行器未实现 with_transaction / 多源混合时按原样执行
-        （跨源无法原子 —— 信任边界见 README「事务边界」），绝不静默假装已事务化；
-      - 同源嵌套：在已持有的事务连接上开 SAVEPOINT ``sp_<n>``（内层失败 ROLLBACK TO 本层，
-        外层可继续）；句柄无保存点原语则降级并入外层发 nested_savepoint_unsupported；
+      - SQL 源且执行器实现 with_transaction：包事务；同源嵌套开 SAVEPOINT sp_<n>；
+      - Mongo 源：探测可事务（replica set / sharded）→ 包 session 事务；standalone / unknown
+        → 发 ``mongo_transaction_unsupported`` 并按原样执行（绝不静默假装已事务化）；
+      - Mongo 无保存点原语：同源嵌套走既有 ``nested_savepoint_unsupported`` 降级声明；
       - 事务体抛错统一 rollback 后原样上抛。
     """
     session = _current_session.get()
@@ -365,24 +363,50 @@ async def run_in_transaction(source, fn):
         # 会话内：事务边界由会话统一管理；本层作为嵌套作用域开保存点（失败只回滚本层）
         return await session.nested_scope(fn)
     conn = get_connection(source)
-    with_tx = conn.get('with_transaction') if isinstance(conn, Mapping) else None
-    if not callable(with_tx):
-        return await fn()
     parent = _tx_override.get() or {}
+
+    if isinstance(conn, Mapping):
+        # ── SQL 分支（既有语义，保持不变）──
+        with_tx = conn.get('with_transaction')
+        if not callable(with_tx):
+            return await fn()
+        if source in parent:
+            # 同源嵌套事务：在已持有的事务连接上开保存点（内层失败只回滚本层，外层可继续）
+            return await _nested_savepoint_scope(source, parent[source], fn)
+        tx_desc = {'kind': conn['kind'], 'exec': None, 'tx': None}
+
+        async def _body(exec_on_tx, tx=None):
+            tx_desc['exec'] = exec_on_tx
+            tx_desc['tx'] = tx
+            return await fn()
+
+        token = _tx_override.set({**parent, source: tx_desc})
+        try:
+            return await with_tx(_body)
+        finally:
+            _tx_override.reset(token)
+
+    # ── Mongo 分支 ──
     if source in parent:
-        # 同源嵌套事务：在已持有的事务连接上开保存点（内层失败只回滚本层，外层可继续）
+        # 同源嵌套：Mongo 无保存点 → 复用降级声明（内层失败将回滚整个外层事务）
         return await _nested_savepoint_scope(source, parent[source], fn)
-    tx_desc = {'kind': conn['kind'], 'exec': None, 'tx': None}
-
-    async def _body(exec_on_tx, tx=None):
-        tx_desc['exec'] = exec_on_tx
-        tx_desc['tx'] = tx
+    cap = await mongo_transactable(conn)
+    if cap is not True:
+        _warn_mongo_unsupported(source, 'standalone' if cap is False else 'unknown')
         return await fn()
-
-    token = _tx_override.set({**parent, source: tx_desc})
+    tx = await executors.mongo.open_transaction(conn)
+    view = {'kind': 'mongo', 'conn': conn, 'session': tx['session'], 'tx': tx}
+    token = _tx_override.set({**parent, source: view})
     try:
-        return await with_tx(_body)
+        out = await fn()
+    except BaseException:
+        await tx['rollback']()
+        raise
+    else:
+        await tx['commit']()
+        return out
     finally:
+        await tx['release']()
         _tx_override.reset(token)
 
 
@@ -454,7 +478,8 @@ class Session:
     """显式会话（工作单元）
 
     - 惰性开事务：命令真正落到某 SQL 源时才 checkout 并 BEGIN（空会话不占连接）；
-    - Mongo 源 / 缺 open_transaction 的执行器 → 直通 + 告警一次（绝不静默）；
+    - Mongo 源按探测结果事务化；不可事务（standalone/unknown）→ 直通 +
+      `mongo_transaction_unsupported` 声明（绝不静默）；
     - 跨源写 fail-closed：≥2 个源发生写命令 → 退出时全部 rollback 并抛
       NonAtomicWriteError；
     - 嵌套会话 / 会话内 transaction：作为嵌套作用域在已有事务上开保存点
@@ -462,7 +487,7 @@ class Session:
     """
 
     def __init__(self):
-        self._views = {}     # source -> {'kind','exec','tx'} | None（None=直通）
+        self._views = {}     # source -> {'kind','exec','tx'} | Mongo 视图 | None（None=直通）
         self._txs = {}       # source -> 显式事务句柄
         self._opened = []    # 开启顺序
         self._wrote = set()  # 发生过写命令的 source
@@ -554,19 +579,31 @@ class Session:
         return view
 
     async def _open_view(self, source):
-        """解析并缓存该源的事务视图；返回 ``{'kind','exec','tx'}`` 或 None（直通）"""
+        """解析并缓存该源的事务视图；返回 ``{'kind','exec','tx'}`` /
+        ``{'kind':'mongo','conn','session','tx'}`` / None（直通）"""
         override = _tx_override.get()
-        if override and source in override and override[source].get('exec') is not None:
-            # 外层事务（run_in_transaction / 外层会话）已绑定该源 → 复用，不新开事务、不告警
-            return override[source]
+        if override and source in override:
+            ov = override[source]
+            if ov.get('tx') is not None:
+                # 外层事务（run_in_transaction / 外层会话）已绑定该源 → 复用，不新开事务、不告警
+                return ov
         connection = get_connection(source)
-        if isinstance(connection, Mapping) and callable(connection.get('open_transaction')):
-            tx = await connection['open_transaction']()
+        if isinstance(connection, Mapping):
+            if callable(connection.get('open_transaction')):
+                tx = await connection['open_transaction']()
+                self._txs[source] = tx
+                self._opened.append(source)
+                return {'kind': connection['kind'], 'exec': tx['exec'], 'tx': tx}
+            self._warn_not_atomic(source, connection.get('kind'))
+            return None
+        # Mongo 源（裸驱动实例）
+        cap = await mongo_transactable(connection)
+        if cap is True:
+            tx = await executors.mongo.open_transaction(connection)
             self._txs[source] = tx
             self._opened.append(source)
-            return {'kind': connection['kind'], 'exec': tx['exec'], 'tx': tx}
-        if isinstance(connection, Mapping):
-            self._warn_not_atomic(source, connection.get('kind'))
+            return {'kind': 'mongo', 'conn': connection, 'session': tx['session'], 'tx': tx}
+        self._warn_mongo(source, cap)
         return None
 
     # ---------- 嵌套作用域（嵌套会话 / 会话内 transaction） ----------
@@ -644,6 +681,16 @@ class Session:
             'source': source,
             'kind': kind,
         })
+
+    def _warn_mongo(self, source, cap):
+        """Mongo 部署不支持事务 → 降级声明（同源只声明一次）
+
+        ``cap``: False → standalone；None → unknown（探测失败/无法探测）。
+        """
+        if source in self._warned:
+            return
+        self._warned.add(source)
+        _warn_mongo_unsupported(source, 'standalone' if cap is False else 'unknown')
 
     def _warn_finalize_failure(self, source, commit, exc):
         _emit_feedback({
