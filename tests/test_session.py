@@ -24,6 +24,7 @@ from py_store import (
 )
 from py_store import schema as _sc
 from py_store.crud import write as write_mod
+from py_store.crud.exec import run_atomic
 
 # ─── 假 SQL 执行器工厂（doc 4.1） ─────────────────────────────
 
@@ -433,3 +434,44 @@ def test_real_sqlite_session_commit_rollback(tmp_path):
     after_commit, after_rollback = _run(scenario())
     assert after_commit == 1, '会话提交后新连接应可见数据'
     assert after_rollback == 1, '会话异常回滚后数据不可见'
+
+
+# ─── #12 非会话多源写：程序化声明 nonAtomic（B1） ────────────
+
+def test_non_atomic_write_multi_source_emits():
+    events = []
+    feedback.set_sink(events.append)
+    ran = []
+
+    async def scenario():
+        async def body():
+            ran.append(True)
+            return 'ok'
+        return await run_atomic({'sess_a', 'sess_b'}, body)
+
+    out = _run(scenario())
+    assert out == 'ok' and ran == [True], '多源仍按顺序原样执行（不阻断）'
+    na = [e for e in events if e.get('code') == 'nonAtomic']
+    assert len(na) == 1, '多源写恰声明一次'
+    assert na[0]['type'] == 'non_atomic_write'
+    assert na[0]['layer'] == 'crud'
+    assert na[0]['sources'] == ['sess_a', 'sess_b']
+
+
+# ─── #13 非会话单源写：包事务且不声明 nonAtomic（零回归） ─────
+
+def test_single_source_write_wraps_transaction_without_emit():
+    desc, state = make_fake_sql_executor()
+    datasource.set_connections({'sess_a': desc})
+    events = []
+    feedback.set_sink(events.append)
+
+    async def scenario():
+        async def body():
+            return 42
+        return await run_atomic({'sess_a'}, body)
+
+    out = _run(scenario())
+    assert out == 42
+    assert state['opened'] == 1 and state['committed'] == 1, '单源须包事务'
+    assert [e for e in events if e.get('code') == 'nonAtomic'] == []
