@@ -28,7 +28,7 @@ from py_store.crud.exec import run_atomic
 
 # ─── 假 SQL 执行器工厂（doc 4.1） ─────────────────────────────
 
-def make_fake_sql_executor(kind='sqlite'):
+def make_fake_sql_executor(kind='sqlite', savepoints=True):
     """返回 ``(descriptor, state)``
 
     descriptor = ``{'kind', 'exec', 'with_transaction', 'open_transaction'}``
@@ -36,12 +36,14 @@ def make_fake_sql_executor(kind='sqlite'):
 
       - open_transaction() → 新建连接标识（'conn-1' …）并 opened += 1；
       - commit / rollback / release 幂等；
-      - exec(plan) 记录当前连接标识；``state['fail_on_write']`` 为真且 plan 含写语句时抛错。
+      - exec(plan) 记录当前连接标识；``state['fail_on_write']`` 为真且 plan 含写语句时抛错；
+      - ``savepoints=False`` 时句柄不带保存点原语（验证嵌套作用域降级）。
     """
     state = {
         'opened': 0, 'committed': 0, 'rolled_back': 0, 'released': 0,
         'tx_conns': [], 'exec_conns': [], 'rows': [],
         'fail_on_write': False,
+        'savepoints': [], 'released_sps': [], 'rolled_to_sps': [],
     }
     seq = {'n': 0}
 
@@ -83,12 +85,26 @@ def make_fake_sql_executor(kind='sqlite'):
         async def tx_exec(plan):
             return await _run_on(conn_id, plan)
 
-        return {'exec': tx_exec, 'commit': commit, 'rollback': rollback, 'release': release}
+        tx = {'exec': tx_exec, 'commit': commit, 'rollback': rollback, 'release': release}
+        if savepoints:
+            async def savepoint(name):
+                state['savepoints'].append((conn_id, name))
+
+            async def release_savepoint(name):
+                state['released_sps'].append((conn_id, name))
+
+            async def rollback_to_savepoint(name):
+                state['rolled_to_sps'].append((conn_id, name))
+
+            tx.update({'savepoint': savepoint,
+                       'release_savepoint': release_savepoint,
+                       'rollback_to_savepoint': rollback_to_savepoint})
+        return tx
 
     async def with_transaction(body):
         tx = await open_transaction()
         try:
-            out = await body(tx['exec'])
+            out = await body(tx['exec'], tx)
         except BaseException:
             await tx['rollback']()
             raise
@@ -475,3 +491,127 @@ def test_single_source_write_wraps_transaction_without_emit():
     assert out == 42
     assert state['opened'] == 1 and state['committed'] == 1, '单源须包事务'
     assert [e for e in events if e.get('code') == 'nonAtomic'] == []
+
+
+# ─── #14 同源嵌套 transaction：内层失败只回滚内层、外层提交 ───
+
+def test_nested_transaction_inner_failure_rolls_back_to_savepoint():
+    desc, state = make_fake_sql_executor()
+    datasource.set_connections({'sess_a': desc})
+
+    async def scenario():
+        async def inner():
+            raise RuntimeError('inner-boom')
+
+        async def outer():
+            try:
+                await store.transaction('sess_a', inner)
+            except RuntimeError as exc:
+                assert str(exc) == 'inner-boom'
+
+        await store.transaction('sess_a', outer)
+
+    _run(scenario())
+    assert state['opened'] == 1, '嵌套同源事务只开一次事务'
+    assert [n for _, n in state['savepoints']] == ['sp_1']
+    assert [n for _, n in state['rolled_to_sps']] == ['sp_1']
+    assert [n for _, n in state['released_sps']] == ['sp_1']
+    assert state['committed'] == 1 and state['rolled_back'] == 0, '外层捕获后仍整体提交'
+
+
+# ─── #15 同源嵌套 transaction：内层成功只 RELEASE ────────────
+
+def test_nested_transaction_inner_success_releases_savepoint():
+    desc, state = make_fake_sql_executor()
+    datasource.set_connections({'sess_a': desc})
+
+    async def scenario():
+        async def inner():
+            return 'inner-ok'
+
+        async def outer():
+            return await store.transaction('sess_a', inner)
+
+        return await store.transaction('sess_a', outer)
+
+    assert _run(scenario()) == 'inner-ok'
+    assert state['opened'] == 1
+    assert [n for _, n in state['savepoints']] == ['sp_1']
+    assert [n for _, n in state['rolled_to_sps']] == []
+    assert [n for _, n in state['released_sps']] == ['sp_1']
+    assert state['committed'] == 1 and state['rolled_back'] == 0
+
+
+# ─── #16 句柄无保存点原语：降级并入外层 + 同源只告警一次 ─────
+
+def test_nested_transaction_without_savepoint_degrades():
+    desc, state = make_fake_sql_executor(savepoints=False)
+    datasource.set_connections({'sess_a': desc})
+    events = []
+    feedback.set_sink(events.append)
+    ran = []
+
+    async def scenario():
+        async def inner():
+            ran.append('inner')
+            raise RuntimeError('inner-boom')
+
+        async def outer():
+            for _ in range(2):
+                try:
+                    await store.transaction('sess_a', inner)
+                except RuntimeError:
+                    ran.append('caught')
+
+        await store.transaction('sess_a', outer)
+
+    _run(scenario())
+    assert ran == ['inner', 'caught', 'inner', 'caught'], '降级：异常上抛由外层自行处理'
+    assert state['opened'] == 1
+    assert state['savepoints'] == [] and state['released_sps'] == []
+    warned = [e for e in events if e.get('code') == 'nestedSavepointUnsupported']
+    assert len(warned) == 1, '同一源（同一外层作用域）只告警一次'
+    assert warned[0]['type'] == 'nested_savepoint_unsupported'
+    assert warned[0]['source'] == 'sess_a'
+
+
+# ─── #17 真实 SQLite：嵌套 transaction 内层回滚、外层提交 ─────
+
+def test_real_sqlite_nested_transaction_inner_rollback(tmp_path):
+    db_path = tmp_path / 'nest.db'
+
+    async def scenario():
+        db = await aiosqlite.connect(db_path)
+        db2 = await aiosqlite.connect(db_path)
+        await db.execute('CREATE TABLE nest_t (_id TEXT PRIMARY KEY, v TEXT)')
+        await db.commit()
+        datasource.set_connections(
+            {'nest_real': executors.create_connection('sqlite', db)})
+
+        async def ins(v):
+            await store.execute_raw(
+                'nest_real', 'INSERT INTO nest_t (_id, v) VALUES (?, ?)', [v, v], is_write=True)
+
+        async def outer():
+            await ins('keep')
+
+            async def inner():
+                await ins('drop')
+                raise RuntimeError('inner-boom')
+
+            try:
+                await store.transaction('nest_real', inner)
+            except RuntimeError:
+                pass
+            await ins('outer')
+
+        await store.transaction('nest_real', outer)
+
+        cur = await db2.execute('SELECT _id FROM nest_t ORDER BY _id')
+        rows = [r[0] for r in await cur.fetchall()]
+        await cur.close()
+        await db.close()
+        await db2.close()
+        return rows
+
+    assert _run(scenario()) == ['keep', 'outer'], '内层写入回滚，外层写入提交'

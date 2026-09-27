@@ -597,6 +597,8 @@ def test_with_transaction_passes_tx_handle_to_body(tmp_path):
 # ─── 嵌套事务：同源内层并入外层（不新开事务） ─────────────────
 
 def test_run_in_transaction_nested_same_source_merges():
+    events = []
+    feedback.set_sink(events.append)
     opened = []
     inner_ran = []
 
@@ -620,3 +622,5 @@ def test_run_in_transaction_nested_same_source_merges():
     _run(scenario())
     assert opened == [1], '嵌套同源事务只应开启一次'
     assert inner_ran == ['inner'], '内层体须并入外层事务执行'
+    warned = [e for e in events if e.get('code') == 'nestedSavepointUnsupported']
+    assert len(warned) == 1, '无保存点原语时降级须告警，且同一源只告警一次'
