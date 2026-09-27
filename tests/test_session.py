@@ -615,3 +615,92 @@ def test_real_sqlite_nested_transaction_inner_rollback(tmp_path):
         return rows
 
     assert _run(scenario()) == ['keep', 'outer'], '内层写入回滚，外层写入提交'
+
+
+# ─── #18 真实 SQLite：嵌套 session 内层回滚、外层提交 ─────────
+
+def test_real_sqlite_nested_session_inner_rollback(tmp_path):
+    db_path = tmp_path / 'nest_sess.db'
+
+    async def scenario():
+        db = await aiosqlite.connect(db_path)
+        db2 = await aiosqlite.connect(db_path)
+        await db.execute('CREATE TABLE sess_t (_id TEXT PRIMARY KEY, v TEXT)')
+        await db.commit()
+        datasource.set_connections({'nest_sess': executors.create_connection('sqlite', db)})
+
+        async def ins(v):
+            await store.execute_raw(
+                'nest_sess', 'INSERT INTO sess_t (_id, v) VALUES (?, ?)', [v, v], is_write=True)
+
+        async with store.session():
+            await ins('keep')
+
+            async def inner_body():
+                async with store.session():
+                    await ins('inner')
+                    raise RuntimeError('inner-boom')
+
+            try:
+                await inner_body()
+            except RuntimeError:
+                pass
+            await ins('outer')
+
+        cur = await db2.execute('SELECT _id FROM sess_t ORDER BY _id')
+        rows = [r[0] for r in await cur.fetchall()]
+        await cur.close()
+        await db.close()
+        await db2.close()
+        return rows
+
+    assert _run(scenario()) == ['keep', 'outer'], '内层会话写入回滚，外层写入提交'
+
+
+# ─── #19 嵌套 session：首次写开保存点、退出释放、共用外层事务 ──
+
+def test_nested_session_opens_savepoint_on_write():
+    desc, state = make_fake_sql_executor()
+    _register_sql('SessA', 'sess_a', 'SA')
+    datasource.set_connections({'sess_a': desc})
+
+    async def scenario():
+        async with store.session() as outer:
+            await outer.insert('SessA', {'v': '1'})
+            async with store.session() as inner:
+                await inner.insert('SessA', {'v': '2'})
+
+    _run(scenario())
+    assert state['opened'] == 1, '嵌套会话共用外层事务连接'
+    assert [n for _, n in state['savepoints']] == ['sp_1'], '内层作用域首次写才开保存点'
+    assert [n for _, n in state['released_sps']] == ['sp_1']
+    assert state['rolled_back'] == 0 and state['committed'] == 1
+
+
+# ─── #20 会话内 transaction：作为嵌套作用域（失败只回滚本层） ──
+
+def test_transaction_inside_session_child_scope_rolls_back():
+    desc, state = make_fake_sql_executor()
+    _register_sql('SessA', 'sess_a', 'SA')
+    datasource.set_connections({'sess_a': desc})
+
+    async def scenario():
+        async with store.session() as s:
+            await s.insert('SessA', {'v': '1'})
+
+            async def inner():
+                await store.insert('SessA', {'v': '2'})
+                raise RuntimeError('inner-boom')
+
+            try:
+                await store.transaction('sess_a', inner)
+            except RuntimeError:
+                pass
+            await s.insert('SessA', {'v': '3'})
+
+    _run(scenario())
+    assert state['opened'] == 1, '会话内 transaction 不另开事务'
+    assert [n for _, n in state['savepoints']] == ['sp_1']
+    assert [n for _, n in state['rolled_to_sps']] == ['sp_1']
+    assert [n for _, n in state['released_sps']] == ['sp_1']
+    assert state['rolled_back'] == 0 and state['committed'] == 1
