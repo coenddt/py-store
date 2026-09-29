@@ -513,6 +513,45 @@ async def execute_raw(source, sql, params=None, is_write=None):
     return {'rows': out.get('rows'), 'affectedRows': int(out.get('affectedRows') or 0)}
 
 
+class NativeCommandError(RuntimeError):
+    """原生 Mongo 命令入口的显式错误（非 Mongo 源 / 非 Mongo 形态）"""
+
+
+async def execute_native(source, collection, pipeline, options=None):
+    """
+    在指定 Mongo 源上执行原生聚合管道（Host 层逃生口，对标 SQL 侧 ``execute_raw``）
+
+      - 复用 GQL 路径唯一的 Mongo IO 边界（``executors.mongo.exec_mongo`` 的
+        aggregate 分支），``options`` 为驱动原生透传项（allowDiskUse/batchSize/...，
+        宿主不做白名单）；
+      - 事务 / 会话作用域内自动透传 session（session 由事务强制接管，
+        ``options.session`` 不可覆盖）；统一按读路径解析（``is_write=False``），
+        ``$merge``/``$out`` 写管道请自行开事务；
+      - 仅支持 Mongo 源：SQL 源显式报错并指引 ``execute_raw``（绝不静默）；
+        MongoClient 形态须经 schema 声明 namespace（``mongo_db`` 既有校验，缺名即报错）；
+      - 返回 ``{'rows': list}``。
+    """
+    conn = await resolve_connection(source, is_write=False)
+    if isinstance(conn, Mapping) and conn.get('kind') == 'mongo':
+        # Mongo 事务视图：db 按视图内连接解析，session 强制由事务接管
+        db = mongo_db(conn['conn'], source, None)
+        session = conn.get('session')
+    elif is_sql(conn):
+        raise NativeCommandError(
+            f'数据源 {source} 是 SQL 源（原生 Mongo 命令入口仅支持 mongo；SQL 源请用 execute_raw）')
+    elif _is_mongo_client(conn) or hasattr(conn, 'get_collection'):
+        # 全局裸连接：MongoClient（须声明 namespace，缺名由 mongo_db 显式报错）/ db 实例
+        db = mongo_db(conn, source, None)
+        session = None
+    else:
+        raise NativeCommandError(
+            f'数据源 {source} 不是 Mongo 源（原生 Mongo 命令入口仅支持 mongo）')
+    cmd = {'kind': 'aggregate', 'collection': collection,
+           'pipeline': list(pipeline or []), 'options': dict(options or {})}
+    out = await executors.mongo.exec_mongo(db, cmd, session)
+    return {'rows': out}
+
+
 class Session:
     """显式会话（工作单元）
 

@@ -117,8 +117,9 @@ async def exec_mongo(db, cmd, session=None):
         return await cursor.to_list(length=None)
     if kind == 'aggregate':
         # PyMongo async 下 ``aggregate`` 是协程（与 ``find`` 直接返回游标不同）
+        # cmd['options'] 为原生聚合透传项（execute_native 注入；GQL 路径无此键，零回归）
         _norm_pipeline(cmd)
-        cursor = await coll.aggregate(cmd['pipeline'], **_opts(session))
+        cursor = await coll.aggregate(cmd['pipeline'], **_opts(session, **(cmd.get('options') or {})))
         return await cursor.to_list(length=None)
     if kind == 'countDocuments':
         _norm_filter(cmd)

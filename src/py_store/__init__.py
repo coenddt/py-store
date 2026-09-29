@@ -39,6 +39,7 @@ from . import (
 from . import (
     introspect as introspect,
 )
+from .datasource import NativeCommandError as NativeCommandError
 from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
 from .datasource import Session as Session
@@ -184,6 +185,20 @@ class Store:
         """
         return await datasource.execute_raw(source, sql, params, is_write)
 
+    async def execute_native(self, source: str, collection: str,
+                             pipeline: list | None = None,
+                             options: dict | None = None) -> dict[str, Any]:
+        """在指定 Mongo 源执行原生聚合管道（事务内可用；对标 SQL 侧 execute_raw）
+
+        ``pipeline`` 为原生聚合管道（list[dict]），``options`` 为驱动原生透传项
+        （allowDiskUse/batchSize/hint/maxTimeMS…，宿主不做白名单）。事务 / 会话
+        作用域内自动透传 session（由事务强制接管，``options.session`` 不可覆盖）；
+        统一按读路径解析，``$merge``/``$out`` 写管道请自行开事务。
+        仅支持 Mongo 源（SQL 源抛 NativeCommandError 并指引 execute_raw）。
+        返回 ``{'rows': list}``。
+        """
+        return await datasource.execute_native(source, collection, pipeline, options)
+
     def generate_ddl(self, backend: str, names: list | None = None) -> str:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
         return ddl.generate(backend, names)
@@ -197,6 +212,7 @@ class Store:
     syncSchema = sync_schema
     buildPipeline = build_pipeline
     executeRaw = execute_raw
+    executeNative = execute_native
     generateDdl = generate_ddl
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
@@ -220,6 +236,8 @@ class Store:
     PermissionError = permission.PermissionError
     # 原生 SQL 入口错误（实例可被 store.RawSqlError 捕获）
     RawSqlError = datasource.RawSqlError
+    # 原生 Mongo 命令入口错误（实例可被 store.NativeCommandError 捕获）
+    NativeCommandError = datasource.NativeCommandError
     # 上下文强制开关（fail-secure：开启后 ctx 缺失报 ERR_NO_CONTEXT，内部调用走 run_as_internal）
     setRequireContext = staticmethod(schema.set_require_context)
     set_require_context = staticmethod(schema.set_require_context)

@@ -203,6 +203,154 @@ def test_transaction_without_with_transaction_runs_plainly():
     assert warned[0]['kind'] == 'sqlite'
 
 
+# ─── ①″ execute_native（Mongo 原生聚合逃生口，与 js 侧对拍）───
+
+class _FakeMongoDb:
+    """带 get_collection → Database 形态（execute_native 判定为合法 Mongo 源）"""
+
+    def get_collection(self, name):
+        return None  # 不会被真正调用（exec_mongo 被替换）
+
+
+def test_execute_native_builds_aggregate_command(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['db'] = db
+        captured['cmd'] = cmd
+        captured['session'] = session
+        return [{'n': 1}]
+
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    db = _FakeMongoDb()
+    datasource.set_connections({'db': db})
+    out = _run(store.execute_native(
+        'db', 'orders', [{'$match': {'a': 1}}], {'allowDiskUse': True}))
+
+    assert captured['db'] is db
+    assert captured['cmd'] == {'kind': 'aggregate', 'collection': 'orders',
+                               'pipeline': [{'$match': {'a': 1}}],
+                               'options': {'allowDiskUse': True}}
+    assert captured['session'] is None
+    assert out == {'rows': [{'n': 1}]}
+
+
+def test_execute_native_pipeline_none_defaults_empty(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['cmd'] = cmd
+        return []
+
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    datasource.set_connections({'db': _FakeMongoDb()})
+    _run(store.execute_native('db', 't'))
+    assert captured['cmd']['pipeline'] == []
+    assert captured['cmd']['options'] == {}
+
+
+def test_execute_native_tx_view_session_injected(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['session'] = session
+        return []
+
+    async def fake_resolve(source, is_write=False):
+        return {'kind': 'mongo', 'conn': _FakeMongoDb(), 'session': 'SENTINEL', 'tx': {}}
+
+    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    _run(store.execute_native('db', 't', []))
+    # 事务视图 session 强制注入执行器
+    assert captured['session'] == 'SENTINEL'
+
+
+def test_execute_native_options_session_cannot_override_tx(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['session'] = session
+        captured['options'] = cmd['options']
+        return []
+
+    async def fake_resolve(source, is_write=False):
+        return {'kind': 'mongo', 'conn': _FakeMongoDb(), 'session': 'SENTINEL', 'tx': {}}
+
+    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    _run(store.execute_native('db', 't', [], {'session': 'USER_SESSION'}))
+    # session 由事务接管：用户 options.session 不可覆盖（executors _opts 内 session 强制注入）
+    assert captured['session'] == 'SENTINEL'
+    assert captured['options'] == {'session': 'USER_SESSION'}
+
+
+def test_execute_native_sql_source_raises():
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    with pytest.raises(store.NativeCommandError) as ei:
+        _run(store.execute_native('db', 't', []))
+    assert '是 SQL 源' in str(ei.value)
+    assert 'execute_raw' in str(ei.value)
+
+
+def test_execute_native_non_mongo_source_raises():
+    datasource.set_connections({'db': _FakeMongo()})
+    with pytest.raises(store.NativeCommandError) as ei:
+        _run(store.execute_native('db', 't', []))
+    assert '不是 Mongo 源' in str(ei.value)
+
+
+def test_exec_mongo_aggregate_forwards_options():
+    captured = {}
+
+    class _FakeCursor:
+        async def to_list(self, length=None):
+            return [{'n': 1}]
+
+    class _FakeColl:
+        async def aggregate(self, pipeline, **kw):
+            captured['pipeline'] = pipeline
+            captured['kw'] = kw
+            return _FakeCursor()
+
+    class _FakeDriverDb:
+        def __getitem__(self, name):
+            captured['collection'] = name
+            return _FakeColl()
+
+    out = _run(datasource.executors.mongo.exec_mongo(
+        _FakeDriverDb(),
+        {'kind': 'aggregate', 'collection': 'orders',
+         'pipeline': [{'$match': {'a': 1}}], 'options': {'allowDiskUse': True}}))
+
+    assert captured['collection'] == 'orders'
+    assert captured['pipeline'] == [{'$match': {'a': 1}}]
+    assert captured['kw'] == {'allowDiskUse': True}
+    assert out == [{'n': 1}]
+
+
+def test_exec_mongo_aggregate_without_options_unchanged():
+    """既有 GQL 路径 cmd 无 options 键 → 调用形态不变（零回归）"""
+    captured = {}
+
+    class _FakeCursor:
+        async def to_list(self, length=None):
+            return []
+
+    class _FakeColl:
+        async def aggregate(self, pipeline, **kw):
+            captured['kw'] = kw
+            return _FakeCursor()
+
+    class _FakeDriverDb:
+        def __getitem__(self, name):
+            return _FakeColl()
+
+    _run(datasource.executors.mongo.exec_mongo(
+        _FakeDriverDb(), {'kind': 'aggregate', 'collection': 't', 'pipeline': []}))
+    assert captured['kw'] == {}
+
+
 # ─── ② ddl.generate ─────────────────────────────────────────
 
 def test_ddl_present_and_archive_includes_json_columns():
