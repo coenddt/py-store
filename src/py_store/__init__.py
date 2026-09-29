@@ -171,12 +171,16 @@ class Store:
         """
         return Session()
 
-    async def execute_raw(self, source: str, sql: str, params: list | None = None,
-                          is_write: bool = False) -> dict[str, Any]:
-        """在指定 SQL 源执行原生 SQL（事务内可用；占位符按各后端原生风格）
+    async def execute_raw(self, source: str, sql: str, params: list | tuple | dict | None = None,
+                          is_write: bool | None = None) -> dict[str, Any]:
+        """在指定 SQL 源执行原生 SQL（事务内可用；编译由 core raw_stmt_compile 完成）
 
-        mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``；仅支持 SQL 源（Mongo 源抛
-        RawSqlError）。``is_write=False`` 取行（rows），``True`` 取影响行数（affectedRows）。
+        两档参数风格：位置档（params 为 list/tuple/None）→ 占位符为各后端原生风格
+        （mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``），SQL 原样透传；命名档
+        （params 为 dict）→ SQL 文本中的 ``:name`` 编译为方言占位符（同名复用、
+        跳过 ``::`` cast / 引号 / 注释边界；缺名 / 多余名显式报错）。
+        ``is_write`` 缺省时按 SQL 首词推断（读白名单外一律按写——安全方向）。
+        仅支持 SQL 源（Mongo 源抛 RawSqlError）。返回 rows / affectedRows。
         """
         return await datasource.execute_raw(source, sql, params, is_write)
 

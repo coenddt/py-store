@@ -72,6 +72,87 @@ def test_execute_raw_missing_executor_raises():
         _run(store.execute_raw('db', 'SELECT 1'))
 
 
+# ─── ①′ execute_raw 命名档与写推断（core raw_stmt_compile 编译链）───
+
+def _capture_exec(captured):
+    async def fake_exec(plan):
+        captured['plan'] = plan
+        return {'docs': None, 'rows': [], 'affectedRows': 0}
+    return fake_exec
+
+
+def test_execute_raw_named_params_mysql():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
+    _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {'x': 7}))
+    assert captured['plan']['stmts'][0]['text'] == 'SELECT * FROM t WHERE a = ?'
+    assert captured['plan']['stmts'][0]['params'] == [7]
+    assert captured['plan']['stmts'][0]['isWrite'] is False
+
+
+def test_execute_raw_named_params_pg_reorder():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
+    _run(store.execute_raw('db', 'SELECT :b, :a', {'a': 1, 'b': 2}))
+    assert captured['plan']['stmts'][0]['text'] == 'SELECT $1, $2'
+    assert captured['plan']['stmts'][0]['params'] == [2, 1]
+
+
+def test_execute_raw_named_reuse_and_cast():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
+    _run(store.execute_raw('db', 'SELECT :x::text OR b = :x', {'x': 'v'}))
+    # 同名复用各占一个占位符；:: cast 不误判为参数
+    assert captured['plan']['stmts'][0]['text'] == 'SELECT $1::text OR b = $2'
+    assert captured['plan']['stmts'][0]['params'] == ['v', 'v']
+
+
+def test_execute_raw_quoted_and_comment_colons_kept():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
+    sql = "SELECT ':' -- :hint\nFROM t WHERE a = :x"
+    _run(store.execute_raw('db', sql, {'x': 1}))
+    # 字符串字面量与行注释内的冒号保持原样，仅真实 :x 被编译
+    assert captured['plan']['stmts'][0]['text'] == "SELECT ':' -- :hint\nFROM t WHERE a = ?"
+    assert captured['plan']['stmts'][0]['params'] == [1]
+
+
+def test_execute_raw_write_inferred_from_insert():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
+    _run(store.execute_raw('db', 'INSERT INTO t VALUES (1)'))
+    assert captured['plan']['stmts'][0]['isWrite'] is True
+
+
+def test_execute_raw_unknown_first_word_treated_as_write():
+    captured = {}
+    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
+    # 未知首词按写（R7 默认安全方向，非 Err）
+    _run(store.execute_raw('db', 'VACUUM ANALYZE t'))
+    assert captured['plan']['stmts'][0]['isWrite'] is True
+
+
+def test_execute_raw_named_missing_param_raises():
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    with pytest.raises(store.RawSqlError) as ei:
+        _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {}))
+    assert '未在 params 中提供' in str(ei.value)
+
+
+def test_execute_raw_named_unused_param_raises():
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    with pytest.raises(store.RawSqlError) as ei:
+        _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {'x': 1, 'y': 2}))
+    assert '未使用的命名参数' in str(ei.value)
+
+
+def test_execute_raw_scalar_params_raises():
+    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    with pytest.raises(store.RawSqlError) as ei:
+        _run(store.execute_raw('db', 'SELECT 1', 7))
+    assert '仅支持 list/tuple（位置档）或 dict（命名档）' in str(ei.value)
+
+
 def test_transaction_uses_tx_connection_and_rolls_back():
     state = {'committed': 0, 'rolled_back': 0}
 

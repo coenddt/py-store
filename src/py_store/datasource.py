@@ -473,25 +473,42 @@ class RawSqlError(RuntimeError):
     """原生 SQL 入口的显式错误（非 SQL 源 / 执行器未接入）"""
 
 
-async def execute_raw(source, sql, params=None, is_write=False):
+async def execute_raw(source, sql, params=None, is_write=None):
     """
-    在指定 SQL 源上执行原生 SQL（Host 层逃生口，绕开 core 的 dialect_translate）
+    在指定 SQL 源上执行原生 SQL（Host 层逃生口，编译由 core 的 raw_stmt_compile 完成）
+
+    两档参数风格（core 编译器按 params 类型自动分档）：
+
+      - 位置档：``params`` 为 list/tuple（或 None）→ 占位符为各后端原生风格
+        （mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``），SQL 文本原样透传；
+      - 命名档：``params`` 为 dict → SQL 文本中的 ``:name`` 被编译为方言占位符
+        （同名复用、跳过 ``::`` cast / 引号 / 注释边界；缺名 / 多余名显式报错）。
+
+    其余约定：
 
       - 事务 / 会话作用域内经 ``resolve_connection`` 落到事务专用连接 → 支持 SELECT ... FOR UPDATE；
-      - 占位符沿用各后端原生风格（mysql/sqlite 用 ``?``，postgres 用 ``$1..$n``）；
+      - ``is_write`` 缺省时由 SQL 首词推断（SELECT/WITH/EXPLAIN/SHOW/PRAGMA/TABLE 视为读，
+        其余按写——默认写是安全方向）；显式传入则覆盖推断；
       - 仅支持 SQL 源；Mongo 源显式报错（绝不静默）；
-      - ``is_write=False`` 视为读（取行）；``True`` 视为写（取影响行数）；
       - 返回 ``{'rows': list|None, 'affectedRows': int}``。
     """
-    conn = await resolve_connection(source, is_write=bool(is_write))
-    if not is_sql(conn):
+    if params is not None and not isinstance(params, (list, tuple, dict)):
+        raise RawSqlError(
+            f'原生 SQL params 仅支持 list/tuple（位置档）或 dict（命名档），收到 {type(params).__name__}')
+    conn0 = connection_for(source)
+    if not is_sql(conn0):
         raise RawSqlError(
             f'数据源 {source} 不是 SQL 源（原生 SQL 入口仅支持 mysql/postgres/sqlite）')
+    try:
+        compiled = _core.raw_stmt_compile(_kind_of(conn0), sql, params, is_write)
+    except Exception as e:
+        raise RawSqlError(str(e)) from e
+    conn = await resolve_connection(source, is_write=compiled['isWrite'])
     exec_fn = _exec_of(conn)
     if not callable(exec_fn):
         raise RawSqlError(
             f'SQL 数据源 {source}({_kind_of(conn)}) 的执行器未接入')
-    stmt = {'text': sql, 'params': list(params or []), 'isWrite': bool(is_write)}
+    stmt = {'text': compiled['sql'], 'params': compiled['params'], 'isWrite': compiled['isWrite']}
     out = await exec_fn({'stmts': [stmt]})
     return {'rows': out.get('rows'), 'affectedRows': int(out.get('affectedRows') or 0)}
 

@@ -330,8 +330,8 @@ await store.transaction("default", transfer)
 ```
 
 - `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源按**运行时能力探测**（replica set / sharded）以 session 事务执行；standalone 或探测失败则按原样执行 `fn` 并发 `mongo_transaction_unsupported`（`deployment: standalone|unknown`）—— 绝不假装已原子。不支持事务（无 `with_transaction`）的执行器亦按原样执行，并发出一条 `transaction_not_atomic` 反馈（允许降级，绝不静默假装已事务化）。同源嵌套 transaction 会开保存点（内层失败只回滚本层）；句柄无保存点原语时降级并入外层并发 `nested_savepoint_unsupported`。
-- `store.execute_raw(source, sql, params=None, is_write=False)` 执行原生 SQL，绕开 GQL 解析与方言翻译。占位符沿用各后端原生风格：MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
-- `is_write=False`（默认）返回 `{"rows", "affectedRows"}` 含结果集行；`is_write=True` 返回影响行数。
+- `store.execute_raw(source, sql, params=None, is_write=None)` 执行原生 SQL，编译由 core 的 `raw_stmt_compile` 完成，按 `params` 类型自动分两档：**位置档**（list/tuple/None）SQL 原样透传，占位符沿用各后端原生风格（MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`）；**命名档**（dict）SQL 文本中的 `:name` 编译为方言占位符（同名复用、跳过 `::` cast / 引号 / 注释边界；缺名 / 多余名显式抛 `RawSqlError`）。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
+- `is_write` 缺省时按 SQL 首词推断（SELECT / WITH / EXPLAIN / SHOW / PRAGMA / TABLE 视为读，其余按写 —— 默认写是安全方向）；显式传入则覆盖推断。返回 `{"rows", "affectedRows"}`：读取行，写取影响行数。
 - **非事务路径显式提交**：在 SQL 源上，`store.transaction` 之外的写命令由执行器显式提交（成功 `commit`；失败先 `rollback` 再上抛）。`aiosqlite` 默认非 autocommit，若缺少这次提交，写入只在当前连接可见、而 `execute_raw` 仍报成功 —— 是静默丢数据的隐患。需要整组原子的多语句写入，请放进 `store.transaction`。
 
 ### 会话（Session / 工作单元）
