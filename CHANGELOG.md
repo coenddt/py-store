@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 2.5.0 (2026-09-29)
+
 ### Added
 
 - **显式会话（Session / Unit of Work）**：`store.session()`（`async with`），会话内同一 SQL 源的
@@ -29,6 +31,13 @@
 - **事务作用域降级声明 `transaction_not_atomic`**：`store.transaction` / 顶层原子包络落到未实现
   `with_transaction` 的 SQL 执行器时按原样执行，并发出一条 `transaction_not_atomic` 反馈
   （`code: transactionNotAtomic`）——与 `session_not_atomic` 对称，消除该路径此前的静默降级。
+- **原生 SQL 逃生口 `execute_raw`**：在指定 SQL 源上执行原生 SQL，编译由 core `raw_stmt_compile`
+  完成——位置档（`params` 为 list/tuple/None：SQL 原样透传，占位符手写方言原生风格）与命名档
+  （`params` 为 dict：`:name` 编译为方言占位符，同名复用、跳过 `::` cast / 引号 / 注释边界，
+  缺名 / 多余名显式报错）；`is_write` 缺省按 SQL 首词推断（默认写是安全方向）；事务 / 会话作用域内
+  落事务专用连接（支持 `SELECT ... FOR UPDATE`）；仅支持 SQL 源，Mongo 源显式报错。
+- **原生 Mongo 管道逃生口 `execute_native`**：在指定 Mongo 源上执行原生聚合管道（复用
+  `exec_mongo` IO 边界），对标 SQL 侧 `execute_raw`。
 
 ### Changed
 
