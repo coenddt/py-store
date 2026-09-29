@@ -12,12 +12,11 @@ import asyncio
 
 import pytest
 
-from py_store import feedback, store
 from py_store import datasource as _ds
+from py_store import feedback, store
 from py_store import schema as _sc
 from py_store.crud.exec import run_atomic
 from py_store.executors.mongo import exec_mongo, open_transaction
-
 
 # ─── 假 Mongo 驱动（能力 + session 记录） ────────────────────
 
