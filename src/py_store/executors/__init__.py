@@ -58,7 +58,7 @@ async def open_acquire(driver):
     conn = await got
     released = False
 
-    async def release():
+    async def release_pooled():
         nonlocal released
         if released:
             return
@@ -67,7 +67,7 @@ async def open_acquire(driver):
         if release_fn is not None:
             await release_fn(conn)
 
-    return conn, release
+    return conn, release_pooled
 
 
 class UpdateResult:

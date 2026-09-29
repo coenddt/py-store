@@ -46,7 +46,7 @@ SQL_KINDS = frozenset({'mysql', 'postgres', 'sqlite'})
 
 _MISSING = object()
 # Mongo 事务能力缓存：client -> True/False（探测失败不写缓存，下次重探）
-_mongo_tx_cap = weakref.WeakKeyDictionary()
+_mongo_tx_cap: 'weakref.WeakKeyDictionary[object, bool]' = weakref.WeakKeyDictionary()
 
 
 def is_write_cmd(cmd):
@@ -603,7 +603,8 @@ class Session:
             await self._finalize(commit=True)
             return False
         finally:
-            _current_session.reset(self._token)
+            if self._token is not None:
+                _current_session.reset(self._token)
 
     async def _finalize(self, commit):
         errors = []
@@ -635,8 +636,8 @@ class Session:
         self._views.clear()
         self._txs.clear()
         self._opened.clear()
-        for source, exc in errors:
-            self._warn_finalize_failure(source, commit, exc)
+        for source, exc_item in errors:
+            self._warn_finalize_failure(source, commit, exc_item)
         if errors:
             raise errors[0][1]
 
@@ -688,7 +689,7 @@ class Session:
 
     def push_scope(self):
         """进入嵌套作用域（内层 session / 会话内 transaction）"""
-        scope = {'savepoints': {}, 'txs': {}}
+        scope: 'dict[str, dict]' = {'savepoints': {}, 'txs': {}}
         self._scopes.append(scope)
         return scope
 
