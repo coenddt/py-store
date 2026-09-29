@@ -329,7 +329,7 @@ async def transfer():
 await store.transaction("default", transfer)
 ```
 
-- `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源按**运行时能力探测**（replica set / sharded）以 session 事务执行；standalone 或探测失败则按原样执行 `fn` 并发 `mongo_transaction_unsupported`（`deployment: standalone|unknown`）—— 绝不假装已原子。不支持事务（无 `with_transaction`）的执行器亦按原样执行。同源嵌套 transaction 会开保存点（内层失败只回滚本层）；句柄无保存点原语时降级并入外层并发 `nested_savepoint_unsupported`。
+- `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源按**运行时能力探测**（replica set / sharded）以 session 事务执行；standalone 或探测失败则按原样执行 `fn` 并发 `mongo_transaction_unsupported`（`deployment: standalone|unknown`）—— 绝不假装已原子。不支持事务（无 `with_transaction`）的执行器亦按原样执行，并发出一条 `transaction_not_atomic` 反馈（允许降级，绝不静默假装已事务化）。同源嵌套 transaction 会开保存点（内层失败只回滚本层）；句柄无保存点原语时降级并入外层并发 `nested_savepoint_unsupported`。
 - `store.execute_raw(source, sql, params=None, is_write=False)` 执行原生 SQL，绕开 GQL 解析与方言翻译。占位符沿用各后端原生风格：MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
 - `is_write=False`（默认）返回 `{"rows", "affectedRows"}` 含结果集行；`is_write=True` 返回影响行数。
 - **非事务路径显式提交**：在 SQL 源上，`store.transaction` 之外的写命令由执行器显式提交（成功 `commit`；失败先 `rollback` 再上抛）。`aiosqlite` 默认非 autocommit，若缺少这次提交，写入只在当前连接可见、而 `execute_raw` 仍报成功 —— 是静默丢数据的隐患。需要整组原子的多语句写入，请放进 `store.transaction`。
@@ -495,6 +495,8 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
   并发出 `mongo_transaction_unsupported` 反馈（`deployment: standalone|unknown`）（允许降级，绝不静默假装已事务化）；
 - **未实现 `open_transaction` 的 SQL 执行器**：会话内按原样执行，并发出
   `session_not_atomic` 反馈（允许降级，绝不静默假装已事务化）；
+- **未实现 `with_transaction` 的 SQL 执行器**：`store.transaction` / 顶层原子包络内按原样执行，
+  并发出 `transaction_not_atomic` 反馈（与 `session_not_atomic` 对称，允许降级，绝不静默假装已事务化）；
 - **归档幂等**：`remove` 的归档采用按 `_id` upsert 的语义，因此部分失败后的重试不会再因重复 `_id` 而失败。
 - 读一致性：只有在显式会话内的多条读才共享同一事务连接；会话外读不额外开启事务。
 - **跨源写（非会话）**：一次写调用涉及 ≥2 个数据源时**无法原子**，按顺序执行，并发出一条

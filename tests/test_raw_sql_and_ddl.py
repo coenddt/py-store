@@ -108,11 +108,18 @@ def test_transaction_without_with_transaction_runs_plainly():
         return {'docs': None, 'rows': [], 'affectedRows': 0}
 
     datasource.set_connections({'db': {'kind': 'sqlite', 'exec': fake_exec}})
+    events = []
+    feedback.set_sink(events.append)
 
     async def body():
         return 'ok'
 
     assert _run(store.transaction('db', body)) == 'ok'
+    warned = [e for e in events if e.get('type') == 'transaction_not_atomic']
+    assert len(warned) == 1, '缺 with_transaction 的事务作用域必须显式声明，不静默'
+    assert warned[0]['code'] == 'transactionNotAtomic'
+    assert warned[0]['source'] == 'db'
+    assert warned[0]['kind'] == 'sqlite'
 
 
 # ─── ② ddl.generate ─────────────────────────────────────────

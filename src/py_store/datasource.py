@@ -307,6 +307,24 @@ def _warn_mongo_unsupported(source, deployment):
     })
 
 
+def _warn_transaction_not_atomic(source, kind):
+    """事务作用域所在 SQL 执行器未实现 ``with_transaction`` → 按原样执行（允许降级，禁止静默）
+
+    与 ``session_not_atomic``（会话路径）对称：同一类降级在两条入口（``store.transaction``
+    与 ``store.session``）都必须显式声明，不留静默口子。
+    """
+    _emit_feedback({
+        'type': 'transaction_not_atomic',
+        'code': 'transactionNotAtomic',
+        'layer': 'datasource',
+        'message': ('数据源 %s(%s) 未实现 with_transaction：'
+                    '事务作用域内命令按原样执行（非原子）' % (source, kind)),
+        'hint': '为该执行器实现 with_transaction，或将写命令收敛到已支持事务的数据源',
+        'source': source,
+        'kind': kind,
+    })
+
+
 async def _rollback_savepoint(tx, source, name):
     """回滚到保存点并释放；任一失败发 savepoint_failed（不掩盖原始错误）"""
     errors = []
@@ -353,6 +371,8 @@ async def run_in_transaction(source, fn):
 
       - 会话内调用：并入会话（事务边界由会话统一管理），不另开事务；
       - SQL 源且执行器实现 with_transaction：包事务；同源嵌套开 SAVEPOINT sp_<n>；
+      - SQL 源且执行器**未**实现 with_transaction：按原样执行并发 ``transaction_not_atomic``
+        （降级不静默，与 ``store.session`` 的 ``session_not_atomic`` 对称）；
       - Mongo 源：探测可事务（replica set / sharded）→ 包 session 事务；standalone / unknown
         → 发 ``mongo_transaction_unsupported`` 并按原样执行（绝不静默假装已事务化）；
       - Mongo 无保存点原语：同源嵌套走既有 ``nested_savepoint_unsupported`` 降级声明；
@@ -366,9 +386,11 @@ async def run_in_transaction(source, fn):
     parent = _tx_override.get() or {}
 
     if isinstance(conn, Mapping):
-        # ── SQL 分支（既有语义，保持不变）──
+        # ── SQL 分支（事务作用域）──
         with_tx = conn.get('with_transaction')
         if not callable(with_tx):
+            # 降级不静默：与 store.session 的 session_not_atomic 对称，显式声明本事务作用域未生效
+            _warn_transaction_not_atomic(source, conn.get('kind'))
             return await fn()
         if source in parent:
             # 同源嵌套事务：在已持有的事务连接上开保存点（内层失败只回滚本层，外层可继续）
