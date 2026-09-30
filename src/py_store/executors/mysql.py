@@ -95,8 +95,9 @@ def create(driver, options=None):
                 else:
                     affected_rows = int(cur.rowcount or 0)
                     # 阶段2：autoincrement 主键写后自增值回读（MySQL 无 RETURNING，
-                    # lastrowid = 本连接最近一次 INSERT 生成的自增值）
-                    insert_id = cur.lastrowid
+                    # lastrowid = 本连接最近一次 INSERT 生成的自增值；
+                    # getattr 防御：无该属性的驱动/测试桩等价「无自增值」）
+                    insert_id = getattr(cur, 'lastrowid', None)
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows, 'insertId': insert_id}
 
     async def exec_(plan):

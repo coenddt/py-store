@@ -387,7 +387,8 @@ def test_ddl_timestamps_and_no_index():
     assert '"createdAt" BIGINT' in sql
     assert '"updatedAt" BIGINT' in sql
     assert '"__present" TEXT' in sql
-    assert 'INDEX' not in sql.upper()
+    # 阶段3：schema.indexes 落地为 CREATE INDEX（原「不建索引」铁律已放开）
+    assert 'CREATE INDEX "idx_ddl_ts_name" ON "ddl_ts" ("name" ASC)' in sql
 
 
 def test_ddl_backend_types():
