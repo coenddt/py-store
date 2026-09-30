@@ -81,7 +81,7 @@ def _columns(defn, backend):
             continue
         if ftype in _NON_COLUMN:
             # object/array → 单列 JSON 文本（同 core field_column_ref::Json）
-            cols.append((name, _JSON_TYPE[i], False))
+            cols.append((name, _JSON_TYPE[i], False, False))
             continue
         if ftype not in _TYPES:
             raise ValueError(
