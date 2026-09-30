@@ -128,8 +128,16 @@ async def exec_mongo(db, cmd, session=None):
         _norm_filter(cmd)
         return await coll.find_one(cmd['filter'], cmd.get('projection'), **_opts(session))
     if kind == 'insertOne':
-        await coll.insert_one(cmd['doc'], **_opts(session))
-        return cmd['doc']
+        doc = cmd.get('doc') or {}
+        # 阶段2（no-error-masking）：Mongo 无自增语义 —— `_id` 缺失的文档只可能来自
+        # 声明 strategy=autoincrement 的 schema（常规 schema 该形态已被 core 拦截）。
+        # 禁止 ObjectId 静默顶替自增契约，显式报错。
+        if not doc.get('_id'):
+            raise ValueError(
+                'AUTOINCREMENT_NOT_SUPPORTED: schema 声明了 strategy="autoincrement"，'
+                'MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源')
+        await coll.insert_one(doc, **_opts(session))
+        return doc
     if kind == 'insertMany':
         if cmd.get('upsertById'):
             # 归档幂等（core plan_archive_docs）：按 _id 逐条覆盖 —— 「归档成功但删除失败」
@@ -137,6 +145,10 @@ async def exec_mongo(db, cmd, session=None):
             for doc in cmd['docs']:
                 await coll.replace_one({'_id': doc['_id']}, doc, **_opts(session, upsert=True))
             return {'insertedCount': len(cmd['docs'])}
+        if cmd['docs'] and any(not (d or {}).get('_id') for d in cmd['docs']):
+            raise ValueError(
+                'AUTOINCREMENT_NOT_SUPPORTED: schema 声明了 strategy="autoincrement"，'
+                'MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源')
         await coll.insert_many(cmd['docs'], **_opts(session))
         return {'insertedCount': len(cmd['docs'])}
     if kind == 'findOneAndUpdate':

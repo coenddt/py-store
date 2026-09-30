@@ -31,12 +31,14 @@ def create(driver, options=None):
         for stmt in plan.get('stmts') or []:
             params = list(stmt.get('params') or [])
             shape = stmt.get('rowShape')
-            if shape or not stmt.get('isWrite'):
-                # SELECT 或带 RETURNING 的写语句 → 取结果集；
+            if shape or not stmt.get('isWrite') or 'RETURNING' in stmt['text'].upper():
+                # SELECT 或带 RETURNING 的写语句 → 取结果集（阶段2：autoincrement 的
+                #  无 rowShape，靠文本含 RETURNING 识别）；
                 # 无 rowShape 的读（Host 原生 SQL 逃生口 execute_raw）亦取行
                 records = await conn.fetch(stmt['text'], *params)
                 rows = normalize_rows([dict(r) for r in records])
-                docs = _core.restore_rows(shape, rows)
+                if shape:
+                    docs = _core.restore_rows(shape, rows)
             else:
                 affected_rows = _affected(await conn.execute(stmt['text'], *params))
         return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}

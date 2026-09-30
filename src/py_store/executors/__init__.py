@@ -115,7 +115,19 @@ def shape_result(cmd, out):
     if kind == 'countDocuments':
         return _scalar(out.get('rows'))
     if kind == 'insertOne':
-        return cmd.get('doc')
+        doc = cmd.get('doc')
+        # 阶段2：autoincrement 主键 —— doc 无 `_id`（core 不注入）→ 从执行包络回读
+        # 自增值（PG/SQLite RETURNING 走 rows；MySQL/SQLite lastrowid 走 insertId）。
+        # 包络两者皆无 → 保持无 `_id` 返回（SQL 侧不该发生；Mongo 路径已在执行器报错）。
+        if isinstance(doc, dict) and not doc.get('_id'):
+            rid = None
+            if out.get('rows') and isinstance(out['rows'][0], dict) and '_id' in out['rows'][0]:
+                rid = out['rows'][0]['_id']
+            elif out.get('insertId') is not None:
+                rid = out['insertId']
+            if rid is not None:
+                return {**doc, '_id': rid}
+        return doc
     if kind == 'insertMany':
         return {'insertedCount': len(cmd.get('docs') or [])}
     if kind == 'updateMany':

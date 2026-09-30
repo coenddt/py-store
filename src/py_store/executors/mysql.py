@@ -83,6 +83,7 @@ def create(driver, options=None):
         docs = None
         rows = None
         affected_rows = 0
+        insert_id = None
         async with conn.cursor(DictCursor) as cur:
             for stmt in plan.get('stmts') or []:
                 await cur.execute(_to_pyformat(stmt['text']), list(stmt.get('params') or []))
@@ -93,7 +94,10 @@ def create(driver, options=None):
                         docs = _core.restore_rows(shape, rows)
                 else:
                     affected_rows = int(cur.rowcount or 0)
-        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
+                    # 阶段2：autoincrement 主键写后自增值回读（MySQL 无 RETURNING，
+                    # lastrowid = 本连接最近一次 INSERT 生成的自增值）
+                    insert_id = cur.lastrowid
+        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows, 'insertId': insert_id}
 
     async def exec_(plan):
         """非事务路径：整个 plan 固定在同一连接执行，成功后显式 commit

@@ -21,8 +21,12 @@ async def insert(schema_name, data, route_override=None):
     plan = _call(lambda: _core.plan_insert(
         schema_name, data, _now_for(schema_name), _generate_id(s) if s['idPrefix'] else '', _ctx(),
         route_override))
-    await _exec(plan['command'])
-    return plan['returns']
+    result = await _exec(plan['command'])
+    returns = plan['returns']
+    # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
+    if isinstance(returns, dict) and not returns.get('_id')             and isinstance(result, dict) and result.get('_id') is not None:
+        returns = {**returns, '_id': result['_id']}
+    return returns
 
 
 async def insert_many(schema_name, docs, route_override=None):
@@ -31,6 +35,13 @@ async def insert_many(schema_name, docs, route_override=None):
         return []
 
     s = _get_schema(schema_name)
+    # 阶段2（no-error-masking）：autoincrement 的批量自增值回读不可靠（MySQL 批量
+    # lastrowid 仅首行、且并发插入会留间隙）→ 显式报错，不静默产出错误 _id
+    id_fdef = (s.get('fields') or {}).get('_id') or {}
+    if id_fdef.get('strategy') == 'autoincrement' and any(not (d or {}).get('_id') for d in docs):
+        raise ValueError(
+            'AUTOINCREMENT_NOT_SUPPORTED: insert_many 不支持 autoincrement schema'
+            '（批量自增值回读不可靠）；请逐条 insert 或显式提供 _id')
     plan = _call(lambda: _core.plan_insert_many(
         schema_name,
         docs,
@@ -74,11 +85,50 @@ async def update(schema_name, condition, data, options=None, route_override=None
     return await run_atomic(sources, _do)
 
 
+async def _exec_with_pre(command):
+    """执行带 ``preCommand`` 的命令（阶段1：mutation 关系谓词归一）。
+
+    preCommand（aggregate 取命中 `_id`）先行执行，把结果 `_id` 列表回填进主命令
+    filter 的 `_id.$in` 占位（core 规划注入 ``"__REL_PRED_IDS__"``）。空集 → `$in: []`，
+    各后端语义一致 = 不命中任何行。同批可传 ``extra_targets``：其他携带同一占位的
+    命令（如 remove 的归档 findCommand）一并回填，避免二次执行 preCommand。"""
+    pre = command.get('preCommand')
+    if not pre:
+        return await _exec(command)
+    ids = []
+    for doc in await _exec(pre):
+        if isinstance(doc, dict) and '_id' in doc:
+            ids.append(doc['_id'])
+    return await _fill_pre_ids(command, ids)
+
+
+def _fill_pre_ids(command, ids):
+    """把 preCommand 取得的 `_id` 列表回填进命令 filter 的 `$in` 占位（递归查找后执行）。
+
+    core 注入的占位可能位于 `$and` 数组内（改写条件已有其他键时），故递归遍历。"""
+    main = {k: v for k, v in command.items() if k != 'preCommand'}
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for k, v in list(node.items()):
+                if isinstance(v, dict) and v.get('$in') == '__REL_PRED_IDS__':
+                    node[k] = {'$in': list(ids)}
+                else:
+                    _walk(v)
+        elif isinstance(node, list):
+            for it in node:
+                _walk(it)
+
+    if 'filter' in main:
+        _walk(main['filter'])
+    return _exec(main)
+
+
 async def update_many(schema_name, condition, data, route_override=None):
     """批量更新（支持原生操作符）"""
     out = _call(lambda: _core.plan_update_many(
         schema_name, condition, data, _now_for(schema_name), _ctx(), route_override))
-    result = await _exec(out['command'])
+    result = await _exec_with_pre(out['command'])
     return {'modifiedCount': result.modified_count}
 
 
@@ -91,15 +141,22 @@ async def remove(schema_name, condition, route_override=None):
 
     async def _do_remove():
         archived_count = 0
+        # 关系谓词：先执行 deleteCommand.preCommand 取命中 _id（归档 find 与删除共用同一列表）
+        pre = (out.get('deleteCommand') or {}).get('preCommand')
+        ids = None
+        if pre:
+            ids = [d['_id'] for d in await _exec(pre) if isinstance(d, dict) and '_id' in d]
         if out.get('findCommand'):
-            docs = await _exec(out['findCommand'])
+            find_cmd = out['findCommand']
+            docs = await (_fill_pre_ids(find_cmd, ids) if ids is not None else _exec(find_cmd))
             if docs:
                 arch = _call(lambda: _core.plan_archive_docs(
                     schema_name, docs, _now_for(schema_name), route_override))
                 await _exec(arch['command'])
                 archived_count = len(docs)
 
-        result = await _exec(out['deleteCommand'])
+        result = await (_fill_pre_ids(out['deleteCommand'], ids)
+                        if ids is not None else _exec(out['deleteCommand']))
         return {'deletedCount': result.deleted_count, 'archivedCount': archived_count}
 
     sources = _sources_of(out)

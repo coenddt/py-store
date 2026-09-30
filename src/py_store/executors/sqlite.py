@@ -32,6 +32,7 @@ def create(db, options=None):
         docs = None
         rows = None
         affected_rows = 0
+        insert_id = None
         for stmt in plan.get('stmts') or []:
             cur = await db.execute(stmt['text'], _bind(stmt.get('params')))
             try:
@@ -43,9 +44,12 @@ def create(db, options=None):
                         docs = _core.restore_rows(shape, rows)
                 else:
                     affected_rows = int(cur.rowcount or 0)
+                    # 阶段2：autoincrement 主键写后自增值回读（非 RETURNING 的 INSERT 走
+                    # lastrowid；带 RETURNING 的写语句走上方 rows 分支）
+                    insert_id = cur.lastrowid
             finally:
                 await cur.close()
-        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
+        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows, 'insertId': insert_id}
 
     async def exec_(plan):
         """非事务路径：plan 成功后显式提交（aiosqlite 默认非 autocommit，

@@ -8,7 +8,9 @@ DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回
   - 每表必建 __present 哨兵列（形态 ,f1,f2,；同 core write/insert.rs::present_value）；
   - timestamps !== false → 追加 createdAt / updatedAt（同 core schema/registry.rs::add_timestamp_fields）；
   - 归档表 <collection>_deleted 由 registry 自动派生，本模块按已注册 def 逐表生成（不特判）；
-  - 不生成 CREATE INDEX（SQL 后端不建索引，schema.indexes 仅元数据，铁律 6）。
+  - schema.indexes（Mongo 形态 `{keys: {f: 1|-1}, options/inline}`）→ CREATE [UNIQUE] INDEX
+    （阶段 3 索引落地；原「仅元数据不建索引」铁律 6 子项按用户裁决放开，见
+    common-store/事务型能力增补执行文档.md 附录 D）。
 
 生成器只产出文本、不执行 —— 不违反铁律 6（绝不写 DDL 回库）。
 对齐 nodejs-store/src/ddl.js（两端输出逐字节一致）。
@@ -37,6 +39,10 @@ _NON_COLUMN = ('object', 'array')
 # object/array 字段的列类型（JSON 文本列；同 core Backend::json_type_name）
 _JSON_TYPE = ('JSON', 'jsonb', 'TEXT')
 _ID_TYPE = ('VARCHAR(64)', 'TEXT', 'TEXT')
+# 阶段2：`_id` 声明 strategy=autoincrement 时的自增列类型（MySQL AUTO_INCREMENT 列
+# 须被索引 —— 表级 PRIMARY KEY 满足；SQLite 语法要求 PRIMARY KEY AUTOINCREMENT 相邻，
+# 由 _create_table 的 pk+auto 分支拼接；PG 用 SERIAL）
+_ID_AUTO_TYPE = ('INT AUTO_INCREMENT', 'SERIAL', 'INTEGER')
 _PRESENT_TYPE = ('VARCHAR(255)', 'TEXT', 'TEXT')
 _TIMESTAMP_FIELDS = ('createdAt', 'updatedAt')
 _MYSQL_PRESENT_MAX = 255
@@ -67,7 +73,11 @@ def _columns(defn, backend):
     for name, fdef in fields.items():
         ftype = _declared_type(fdef)
         if name == '_id':
-            cols.append((name, _ID_TYPE[i], True))
+            fdef = fdef if isinstance(fdef, dict) else {}
+            if fdef.get('strategy') == 'autoincrement':
+                cols.append((name, _ID_AUTO_TYPE[i], True, True))
+            else:
+                cols.append((name, _ID_TYPE[i], True, False))
             continue
         if ftype in _NON_COLUMN:
             # object/array → 单列 JSON 文本（同 core field_column_ref::Json）
@@ -77,14 +87,14 @@ def _columns(defn, backend):
             raise ValueError(
                 f'DDL 生成：字段 "{defn["name"]}.{name}" 类型 {ftype!r} 未知，'
                 f'支持 {sorted(_TYPES)}')
-        cols.append((name, _TYPES[ftype][i], False))
+        cols.append((name, _TYPES[ftype][i], False, False))
     if not any(c[2] for c in cols):
         raise ValueError(f'DDL 生成：schema "{defn["name"]}" 缺少 _id 字段')
     if defn.get('timestamps') is not False:
         for ts in _TIMESTAMP_FIELDS:
             if not any(c[0] == ts for c in cols):
-                cols.append((ts, _TYPES['number'][i], False))
-    cols.append(('__present', _PRESENT_TYPE[i], False))
+                cols.append((ts, _TYPES['number'][i], False, False))
+    cols.append(('__present', _PRESENT_TYPE[i], False, False))
     return cols
 
 
@@ -110,8 +120,11 @@ def _create_table(defn, backend):
     if backend == 'mysql':
         _warn_present_overflow(defn, cols)
     lines = []
-    for name, ctype, pk in cols:
-        if pk and backend == 'mysql':
+    for name, ctype, pk, auto in cols:
+        if pk and auto and backend == 'sqlite':
+            # SQLite 语法要求 AUTOINCREMENT 紧跟 PRIMARY KEY
+            lines.append(f'  {_q(backend, name)} {ctype} PRIMARY KEY AUTOINCREMENT')
+        elif pk and backend == 'mysql':
             lines.append(f'  {_q(backend, name)} {ctype} NOT NULL')
         elif pk:
             lines.append(f'  {_q(backend, name)} {ctype} PRIMARY KEY')
@@ -120,6 +133,29 @@ def _create_table(defn, backend):
     if backend == 'mysql':
         lines.append(f'  PRIMARY KEY ({_q(backend, "_id")})')
     return f'CREATE TABLE {_q(backend, table)} (\n' + ',\n'.join(lines) + '\n);'
+
+
+def _index_stmts(defn, backend):
+    """schema.indexes → CREATE [UNIQUE] INDEX 语句列表（阶段 3 索引落地）。
+
+    索引名 `idx_<collection>_<f1>_<f2>`（对齐 SQL 常规命名）；keys 值 1/-1 → ASC/DESC。
+    """
+    out = []
+    table = defn.get('collection') or defn.get('name')
+    for idx in defn.get('indexes') or []:
+        if not isinstance(idx, dict):
+            continue
+        keys = idx.get('keys')
+        if not isinstance(keys, dict) or not keys:
+            continue
+        unique = bool(idx.get('unique') or (idx.get('options') or {}).get('unique'))
+        cols = ', '.join(
+            f"{_q(backend, k)} {'DESC' if v == -1 else 'ASC'}" for k, v in keys.items())
+        name = 'idx_' + table + '_' + '_'.join(keys)
+        out.append(
+            f"CREATE {'UNIQUE ' if unique else ''}INDEX {_q(backend, name)} "
+            f"ON {_q(backend, table)} ({cols})")
+    return out
 
 
 def generate(backend, names=None):
@@ -142,6 +178,7 @@ def generate(backend, names=None):
             continue
         seen_tables.add(table)
         blocks.append(_create_table(defn, backend))
+        blocks.extend(_index_stmts(defn, backend))
     if dup:
         _emit_feedback({
             'type': 'ddl_duplicate_table',
