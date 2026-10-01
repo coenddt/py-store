@@ -338,6 +338,7 @@ async def run_backend(kind, oracle=None):
     """统一 feedback sink；对每个 case 执行 reset→set_context→steps→断言。"""
     fb.set_sink(h.events_all.append)
     h.backend = kind
+    h.driver = None  # setup 后填充（阶段4 T4 迁移用例执行 DDL 用）
     return await _run_backend_inner(kind, oracle)
 
 
@@ -346,6 +347,7 @@ async def _run_backend_inner(kind, oracle):
     driver, conn = await setup_backend(kind)
     if driver is None:
         return {'backend': kind, 'available': False, 'skip_reason': conn, 'results': []}
+    h.driver = driver
     register_all()
     if kind != 'mongodb':
         # 阶段3 建→读闭环：手工 DDL 建表后，执行引擎 ddl.generate 产的 CREATE INDEX

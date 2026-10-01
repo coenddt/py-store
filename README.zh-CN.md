@@ -518,6 +518,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 - **`$group by` one 关系路径** —— `by: ['product.category']` 编译为 `$lookup`+`$unwind`（Mongo）/ `LEFT JOIN`（SQL）；many 路径显式报错（扇出破坏计数语义）。
 - **自增主键** —— `_id: {'type': 'int', 'strategy': 'autoincrement'}`；PG/SQLite 经 `INSERT…RETURNING` 回读、MySQL 经 lastrowid；MongoDB 与 `insert_many` 显式报 `AUTOINCREMENT_NOT_SUPPORTED`（禁 ObjectId 静默顶替）。
 - **索引 DDL** —— `schema.indexes`（Mongo 形态）→ `ddl.generate` 产出 `CREATE [UNIQUE] INDEX idx_<表>_<字段>`，MySQL/PostgreSQL/SQLite 三方言逐字节一致。
+- **声明式迁移** —— `ddl.diff_defs(old, new)` + `ddl.generate_migration(backend, old, new)`：白名单制（加表/加列/加索引/类型放宽），纯函数按方言产 SQL；白名单外显式报 `MIGRATION_UNSUPPORTED`。
 
 ## 常见问题
 
