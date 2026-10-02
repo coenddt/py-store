@@ -36,7 +36,7 @@ from .core import core
 from .llm import get_llm as _get_llm
 from .schema import text2query
 
-__all__ = ['AskResult', 'AskExhausted', 'ask', 'describe_for_ai']
+__all__ = ['AskExhausted', 'AskResult', 'ask', 'describe_for_ai']
 
 
 # ─── 轨迹载体 ──────────────────────────────────────────────────

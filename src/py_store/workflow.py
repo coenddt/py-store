@@ -229,7 +229,7 @@ def validate_defn(defn):
         errors.append('steps 必填（非空数组，线性步骤序列）')
         return errors
 
-    defined_as = set()
+    defined_as: set[str] = set()
     for i, step in enumerate(steps):
         where = f'steps[{i}]'
         if not isinstance(step, dict):
@@ -257,7 +257,7 @@ def validate_defn(defn):
             errors.append(f'{where}: gql 内嵌占位符不支持（注入面）；动态参数请走 params 绑定')
         # 占位符前向引用：扫描该步全部占位符字段（gql 除外——已禁）
         scan_pool = {k: v for k, v in step.items() if k not in ('op', 'gql')}
-        for inner, whole in _scan_placeholders(scan_pool):
+        for inner, _whole in _scan_placeholders(scan_pool):
             _check_expr(inner, defined_as, errors, where)
         # when 结构
         when = step.get('when')
@@ -458,7 +458,7 @@ def _eval_when(when, input_map, ctx_map):
         return left >= right
     except TypeError:
         raise _StepFailure(
-            f'when 算子 {op} 的操作数类型不可比: {type(left).__name__} vs {type(right).__name__}')
+            f'when 算子 {op} 的操作数类型不可比: {type(left).__name__} vs {type(right).__name__}') from None
 
 
 # ─── 执行器（线性步骤循环 + fail-fast；§2 生命线） ─────────────
@@ -475,10 +475,10 @@ def _prescan_sources(defn, route_override, now, ctx):
             continue
         try:
             pool = _new_id_pool(step['model'], step['data'])
-            plan = _call(lambda: _core.plan_mutation(
-                step['model'], step['data'], now, pool, ctx, route_override))
+            plan = _call(lambda s=step, p=pool: _core.plan_mutation(
+                s['model'], s['data'], now, p, ctx, route_override))
             sources |= _sources_of(plan)
-        except Exception as e:  # noqa: BLE001 预扫失败降级裸跑（显式声明，禁静默）
+        except Exception as e:  # 预扫失败降级裸跑（显式声明，禁静默）
             _emit_feedback({
                 'type': 'workflow_prescan_failed',
                 'code': 'workflowPrescanFailed',
@@ -562,7 +562,7 @@ async def _run_steps(defn, input_map, ctx_map, trace, dry, route_override):
             if e.index is None:
                 e.index = i
             raise
-        except Exception as e:  # noqa: BLE001 步骤 Err → fail-fast（包一层定位，错误不吞）
+        except Exception as e:  # 步骤 Err → fail-fast（包一层定位，错误不吞）
             msg = f'步骤 {i}（{op}）执行失败: {e}'
             trace.append({**entry, 'state': 'failed', 'error': msg})
             raise _StepFailure(msg, i) from e

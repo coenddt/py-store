@@ -256,8 +256,8 @@ def diff_defs(old_defn, new_defn):
     首批白名单：addColumn / widenColumn / addIndex（addTable 由 generate_migration 在
     old_defn 为 None 时处理）。白名单外变更记入 errors（调用方必须显式处理，禁静默）。
     """
-    changes = []
-    errors = []
+    changes: list = []
+    errors: list[str] = []
     old_fields = (old_defn or {}).get('fields') or {}
     new_fields = new_defn.get('fields') or {}
 
