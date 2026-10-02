@@ -49,6 +49,21 @@ def scoped_roles(roles):
         _ctx.reset(token)
 
 
+@contextmanager
+def scoped_context(ctx):
+    """以完整上下文 ``ctx`` 进入临时权限上下文（token-set/reset，嵌套安全），退出自动恢复。
+
+    与 :func:`scoped_roles` 同构；区别在于整体替换 ctx（保留调用方原上下文于外层），
+    供 AI 问数（``ask``）等把服务端构造的用户上下文显式注入执行面的场景——
+    不用「set_context + finally 清空」写法（嵌套时误清外层，静默失守方向）。
+    """
+    token = _ctx.set(ctx)
+    try:
+        yield
+    finally:
+        _ctx.reset(token)
+
+
 async def run_as_internal(fn):
     """在内部上下文中执行操作（绕过权限检查），结束后自动恢复上下文"""
     prev = get_context()
@@ -103,6 +118,39 @@ def get_writable_fields(schema, ctx):
 
 def filter_writable_data(schema, ctx, data):
     return core.filter_writable_data(_model(schema), ctx, data)
+
+
+# ─── RBAC 动态策略（core 判决；本模块零判决，仅透传） ─────────
+
+
+def set_rbac(policy):
+    """注入/清除 RBAC 策略。dict = 注入（解析失败 core 抛错）；None = 清除关闭"""
+    return core.set_rbac(policy)
+
+
+def rbac_enabled():
+    """RBAC 策略是否已注入"""
+    return core.rbac_enabled()
+
+
+def rbac_can(model, action, ctx=None):
+    """RBAC 动作判决：action ∈ {read, insert, update, remove}；RBAC 不介入 → True"""
+    return core.rbac_can(_model(model), action, ctx)
+
+
+def rbac_readable_fields(model, ctx=None):
+    """RBAC 叠加后的可读字段集（静态 ∩ readFields）；无 ctx → None 不裁剪"""
+    return core.rbac_readable_fields(_model(model), ctx)
+
+
+def rbac_writable_fields(model, ctx=None):
+    """RBAC 叠加后的可写字段集（静态 ∩ writeFields）；无 ctx → None 不裁剪"""
+    return core.rbac_writable_fields(_model(model), ctx)
+
+
+def rbac_row_condition(model, action, ctx=None):
+    """RBAC 行级条件（ownerOnly/condition 的 OR 合并体）；action ∈ {read, update, remove}"""
+    return core.rbac_row_condition(_model(model), action, ctx)
 
 
 # ─── 自定义错误 ──────────────────────────────────────────────

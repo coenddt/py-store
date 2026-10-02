@@ -20,18 +20,19 @@ py-store — 轻量多后端数据层（Python 版，Rust 单核心架构；支�
 """
 
 from collections.abc import Mapping
-from contextlib import contextmanager
 from typing import Any
 
 from pymongo.errors import PyMongoError
 
 from . import (
+    ask,
     crud,
     datasource,
     ddl,
     feedback,
     permission,
     schema,
+    workflow,
 )
 from . import (
     executors as executors,
@@ -39,10 +40,16 @@ from . import (
 from . import (
     introspect as introspect,
 )
+from .ask import AskExhausted as AskExhausted
+from .ask import AskResult as AskResult
 from .datasource import NativeCommandError as NativeCommandError
 from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
 from .datasource import Session as Session
+from .llm import get_llm as get_llm
+from .llm import make_openai_compat as make_openai_compat
+from .llm import register_llm as register_llm
+from .schema import text2query
 from .sync import sync_schema
 
 
@@ -50,21 +57,6 @@ def _build_pipeline(gql, params=None):
     """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
     return schema.core.build_pipeline(
         gql, params if params is not None else {}, permission.get_context())
-
-
-@contextmanager
-def text2query():
-    """以 text2query 档执行（功能收缩 + 硬限制），退出恢复原档位。
-
-    AI 问数链路入口；与 ``permission.scoped_roles`` 同构（token-set/reset，嵌套安全）。
-    进入档位即等效强制携带用户上下文（core `ensure_profile_ctx`，见执行文档 §4.2）。
-    """
-    prev = schema.get_profile()
-    schema.set_profile('text2query')
-    try:
-        yield
-    finally:
-        schema.set_profile(prev)
 
 
 class Store:
@@ -203,6 +195,35 @@ class Store:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
         return ddl.generate(backend, names)
 
+    # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
+    def registerWorkflow(self, defn: dict) -> dict:
+        """注册工作流定义（注册即静态校验，白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
+        return workflow.register(defn)
+
+    def workflows(self, ctx: dict | None = None) -> list[str]:
+        """全部可见工作流名（read 白名单过滤）"""
+        return workflow.list(ctx)
+
+    def getWorkflow(self, name: str, ctx: dict | None = None) -> dict:
+        """按名取工作流定义（read 白名单过滤；不可见与不存在同形——防枚举）"""
+        return workflow.get(name, ctx)
+
+    async def runWorkflow(self, name: str, input: dict | None = None, *,
+                          dry_run: bool = False,
+                          route_override: dict | None = None) -> dict[str, Any]:
+        """触发工作流 → 完整 run 文档（终态 failed/rejected 不抛错，以 run.status + error 表达）"""
+        return await workflow.run(name, input, dry_run=dry_run, route_override=route_override)
+
+    # ── AI 问数（L1，只读）：自然语言 → LLM 翻译 → text2query 沙箱执行 → 结构化回喂 ──
+    # 护栏（档位/ctx/route_override）全部服务端硬编码于 ask.py，零暴露进 LLM 消息面（D5）
+    # （先于 ask 赋值取 describe_for_ai：赋值后类体命名空间的 ask 不再是模块）
+    describeForAi = staticmethod(ask.describe_for_ai)
+    describe_for_ai = describeForAi
+    ask = staticmethod(ask.ask)
+    # 问数结果/耗尽错误（实例可被 store.AskExhausted 捕获；对齐 PermissionError 先例）
+    AskResult = AskResult
+    AskExhausted = AskExhausted
+
     # ── 驼峰别名（与上方同名蛇形方法为**同一实现**，仅命名差异）──
     queryOne = query_one
     queryWithCount = query_with_count
@@ -214,6 +235,10 @@ class Store:
     executeRaw = execute_raw
     executeNative = execute_native
     generateDdl = generate_ddl
+    # 工作流编排（蛇形别名与上方驼峰同实现）
+    register_workflow = registerWorkflow
+    run_workflow = runWorkflow
+    get_workflow = getWorkflow
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
@@ -243,6 +268,19 @@ class Store:
     set_require_context = staticmethod(schema.set_require_context)
     requireContext = staticmethod(schema.require_context)
     require_context = staticmethod(schema.require_context)
+    # RBAC 动态策略（判决唯一在 core；本层仅透传配置与查询面）
+    setRbac = staticmethod(permission.set_rbac)
+    set_rbac = staticmethod(permission.set_rbac)
+    rbacEnabled = staticmethod(permission.rbac_enabled)
+    rbac_enabled = staticmethod(permission.rbac_enabled)
+    rbacCan = staticmethod(permission.rbac_can)
+    rbac_can = staticmethod(permission.rbac_can)
+    rbacReadableFields = staticmethod(permission.rbac_readable_fields)
+    rbac_readable_fields = staticmethod(permission.rbac_readable_fields)
+    rbacWritableFields = staticmethod(permission.rbac_writable_fields)
+    rbac_writable_fields = staticmethod(permission.rbac_writable_fields)
+    rbacRowCondition = staticmethod(permission.rbac_row_condition)
+    rbac_row_condition = staticmethod(permission.rbac_row_condition)
     # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
     # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
     setProfile = staticmethod(schema.set_profile)
