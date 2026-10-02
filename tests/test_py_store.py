@@ -98,10 +98,14 @@ def test_perm_scoped_roles_and_run_as_internal():
 def test_perm_schema_read_write():
     s = _sc.get('PermModel')
     assert perm.can_read_schema(s, {'roles': ['seller']}) is True
-    assert perm.can_read_schema(s, {'roles': ['admin']}) is True
+    # 清单化语义（设计 §11.5）：admin 不再默认放行——不在白名单即拒，显式豁免后直通
+    assert perm.can_read_schema(s, {'roles': ['admin']}) is False
     assert perm.can_read_schema(s, {'roles': ['guest']}) is False
     assert perm.can_write_schema(s, {'roles': ['seller']}) is True
     assert perm.can_write_schema(s, {'roles': ['guest']}) is False
+    perm.set_exempt_roles(['admin'])
+    assert perm.can_read_schema(s, {'roles': ['admin']}) is True
+    perm.set_exempt_roles([])
 
 
 def test_perm_owner_condition():

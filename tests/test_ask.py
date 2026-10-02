@@ -354,20 +354,26 @@ def test_t8_summary_without_ctx_names_only():
 def test_t8_admin_summary_and_compute_skip_warning():
     """admin 视角：role 进摘要；read 白名单计算列无论角色一律收窄并告警（同签名去重）"""
     _ask_mod._COMPUTE_SKIP_SIGS.clear()  # 告警去重为进程级，单测内复位以保证可断言
-    events = []
-    feedback.set_sink(events.append)
-    s = store.describe_for_ai(CTX_ADMIN)
-    aku = next(m for m in s if m['name'] == 'AkUser')
-    assert aku['fields']['role'] == 'string'
-    assert 'displayName' not in aku['computes']
-    assert 'upperName' in aku['computes']
-    assert 'itemCount' in next(m for m in s if m['name'] == 'AkOrder')['computes']
-    warns = [e for e in events if e['type'] == 'ask_summary_compute_skipped']
-    assert len(warns) == 1
-    assert warns[0]['model'] == 'AkUser' and warns[0]['compute'] == 'displayName'
-    # 同签名只告警一次（再次 describe 不重复）
-    store.describe_for_ai(CTX_ADMIN)
-    assert len([e for e in events if e['type'] == 'ask_summary_compute_skipped']) == 1
+    # 清单化语义（设计 §11.5）：AkUser.read 白名单不含 admin，admin 视角需显式豁免
+    from py_store import permission as _perm
+    _perm.set_exempt_roles(['admin'])
+    try:
+        events = []
+        feedback.set_sink(events.append)
+        s = store.describe_for_ai(CTX_ADMIN)
+        aku = next(m for m in s if m['name'] == 'AkUser')
+        assert aku['fields']['role'] == 'string'
+        assert 'displayName' not in aku['computes']
+        assert 'upperName' in aku['computes']
+        assert 'itemCount' in next(m for m in s if m['name'] == 'AkOrder')['computes']
+        warns = [e for e in events if e['type'] == 'ask_summary_compute_skipped']
+        assert len(warns) == 1
+        assert warns[0]['model'] == 'AkUser' and warns[0]['compute'] == 'displayName'
+        # 同签名只告警一次（再次 describe 不重复）
+        store.describe_for_ai(CTX_ADMIN)
+        assert len([e for e in events if e['type'] == 'ask_summary_compute_skipped']) == 1
+    finally:
+        _perm.set_exempt_roles([])
 
 
 # ── T9 无 ctx 直接拒绝（fail-secure，A4） ──────────────────────

@@ -320,8 +320,14 @@ def test_permission_wrappers_and_internal_sync_return():
     })
     assert permission.should_inject_owner_condition(
         'CovOwner', {'userId': 'u1', 'roles': ['user']}) is True
+    # 清单化语义（设计 §11.5）：admin 不再默认豁免——creator-only 下同样注入 owner 条件；
+    # 显式豁免后恢复「不注入」
+    assert permission.should_inject_owner_condition(
+        'CovOwner', {'userId': 'u1', 'roles': ['admin']}) is True
+    permission.set_exempt_roles(['admin'])
     assert permission.should_inject_owner_condition(
         'CovOwner', {'userId': 'u1', 'roles': ['admin']}) is False
+    permission.set_exempt_roles([])
     assert permission.get_readable_relations('CovOwner', None) is None, '无上下文不裁剪'
     assert _run(permission.run_as_internal(lambda: 42)) == 42, '同步返回值须原样返回'
 
