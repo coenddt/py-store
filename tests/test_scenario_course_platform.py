@@ -11,17 +11,18 @@
 
 import asyncio
 import datetime
-import sys
 from pathlib import Path
 
 import pytest
 
-# harness 依赖 impl 目录下的 checks / probes / fns（脚本运行退化为模块级 import）
-HARNESS = Path(__file__).resolve().parent.parent / 'example' / 'course-platform' / 'impl'
-sys.path.insert(0, str(HARNESS))
-sys.path.insert(0, str(HARNESS.parent.parent.parent / 'src'))  # py-store/src
+from _scenario_harness import load_scenario_harness
 
-import harness  # noqa: E402
+# 场景 harness 以唯一模块名显式加载（sys.modules 同名冲突防线，见 _scenario_harness.py）：
+# 同进程批跑时 manager-transaction 场景的 harness/checks 与本场景同名，
+# `import harness` 会静默命中缓存拿到别的场景。
+harness = load_scenario_harness(
+    'course_platform_harness',
+    Path(__file__).resolve().parent.parent / 'example' / 'course-platform' / 'impl')
 
 BACKENDS = ['mongodb', 'postgres', 'mysql', 'sqlite']
 _LOOP = None

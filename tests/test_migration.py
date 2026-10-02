@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from py_store import ddl  # noqa: E402
+from py_store import ddl
 
 OLD = {
     'name': 'Order', 'collection': 'orders', 'idPrefix': 'o', 'timestamps': False,

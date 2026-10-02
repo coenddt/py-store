@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT.parent.parent / 'src'))  # py-store/src
 
-from py_store import executors, init, permission, schema as sc, store  # noqa: E402
+from py_store import executors, init, permission, schema as sc, store, workflow  # noqa: E402
 from py_store import feedback as fb  # noqa: E402
 
 # 主场景表 + autoincrement 探针表（均有归档表；探针表 AutoOrder 由 checks.register_auto_schema 注册）
@@ -81,7 +81,7 @@ async def setup_backend(kind):
         except ImportError as e:
             return None, f'缺少 aiosqlite: {e}'
         db = await aiosqlite.connect(':memory:')
-        for stmt in _ddl(kind):
+        for stmt in _ddl(kind) + _builtin_ddl(kind):
             await db.execute(stmt)
         await db.commit()
         return db, executors.create_connection('sqlite', db)
@@ -100,7 +100,7 @@ async def setup_backend(kind):
                     await cur.execute('SELECT 1')
         except Exception as e:
             return None, f'MySQL 不可达（{MYSQL_URI}）: {e}'
-        for stmt in _ddl(kind):
+        for stmt in _ddl(kind) + _builtin_ddl(kind):
             async with pool.acquire() as c:
                 async with c.cursor() as cur:
                     await cur.execute(stmt)
@@ -115,7 +115,7 @@ async def setup_backend(kind):
             await pool.execute('SELECT 1')
         except Exception as e:
             return None, f'PostgreSQL 不可达（{PG_URI}）: {e}'
-        for stmt in _ddl(kind):
+        for stmt in _ddl(kind) + _builtin_ddl(kind):
             await pool.execute(stmt)
         return pool, executors.create_connection('postgres', pool)
     if kind == 'mongodb':
@@ -137,6 +137,19 @@ async def setup_backend(kind):
 def _ddl(kind):
     path = ROOT / 'ddl' / f'{kind}.sql'
     return [s.strip() for s in path.read_text(encoding='utf-8').split(';') if s.strip()]
+
+
+def _builtin_ddl(kind):
+    """内建 schema（__workflowRun）建表语句——与业务表同一 DDL 生成器产出，零特判。
+
+    前置 DROP IF EXISTS：e2e 库随业务表一起可重入重建（生产启用工作流时由
+    ddl.generate(backend, ['__workflowRun']) 一次性建表，见 README「事务边界」）。
+    """
+    from py_store import ddl as ddl_mod
+    stmts = [x.strip() for x in str(ddl_mod.generate(kind, ['__workflowRun'])).split('\n\n')
+             if x.strip()]
+    table = '`__workflowRun`' if kind == 'mysql' else '"__workflowRun"'
+    return [f'DROP TABLE IF EXISTS {table}'] + stmts
 
 
 async def reset(kind, driver):
@@ -236,6 +249,14 @@ async def run_step(h, step):
         elif op == 'set_flag':
             _set_flag(step['name'], step['value'])
             result = None
+        elif op == 'set_ctx':
+            permission.set_context(step.get('ctx'))
+            result = None
+        elif op == 'register_workflow':
+            result = workflow.register(step['defn'])
+        elif op == 'run_workflow':
+            result = await store.runWorkflow(step['name'], step.get('input'),
+                                             dry_run=bool(step.get('dryRun')))
         else:
             raise RuntimeError(f'未知 op: {op}')
     except Exception as e:  # noqa: BLE001 统一捕获作为"显式报错"证据
@@ -277,6 +298,24 @@ async def assert_step(h, step, oracle_rows):
         if err is not None or any(c for c in codes):
             return True, f'显式(err={type(err).__name__ if err else None}, events={codes})'
         return False, '不可翻译却静默返回了结果（既无错误也无告警）'
+
+    if kind == 'run':
+        # run 文档断言：runWorkflow 统一契约不抛错；error 键显式存在时严格相等
+        # （含 null——no-error-masking §二：成功态 error 必须为 null 的正向断言）
+        if err is not None:
+            return False, f'run_workflow 不应抛错（统一契约），实际: {err}'
+        r = h.result or {}
+        if r.get('status') != expect.get('status'):
+            return False, (f'status={r.get("status")} 期望 {expect.get("status")}'
+                           f'（error={r.get("error")!r}）')
+        if 'error' in expect and r.get('error') != expect['error']:
+            return False, f'error={r.get("error")!r} 期望 {expect["error"]!r}'
+        if 'stepIndex' in expect and r.get('stepIndex') != expect['stepIndex']:
+            return False, f'stepIndex={r.get("stepIndex")} 期望 {expect["stepIndex"]}'
+        states = [st.get('state') for st in r.get('steps') or []]
+        if 'stepStates' in expect and states != expect['stepStates']:
+            return False, f'stepStates={states} 期望 {expect["stepStates"]}'
+        return True, f'run={r.get("status")} states={states}'
 
     if err is not None:
         if is_sql and policy == 'explicit-or-parity':

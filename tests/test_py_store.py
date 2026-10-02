@@ -13,31 +13,31 @@ from py_store import crud as _crud_mod
 from py_store import permission as perm
 from py_store import schema as _sc
 
-# ─────────────────────────────────────────────────────────────
-# 内置最小 schema（与业务工程 CommercialLedger 同构）
-# ─────────────────────────────────────────────────────────────
 
-_sc.register({
-    'name': 'CommercialLedger', 'collection': 'commercial_ledger', 'idPrefix': 'CL', 'timestamps': True,
-    'fields': {'unit': 'string', 'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
-})
-_sc.register({
-    'name': 'GoalLedger', 'collection': 'goal_ledger', 'idPrefix': 'GL', 'timestamps': True,
-    'fields': {'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
-})
-# 权限相关
-_sc.register({
-    'name': 'PermModel', 'collection': 'perm_model', 'timestamps': False,
-    'fields': {
-        'a': {'type': 'string'},
-        'b': {'type': 'string', 'read': ['admin'], 'write': ['admin']},
-    },
-    'relations': {}, 'computes': {}, 'read': ['seller'], 'write': ['seller'],
-})
-_sc.register({
-    'name': 'OwnerModel', 'collection': 'owner_model', 'timestamps': False,
-    'fields': {'a': 'string'}, 'relations': {}, 'computes': {}, 'read': ['creator'],
-})
+def _register_test_schemas():
+    """模块 schema 注册入口（conftest 模块隔离夹具在首用例前调用；import 零副作用）"""
+    # 内置最小 schema（与业务工程 CommercialLedger 同构）
+    _sc.register({
+        'name': 'CommercialLedger', 'collection': 'commercial_ledger', 'idPrefix': 'CL', 'timestamps': True,
+        'fields': {'unit': 'string', 'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
+    })
+    _sc.register({
+        'name': 'GoalLedger', 'collection': 'goal_ledger', 'idPrefix': 'GL', 'timestamps': True,
+        'fields': {'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
+    })
+    # 权限相关
+    _sc.register({
+        'name': 'PermModel', 'collection': 'perm_model', 'timestamps': False,
+        'fields': {
+            'a': {'type': 'string'},
+            'b': {'type': 'string', 'read': ['admin'], 'write': ['admin']},
+        },
+        'relations': {}, 'computes': {}, 'read': ['seller'], 'write': ['seller'],
+    })
+    _sc.register({
+        'name': 'OwnerModel', 'collection': 'owner_model', 'timestamps': False,
+        'fields': {'a': 'string'}, 'relations': {}, 'computes': {}, 'read': ['creator'],
+    })
 
 
 def _run(coro):

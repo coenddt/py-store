@@ -13,16 +13,18 @@ $env:LOCAL_CORE='1'; $env:PYTHONPATH='py-store/src'; python -m pytest py-store/t
 
 import asyncio
 import datetime
-import sys
 from pathlib import Path
 
 import pytest
 
-HARNESS = Path(__file__).resolve().parent.parent / 'example' / 'manager-transaction' / 'impl'
-sys.path.insert(0, str(HARNESS))
-sys.path.insert(0, str(HARNESS.parent.parent.parent / 'src'))  # py-store/src
+from _scenario_harness import load_scenario_harness
 
-import harness  # noqa: E402
+# 场景 harness 以唯一模块名显式加载（sys.modules 同名冲突防线，见 _scenario_harness.py）：
+# 同进程批跑时 course-platform 场景先收集并占住 `harness`/`checks` 缓存键，
+# `import harness` 会静默命中缓存——本场景将实际执行 course 的用例集（对拍失效）。
+harness = load_scenario_harness(
+    'manager_transaction_harness',
+    Path(__file__).resolve().parent.parent / 'example' / 'manager-transaction' / 'impl')
 
 BACKENDS = ['mongodb', 'postgres', 'mysql', 'sqlite']
 _LOOP = None

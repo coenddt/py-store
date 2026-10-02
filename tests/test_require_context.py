@@ -16,10 +16,13 @@ from py_store import crud as _crud_mod
 from py_store import permission as perm
 from py_store import schema as _sc
 
-_sc.register({
-    'name': 'RcModel', 'collection': 'rc_model', 'idPrefix': 'RC', 'timestamps': False,
-    'fields': {'title': 'string'}, 'relations': {}, 'read': None, 'write': None,
-})
+
+def _register_test_schemas():
+    """模块 schema 注册入口（conftest 模块隔离夹具在首用例前调用；import 零副作用）"""
+    _sc.register({
+        'name': 'RcModel', 'collection': 'rc_model', 'idPrefix': 'RC', 'timestamps': False,
+        'fields': {'title': 'string'}, 'relations': {}, 'read': None, 'write': None,
+    })
 
 
 def _run(coro):

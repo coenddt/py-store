@@ -7,6 +7,7 @@ Schema 管理 — 薄适配层
   3. 保留 asyncFn 原生函数映射（闭包无法跨 FFI，由 Host 在读路径尾处理执行）；
   4. 保留 Host 必需的元数据镜像（collection / idPrefix / indexes / relations），
      供 ID 生成与索引创建使用。
+  5. ``text2query`` 档位上下文管理器（档位 set/get 的伴随入口，同模块内聚）。
 
 示例:
     register({
@@ -31,6 +32,8 @@ Schema 管理 — 薄适配层
         ],
     })
 """
+
+from contextlib import contextmanager
 
 from .core import core
 from .feedback import emit as _emit_feedback
@@ -92,7 +95,11 @@ def register(defn):
             core.set_fn(fn_ref, val['fn'])
         if val.get('asyncFn'):
             _async_fns[fn_ref] = val['asyncFn']
-        computes[key] = {'fnRef': fn_ref}
+        # 镜像保留声明元数据（callable 白名单外天然剔除）：
+        # agg 形态与 read 白名单供 AI 摘要（ask.describe_for_ai）等消费者读取，
+        # 可执行物（fn/asyncFn）不入镜像（执行判决唯一在 core 规划 + Host 尾处理）
+        computes[key] = {k: val[k] for k in ('type', 'depends', 'agg', 'read') if k in val}
+        computes[key]['fnRef'] = fn_ref
 
     _schemas[defn['name']] = {
         'name': defn['name'],
@@ -146,6 +153,19 @@ def get(name):
 def has(name):
     """检查 schema 是否已注册（core 侧判定，含归档表）"""
     return core.has(name)
+
+
+def clear_schemas():
+    """清空 schema 注册表（core 注册表 + Host 镜像 + asyncFn 映射 + 去重告警签名）
+
+    测试隔离 / 动态重建场景的注册表生命周期原语（绑定层 ``clear_schemas`` 同语义）：
+    只清 schema 集合，**不动** ``require_context`` / ``profile`` 等配置开关
+    （各清各的，与 ``clear_fns`` 对称）。
+    """
+    core.clear_schemas()
+    _schemas.clear()
+    _async_fns.clear()
+    _dup_signatures.clear()
 
 
 # 去重告警签名（同一重复形态只告警一次，避免 list() 高频调用刷屏）
@@ -210,6 +230,21 @@ def set_profile(profile):
 def get_profile():
     """当前档位字符串（'standard' / 'text2query'）"""
     return core.profile()
+
+
+@contextmanager
+def text2query():
+    """以 text2query 档执行（功能收缩 + 硬限制），退出恢复原档位。
+
+    AI 问数链路入口；与 ``permission.scoped_roles`` 同构（token-set/reset，嵌套安全）。
+    进入档位即等效强制携带用户上下文（core `ensure_profile_ctx`，见执行文档 §4.2）。
+    """
+    prev = get_profile()
+    set_profile('text2query')
+    try:
+        yield
+    finally:
+        set_profile(prev)
 
 
 def get_async_fn(fn_ref):

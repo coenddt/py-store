@@ -1,4 +1,4 @@
-# manager-transaction 场景矩阵 · 多后端对拍报告（2026-10-01）
+# manager-transaction 场景矩阵 · 多后端对拍报告（2026-10-02）
 
 ## 一、环境与后端可达性
 

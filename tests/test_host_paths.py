@@ -38,37 +38,54 @@ async def _noop_async(_items, _ctx):
 # schema（两阶段读路径需要「根 + 关系子表」）
 # ─────────────────────────────────────────────────────────────
 
-_sc.register({
-    'name': 'HpPost', 'collection': 'hp_posts', 'idPrefix': 'HP', 'timestamps': False,
-    'fields': {'title': 'string', 'seq': {'type': 'int'}},
-    'relations': {
-        'comments': {'model': 'HpComment', 'type': 'many',
-                     'localField': '_id', 'foreignField': 'postId'},
-    },
-    'read': None, 'write': None,
-})
-_sc.register({
-    'name': 'HpComment', 'collection': 'hp_comments', 'timestamps': False,
-    'fields': {'postId': 'string', 'body': 'string'},
-    'relations': {}, 'read': None, 'write': None,
-})
-# 联邦降级：根与子表分属两个数据源（跨源子级 $limit 无法下推）
-_sc.register({
-    'name': 'HpUser', 'collection': 'hp_users', 'datasource': 'hp_mongo_a',
-    'idPrefix': 'HU', 'timestamps': False,
-    'fields': {'name': 'string'},
-    'relations': {
-        'orders': {'model': 'HpOrder', 'type': 'many',
-                   'localField': '_id', 'foreignField': 'userId'},
-    },
-    'read': None, 'write': None,
-})
-_sc.register({
-    'name': 'HpOrder', 'collection': 'hp_orders', 'datasource': 'hp_mongo_b',
-    'timestamps': False,
-    'fields': {'userId': 'string', 'code': 'string'},
-    'relations': {}, 'read': None, 'write': None,
-})
+def _register_test_schemas():
+    """模块 schema 注册入口（conftest 模块隔离夹具在首用例前调用；import 零副作用）"""
+
+    # 两阶段读路径需要「根 + 关系子表」
+    _sc.register({
+        'name': 'HpPost', 'collection': 'hp_posts', 'idPrefix': 'HP', 'timestamps': False,
+        'fields': {'title': 'string', 'seq': {'type': 'int'}},
+        'relations': {
+            'comments': {'model': 'HpComment', 'type': 'many',
+                         'localField': '_id', 'foreignField': 'postId'},
+        },
+        'read': None, 'write': None,
+    })
+    _sc.register({
+        'name': 'HpComment', 'collection': 'hp_comments', 'timestamps': False,
+        'fields': {'postId': 'string', 'body': 'string'},
+        'relations': {}, 'read': None, 'write': None,
+    })
+    # 联邦降级：根与子表分属两个数据源（跨源子级 $limit 无法下推）
+    _sc.register({
+        'name': 'HpUser', 'collection': 'hp_users', 'datasource': 'hp_mongo_a',
+        'idPrefix': 'HU', 'timestamps': False,
+        'fields': {'name': 'string'},
+        'relations': {
+            'orders': {'model': 'HpOrder', 'type': 'many',
+                       'localField': '_id', 'foreignField': 'userId'},
+        },
+        'read': None, 'write': None,
+    })
+    _sc.register({
+        'name': 'HpOrder', 'collection': 'hp_orders', 'datasource': 'hp_mongo_b',
+        'timestamps': False,
+        'fields': {'userId': 'string', 'code': 'string'},
+        'relations': {}, 'read': None, 'write': None,
+    })
+    # init 建索引：unique 索引 / 缺 keys 跳过
+    _sc.register({
+        'name': 'HpIndexed', 'collection': 'hp_indexed', 'timestamps': False,
+        'fields': {'title': 'string'},
+        'relations': {},
+        'indexes': [{'keys': {'title': 1}, 'unique': True}],
+    })
+    _sc.register({
+        'name': 'HpIndexNoKeys', 'collection': 'hp_index_no_keys', 'timestamps': False,
+        'fields': {'title': 'string'},
+        'relations': {},
+        'indexes': [{'options': {'unique': True}}],  # 缺 keys → 应跳过，不报错
+    })
 
 
 @pytest.fixture(autouse=True)
@@ -364,20 +381,6 @@ class _IndexDb:
         if name not in self._colls:
             self._colls[name] = self._factory()
         return self._colls[name]
-
-
-_sc.register({
-    'name': 'HpIndexed', 'collection': 'hp_indexed', 'timestamps': False,
-    'fields': {'title': 'string'},
-    'relations': {},
-    'indexes': [{'keys': {'title': 1}, 'unique': True}],
-})
-_sc.register({
-    'name': 'HpIndexNoKeys', 'collection': 'hp_index_no_keys', 'timestamps': False,
-    'fields': {'title': 'string'},
-    'relations': {},
-    'indexes': [{'options': {'unique': True}}],  # 缺 keys → 应跳过，不报错
-})
 
 
 def test_init_creates_index_and_skips_existing():

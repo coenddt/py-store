@@ -525,6 +525,71 @@ complex reads). Full details, semantics and the explicit-error list:
 - **Index DDL** — `schema.indexes` (MongoDB shape) → `CREATE [UNIQUE] INDEX idx_<table>_<cols>` in `ddl.generate`, byte-identical across MySQL/PostgreSQL/SQLite.
 - **Declarative migration** — `ddl.diff_defs(old, new)` + `ddl.generate_migration(backend, old, new)`: whitelist-only (add table/column/index, type widening), per-dialect SQL, pure functions; destructive changes fail with `MIGRATION_UNSUPPORTED`.
 
+## Workflow orchestration (first batch)
+
+Express "orchestration of multi-step data operations" as data: a workflow definition (defn) is pure
+JSON isomorphic to a schema defn, and each run is persisted to the built-in schema `__workflowRun`
+(queryable with plain GQL — zero new observability endpoints). Execution generalizes the existing
+mutation step-sequence mechanism: linear steps + per-step `when` guards + fail-fast. The engine
+lives in the host layer (`py_store/workflow.py`), core unchanged; aligned with
+`nodejs-store/src/workflow.js` (byte-identical outputs guarded by parity anchor tests).
+
+```python
+from py_store import workflow
+
+workflow.register({
+    'name': 'placeOrder',
+    'run': ['admin', 'ops'],              # three-tier whitelists read/write/run (run falls back to write)
+    'steps': [
+        {'op': 'query', 'as': 'inv',
+         'gql': 'Inventory($condition:@c0){_id, stock}',
+         'params': {'c0': {'productId': '{{input.productId}}', 'warehouse': '{{input.warehouse}}'}}},
+        {'op': 'fail', 'when': {'exists': '{{inv._id}}', 'is': None}, 'message': '库存记录不存在'},
+        {'op': 'fail', 'when': {'lt': '{{inv.stock}}', 'than': '{{input.qty}}'}, 'message': '库存不足'},
+        {'op': 'mutation', 'model': 'Inventory',
+         'data': {'_id': '{{inv._id}}', 'stock': '{{dec:{{inv.stock}},{{input.qty}}}}'}},
+    ],
+})
+
+run = await workflow.run('placeOrder', {'productId': 'p1', 'warehouse': 'w1', 'qty': 30})
+# run['status'] ∈ succeeded | failed | rejected | drySucceeded | dryFailed
+# Uniform contract: business failures never raise; the error lives in run['error']
+# (set only on failure; always null on success — never `||`-masked downstream)
+```
+
+- **Step whitelist** (three kinds; anything else fails registration with `WORKFLOW_UNSUPPORTED`):
+  `query` (result must be unique — >1 row is an explicit error), `mutation` (store.mutation /
+  upsert), `fail` (explicit business assertion). Optional `when` guards (exists / is / eq / ne /
+  lt / lte / gt / gte) record `skipped` explicitly — never silently skipped.
+- **Placeholders**: `{{input.<path>}}`, `{{<as>.<path>}}` (forward references only),
+  `{{dec:<a>,<b>}}`; full-string replacement keeps the value type. No placeholders inside gql
+  (bind via params — injection safety); no array-index path segments.
+- **Permissions**: three-tier role whitelists embedded in the defn (same RBAC semantics: admin /
+  super_admin bypass, guest denied, internal bypass); runs inherit the caller's Context and every
+  step goes through core permission checks — no superuser. `require_context(true)` rejects
+  context-less runs (fail-secure wins over dry-run); rejected runs are persisted for audit.
+- **Atomicity**: a single-source run is atomic across steps (outer `run_atomic` wraps the whole
+  loop, inner mutations nest into it); multi-source / prescan-failed runs execute sequentially and
+  emit feedback events (`workflow_non_atomic` / `workflow_prescan_failed`) — never silent. The run
+  record (running → terminal) is committed outside the business transaction so failed runs stay
+  queryable after rollback.
+- **dry-run**: `workflow.run(name, input, dry_run=True)` — query steps execute for real (read-only
+  safe); mutation / fail are recorded as `wouldRun` (`drySucceeded | dryFailed`).
+- **Run persistence**: `__workflowRun` is bootstrapped on import (idempotent); SQL backends need a
+  one-time `ddl.generate(backend, ['__workflowRun'])` (Mongo creates the collection on first write).
+  Its `write` whitelist is explicitly empty (GQL tampering with run audit is rejected by R2).
+
+### Explicitly not in the first batch (detected → error; boundaries shipped with the same weight as features)
+
+| Not supported | Why | Escape hatch |
+|---|---|---|
+| Loops / parallel / sub-workflows / human approval | DAG & wait semantics explode; linear + `when` covers the first batch | orchestrate in host code via the store API |
+| Auto compensation (Saga) / auto retry | Inverse-operation burden; steps have no automatic idempotency | inspect run records and handle explicitly |
+| Per-step host callbacks | Arbitrary code breaks whitelist governance | schema computes (read) / host code (write) |
+| Workflow defn persistence / hot reload | Depends on schema versioning (next on the roadmap) | defn stays code-side JSON + register, like schemas today |
+| Timers / event triggers | Scheduling is a resident-IO concern, orthogonal to pure orchestration | call `run` from the application layer |
+| Placeholders inside gql / array-index paths | Injection surface / per-row iteration semantics | params binding / host-code orchestration |
+
 ## FAQ
 
 **How do I use one schema for both MongoDB and PostgreSQL in Python?**

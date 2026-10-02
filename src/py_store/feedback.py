@@ -18,6 +18,11 @@ import sys
 _sink = None
 
 
+def get_sink():
+    """当前 sink（None = 默认 stderr 行为）；供接管方保存原值、退出时恢复（token-set/reset 同构）"""
+    return _sink
+
+
 def set_sink(fn):
     """注册反馈事件回调 ``fn(event: dict)``；传 None 恢复默认 stderr 行为"""
     global _sink

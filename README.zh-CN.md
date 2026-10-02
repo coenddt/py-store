@@ -495,6 +495,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 | `store.session(...)` | 会话内单 SQL 源**跨多次调用**原子；跨源写被显式拦截（`NonAtomicWriteError`） |
 | 无会话的跨源多写 | 非原子（无 2PC / Saga 支持），按数据源顺序执行，并经反馈通道声明 `nonAtomic`（事件 `non_atomic_write`，含涉及源） |
 | Mongo 多步写 | replica set / sharded：单 Mongo 源原子（session 事务）；standalone：非原子并显式声明 `mongo_transaction_unsupported` |
+| 工作流 run（`workflow.run`） | 单源 run **跨步骤**整体原子（外层 `run_atomic` 包住步骤循环、内层 mutation 嵌套并入）；多源 / 源预扫失败按顺序执行并经反馈通道声明非原子 |
 
 - **Mongo 源**：会话内按运行时能力探测结果事务化；不可事务（standalone / 探测失败）按原样执行，
   并发出 `mongo_transaction_unsupported` 反馈（`deployment: standalone|unknown`）（允许降级，绝不静默假装已事务化）；
@@ -519,6 +520,68 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 - **自增主键** —— `_id: {'type': 'int', 'strategy': 'autoincrement'}`；PG/SQLite 经 `INSERT…RETURNING` 回读、MySQL 经 lastrowid；MongoDB 与 `insert_many` 显式报 `AUTOINCREMENT_NOT_SUPPORTED`（禁 ObjectId 静默顶替）。
 - **索引 DDL** —— `schema.indexes`（Mongo 形态）→ `ddl.generate` 产出 `CREATE [UNIQUE] INDEX idx_<表>_<字段>`，MySQL/PostgreSQL/SQLite 三方言逐字节一致。
 - **声明式迁移** —— `ddl.diff_defs(old, new)` + `ddl.generate_migration(backend, old, new)`：白名单制（加表/加列/加索引/类型放宽），纯函数按方言产 SQL；白名单外显式报 `MIGRATION_UNSUPPORTED`。
+
+## 工作流编排（首批）
+
+把「多步数据操作的编排」用数据表达：工作流定义（Workflow defn）是与 schema defn 同构的纯 JSON、
+运行记录（run）落库为内建 schema `__workflowRun`（普通 GQL 即查，可观测性零新接口）。执行是既有
+mutation 步骤序列机制的推广——线性步骤 + 步骤级 `when` 守卫 + fail-fast。引擎落在宿主层
+（`py_store/workflow.py`），core 零改动；对齐 `nodejs-store/src/workflow.js`（双宿主输出逐字节
+一致由 parity 锚单测守护）。
+
+```python
+from py_store import workflow
+
+workflow.register({                       # 注册即静态校验；白名单外显式 Err（WORKFLOW_UNSUPPORTED）
+    'name': 'placeOrder',
+    'run': ['admin', 'ops'],              # 三级白名单 read/write/run（run 缺省回退 write）
+    'steps': [
+        {'op': 'query', 'as': 'inv',
+         'gql': 'Inventory($condition:@c0){_id, stock}',
+         'params': {'c0': {'productId': '{{input.productId}}', 'warehouse': '{{input.warehouse}}'}}},
+        {'op': 'fail', 'when': {'exists': '{{inv._id}}', 'is': None}, 'message': '库存记录不存在'},
+        {'op': 'fail', 'when': {'lt': '{{inv.stock}}', 'than': '{{input.qty}}'}, 'message': '库存不足'},
+        {'op': 'mutation', 'model': 'Inventory',
+         'data': {'_id': '{{inv._id}}', 'stock': '{{dec:{{inv.stock}},{{input.qty}}}}'}},
+    ],
+})
+
+run = await workflow.run('placeOrder', {'productId': 'p1', 'warehouse': 'w1', 'qty': 30})
+# run['status'] ∈ succeeded | failed | rejected | drySucceeded | dryFailed
+# 统一契约：业务失败不抛错，错误在 run['error']（失败才有值；succeeded 态恒为 null）
+```
+
+- **步骤白名单**（首批仅三种，白名单外注册即 `WORKFLOW_UNSUPPORTED`）：`query`（store.query；
+  结果单条化，>1 行显式 Err）、`mutation`（store.mutation / upsert，继承其步骤序列与占位符机制）、
+  `fail`（显式业务断言失败：run 记 failed + stepIndex + message）。步骤可选 `when` 守卫
+  （exists / is / eq / ne / lt / lte / gt / gte），不满足记 `skipped`——显式留痕，绝不静默跳过。
+- **占位符**：`{{input.<path>}}`（本次 run 输入）、`{{<as>.<path>}}`（前序步骤结果，必须前向引用）、
+  `{{dec:<a>,<b>}}`（递减）；整值替换保类型、内嵌替换字符串化。gql 内禁占位符（参数走 params
+  绑定，防注入）；数组下标路径不支持（逐行处理请走宿主代码编排）。
+- **权限**：defn 内嵌三级角色白名单（复用四级 RBAC 语义：admin / super_admin 放行、guest 拒绝、
+  internal 放行、creator 按 Missing 通过）；run 继承触发者 Context，每步 query/mutation 都过 core
+  权限判定——工作流是「权限内的一次次普通调用」，不存在超级身份。`require_context(true)` 开启时
+  无 ctx 拒跑（fail-secure 优先于 dry-run）。rejected 同样落库（拒绝可审计）。
+- **原子性**：单源 run 整体原子（外层 `run_atomic` 包住整个步骤循环，内层 mutation 嵌套并入——
+  任一步失败整体回滚）；多源 / 预扫失败按顺序执行并发反馈事件（`workflow_non_atomic` /
+  `workflow_prescan_failed`，禁静默）。run 记录时序：先落 `running`（进程崩溃可见）→ 步骤事务 →
+  终态在事务外独立提交（业务回滚不影响失败 run 可查）。
+- **dry-run**：`workflow.run(name, input, dry_run=True)`——query 真实执行（只读安全），
+  mutation / fail 记 `wouldRun`；终态 `drySucceeded | dryFailed`。
+- **run 落库**：`__workflowRun` 由模块导入即自举注册（幂等）；SQL 后端首次启用工作流需执行
+  `ddl.generate(backend, ['__workflowRun'])` 建表（Mongo 无需，首次写入自动建集合）。
+  其 `write` 为显式空名单（普通角色 GQL 篡改 run 审计被 R2 拒绝；模块内部写入走 internal 上下文）。
+
+### 首批明确不做（检出即 Err，边界与能力同权重）
+
+| 不做 | 理由 | 出口 |
+|---|---|---|
+| 循环 / 并行 / 子工作流 / 人工审批 | DAG 与人工等待语义复杂度爆炸；线性 + `when` 覆盖首批场景 | 宿主代码用 store API 编排 |
+| 自动补偿（Saga）/ 自动重试 | 反向操作语义负担大；步骤无自动幂等保证 | 人查 run 记录显式处置 |
+| 步骤级宿主回调 | 任意代码击穿白名单治理 | schema computes（读）/ 宿主代码（写） |
+| 工作流定义存库 / 热更 | 依赖 schema 版本化先行（路线图下一步） | defn 暂与 schema 同模式：代码内 JSON + register |
+| 定时触发 / 事件触发 | 触发器是常驻 IO 职责，属调度层，与「纯编排」正交 | 应用层自行调用 `run` |
+| gql 内嵌占位符 / 数组下标路径 | 注入面 / 数组逐行处理语义 | params 绑定 / 宿主代码编排 |
 
 ## 常见问题
 

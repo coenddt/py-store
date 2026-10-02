@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "storepy"
-version = "2.6.0"
+version = "2.7.0"
 description = "Multi-backend data layer for Python asyncio (MongoDB, MySQL, SQLite, PostgreSQL): pure JSON schemas, GQL tree queries compiled to a single native query, GROUP BY/HAVING aggregation, computed columns, soft-delete and role-based access control"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,6 +55,10 @@ Issues = "https://github.com/coenddt/py-store/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# ask() 的 system prompt 知识源（text-to-query 通用契约裁剪版）随包分发
+[tool.setuptools.package-data]
+py_store = ["ask_knowledge.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
