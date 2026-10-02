@@ -281,6 +281,13 @@ class Store:
     rbac_writable_fields = staticmethod(permission.rbac_writable_fields)
     rbacRowCondition = staticmethod(permission.rbac_row_condition)
     rbac_row_condition = staticmethod(permission.rbac_row_condition)
+    # 角色清单与未配置姿态（清单化语义，判决唯一在 core；本层仅透传配置）
+    setExemptRoles = staticmethod(permission.set_exempt_roles)
+    set_exempt_roles = staticmethod(permission.set_exempt_roles)
+    setDenyWriteRoles = staticmethod(permission.set_deny_write_roles)
+    set_deny_write_roles = staticmethod(permission.set_deny_write_roles)
+    setUnconfiguredPolicy = staticmethod(permission.set_unconfigured_policy)
+    set_unconfigured_policy = staticmethod(permission.set_unconfigured_policy)
     # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
     # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
     setProfile = staticmethod(schema.set_profile)

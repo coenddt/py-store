@@ -153,6 +153,25 @@ def rbac_row_condition(model, action, ctx=None):
     return core.rbac_row_condition(_model(model), action, ctx)
 
 
+def set_exempt_roles(roles):
+    """豁免角色清单（命中者在一切判决环节直接放行）。
+
+    判决唯一在 core：本层仅透传配置。默认空——无豁免（清单化语义，
+    super_admin/admin 不再默认放行，迁移见迁移指南）。
+    """
+    return core.set_exempt_roles(roles)
+
+
+def set_deny_write_roles(roles):
+    """拒写角色清单（命中者一切写路径拒绝，读不受影响）。默认空——无拒写。"""
+    return core.set_deny_write_roles(roles)
+
+
+def set_unconfigured_policy(policy):
+    """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）。"""
+    return core.set_unconfigured_policy(policy)
+
+
 # ─── 自定义错误 ──────────────────────────────────────────────
 
 
