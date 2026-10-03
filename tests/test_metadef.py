@@ -116,11 +116,19 @@ def test_a2_versioning_history_and_rollback():
         # loadDefs：各 name 最新 active
         latest = await md.load_defs(store, {'tenant': 't1', 'env': 'dev'})
         assert len(latest) == 1 and latest[0]['version'] == 2
-        # 回滚到 v1 → 重新 register → 生效 defn = v1
+        # 回滚到 v1（追加式）→ 以 v1 defn 追加新版本行；本进程 register → 生效 defn = v1
         rb = await md.rollback_to(store, {'tenant': 't1', 'env': 'dev', 'name': 'Item', 'version': 1})
-        assert rb['version'] == 1
+        assert rb['version'] == 3            # 追加式：回滚 = 以 v1 defn 追加 v3（非原地改 v1）
+        assert rb['defn'] == v1
         assert store.get('Item')['fields'] == v1['fields']
         assert 'price' not in store.get('Item')['fields']
+        # 历史 append-only：目标行未被改写
+        hist2 = await md.list_defs(store, {'tenant': 't1', 'env': 'dev', 'name': 'Item'})
+        assert [r['version'] for r in hist2] == [3, 2, 1]
+        # 跨进程闭环锚：网关 hydrate 读 load_defs → 现返回回滚后的最新行（defn=v1）
+        latest2 = await md.load_defs(store, {'tenant': 't1', 'env': 'dev'})
+        assert len(latest2) == 1 and latest2[0]['version'] == 3
+        assert latest2[0]['defn'] == v1
 
     _run_in_sqlite(_run)
 
@@ -182,5 +190,38 @@ def test_d1_restore_defs_rebuilds_registry():
         assert store.has('RestoredItem')      # 重建后即可见
         out2 = await md.restore_defs(store, {'tenant': 't3', 'env': 'dev'})
         assert out2['applied'] == 0           # 同版本幂等：不重复注册
+
+    _run_in_sqlite(_run)
+
+
+# ─── D21：回滚跨进程闭环（rollback → reload hydrate → 按历史 defn 装配） ────
+
+def test_d21_rollback_visible_via_restore_defs():
+    """D21：rollback 以历史 defn 追加新版本 → restore_defs（网关 hydrate 路径）按历史 defn 装配
+
+    复现原缺口：若回滚只原地重注册、不落新行，load_defs 仍返回被回滚掉的旧版本，
+    网关 hydrate 后协议面仍是旧版本 —— 跨进程回滚不闭环。追加式回滚后 load_defs 返回
+    回滚后的新行（新自然键），restore_defs 必然 applied。
+    """
+
+    async def _run(store):
+        md._applied.clear()
+        v1 = {'name': 'RbItem', 'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}}}
+        v2 = {'name': 'RbItem', 'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'},
+                                           'price': {'type': 'number'}}}
+        o = {'tenant': 't5', 'env': 'dev'}
+        await md.persist_def(store, v1, o)
+        await md.restore_defs(store, o)                       # 网关首次 hydrate → v1
+        await md.persist_def(store, v2, o)
+        await md.restore_defs(store, o)                       # 网关再次 hydrate → v2
+        assert 'price' in store.get('RbItem')['fields']
+        # 控制面回滚到 v1
+        await md.rollback_to(store, {'tenant': 't5', 'env': 'dev', 'name': 'RbItem', 'version': 1})
+        # 网关新一次 reload：load_defs 应返回回滚后的最新行（defn=v1），新键 → applied
+        latest = await md.load_defs(store, o)
+        assert len(latest) == 1 and latest[0]['version'] == 3 and latest[0]['defn'] == v1
+        out = await md.restore_defs(store, o)
+        assert out['applied'] == 1
+        assert 'price' not in store.get('RbItem')['fields']   # 协议面按历史 defn 装配
 
     _run_in_sqlite(_run)

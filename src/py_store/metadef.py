@@ -3,7 +3,7 @@
 设计见 doc/execution/2026/10/meta-store定义控制面-01（A1/A2/A3）。三条契约：
   - 定义落库为内建 schema ``__schemaDef``（tenant/env/name/version/defn 五要素）；
   - 同名同形幂等不新增行，异形 version+1；
-  - 版本历史可列，``rollbackTo`` 按历史 defn 重新 register。
+  - 版本历史可列（append-only），``rollbackTo`` 以历史 defn **追加新版本**（跨进程经 ``restore_defs`` 对协议面可见）。
 
 对齐 ``nodejs-store/src/metadef.js``（双宿主流库行内容逐字节一致由对拍脚本守护）。
 存储是 IO，故落宿主层，core 零改动。
@@ -16,6 +16,7 @@ from . import permission as _permission
 from .schema import _to_core_defn
 from .schema import has as _schema_has
 from .schema import register as _schema_register
+from .workflow import register as _register_workflow
 
 # 内建定义表名（``__`` 前缀为内建保留名，对齐 workflow 的 name.startswith('__') 校验）
 _SCHEMA_DEF = '__schemaDef'
@@ -23,6 +24,23 @@ _WORKFLOW_DEF = '__workflowDef'
 _FEEDBACK = '__feedback'
 # 读取投影（双端一致；对拍比较用）
 _DEF_FIELDS = '_id, tenant, env, name, version, defn, status, createdBy'
+
+# 定义类型（kind）→ 内建表名 / 注册函数（缺省 schema，保既有调用零变更）
+_TABLES = {'schema': _SCHEMA_DEF, 'workflow': _WORKFLOW_DEF}
+# 注册函数：(defn, internal) → 注册到对应注册表；internal 仅供系统重建（restore）使用
+_REGISTRARS = {
+    'schema': lambda defn, internal=False: _schema_register(defn, {'internal': True} if internal else None),
+    'workflow': lambda defn, internal=False: _register_workflow(defn),
+}
+
+
+def _kind_of(opts):
+    """解析 kind → ``(kind, table)``；未知 kind 显式 Err（不兜底）"""
+    kind = (opts or {}).get('kind') or 'schema'
+    table = _TABLES.get(kind)
+    if not table:
+        raise MetaDefError(f'metadef: 未知定义类型 {kind!r}')
+    return kind, table
 
 
 def _def_model(name, id_prefix):
@@ -153,17 +171,19 @@ def _internal_ctx():
 async def list_defs(store, opts):
     """列定义行（按 version desc；name 缺省列全部）"""
     opts = opts or {}
+    _, table = _kind_of(opts)
     condition = {'tenant': opts.get('tenant'), 'env': opts.get('env')}
     if opts.get('name') is not None:
         condition['name'] = opts['name']
-    gql = f'__schemaDef($condition:@c0, $sort:@s0){{{_DEF_FIELDS}}}'
+    gql = f'{table}($condition:@c0, $sort:@s0){{{_DEF_FIELDS}}}'
     return await store.query(gql, {'c0': condition, 's0': {'version': -1}})
 
 
 async def load_defs(store, opts):
     """各 name 的**最新 active** 行（每 name 取 version 最大者；version desc 后首见即最新）"""
     opts = opts or {}
-    gql = f'__schemaDef($condition:@c0, $sort:@s0){{{_DEF_FIELDS}}}'
+    _, table = _kind_of(opts)
+    gql = f'{table}($condition:@c0, $sort:@s0){{{_DEF_FIELDS}}}'
     rows = await store.query(gql, {
         'c0': {'tenant': opts.get('tenant'), 'env': opts.get('env'), 'status': 'active'},
         's0': {'version': -1},
@@ -183,9 +203,10 @@ async def persist_def(store, defn, opts):
     if not isinstance(defn, dict) or not defn.get('name'):
         raise MetaDefError('metadef: defn.name 必填')
     opts = opts or {}
+    _, table = _kind_of(opts)
     name = defn['name']
     rows = await list_defs(store, {'tenant': opts.get('tenant'), 'env': opts.get('env'),
-                                   'name': name})
+                                   'name': name, 'kind': opts.get('kind')})
     latest = rows[0] if rows else None
     core_defn = _to_core_defn(defn)  # 函数值剔除（纯 JSON 入库，A3 前提）
     if latest is not None and same_defn(latest.get('defn'), core_defn):
@@ -195,7 +216,7 @@ async def persist_def(store, defn, opts):
     # 自然键 `_id`（D2）：同版本并发写必冲突 → 存储层保证 version 唯一
     row['_id'] = def_id(opts.get('tenant'), opts.get('env'), core_defn['name'], version)
     with _internal_ctx():
-        return await store.insert(_SCHEMA_DEF, row)
+        return await store.insert(table, row)
 
 
 # 已重建进注册表的定义自然键（进程级；同名同版本只注册一次，避免每次 reload 全量覆盖）
@@ -211,29 +232,39 @@ async def restore_defs(store, opts):
     返回 ``{'total': 库内最新 active 行数, 'applied': 本次新注册数}``。
     """
     opts = opts or {}
+    kind, _ = _kind_of(opts)
     rows = await load_defs(store, opts)
     applied = 0
     for r in rows:
-        key = def_id(opts.get('tenant'), opts.get('env'), r['name'], r['version'])
+        key = f"{kind}\u001f{def_id(opts.get('tenant'), opts.get('env'), r['name'], r['version'])}"
         if key in _applied:
             continue
-        _schema_register(r['defn'], {'internal': True})
+        _REGISTRARS[kind](r['defn'], True)
         _applied.add(key)
         applied += 1
     return {'total': len(rows), 'applied': applied}
 
 
 async def rollback_to(store, opts):
-    """回滚到历史版本：取历史行 → 重新 register(row.defn) → 返回该行"""
+    """回滚到历史版本（追加式）：取历史行 defn → 作为新版本再发布 → 本进程 register → 返回落库行。
+
+    D21 跨进程闭环：回滚不再「原地重注册」，而是复用 ``persist_def`` 把历史 defn 落成一条
+    **新版本行**（同名同形幂等 → 返回当前最新行）。``load_defs`` 取「最新 active」故必然返回
+    该行，网关 ``restore_defs`` hydrate 即按回滚后的 defn 装配 —— 回滚对协议面可见。
+    历史保持 append-only：目标历史行不被改写。
+    """
     opts = opts or {}
+    kind, _ = _kind_of(opts)
     rows = await list_defs(store, {'tenant': opts.get('tenant'), 'env': opts.get('env'),
-                                   'name': opts.get('name')})
+                                   'name': opts.get('name'), 'kind': opts.get('kind')})
     version = opts.get('version')
     row = next((r for r in rows if r.get('version') == version), None)
     if row is None:
         raise MetaDefError(f"metadef: 版本不存在 {opts.get('name')}@{version}")
-    _schema_register(row['defn'])
-    return row
+    # 追加式回滚：以历史 defn 走 persist 语义（异形 → version+1；同形 → 返回当前最新）
+    persisted = await persist_def(store, row['defn'], opts)
+    _REGISTRARS[kind](row['defn'])
+    return persisted
 
 
 # 模块导入即自举内建定义表（幂等；零配置）
