@@ -209,6 +209,10 @@ class Store:
         """各 name 的最新 active 行"""
         return await metadef.load_defs(self, opts or {})
 
+    async def restoreDefs(self, opts: dict | None = None) -> dict:
+        """从持久化定义重建注册表（D1 闭环桥；网关 reload 重装配前调用）"""
+        return await metadef.restore_defs(self, opts or {})
+
     async def rollbackTo(self, opts: dict) -> dict:
         """回滚到历史版本（重新 register 该版本 defn）"""
         return await metadef.rollback_to(self, opts)
@@ -274,6 +278,7 @@ class Store:
     persist_def = persistDef
     list_defs = listDefs
     load_defs = loadDefs
+    restore_defs = restoreDefs
     rollback_to = rollbackTo
     ensure_builtins = ensureBuiltins
     enable_feedback_table = enableFeedbackTable

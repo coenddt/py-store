@@ -30,8 +30,8 @@ def _def_model(name, id_prefix):
 
     不声明 indexes：内建表随宿主注册表进入 `ddl.generate()`，而场景 harness 会对全部
     注册表执行其中的 CREATE INDEX（建表仅限业务表）——为内建表加索引会令其对未建的
-    内建表建索引而报错。版本唯一性由控制面「读最新行 + 1」保证（§4.3）；一旦存储层
-    报唯一键冲突按 §4.4 显式上抛（不重试、不吞）。
+    内建表建索引而报错。版本唯一性改由行自然键 ``_id``（见 ``def_id``，D2）在**存储层**
+    保证：并发写同版本必触发唯一键冲突，按 §4.4 显式上抛（不重试、不吞）。
     """
     return {
         'name': name,
@@ -121,6 +121,19 @@ def build_def_row(defn, opts, version):
     }
 
 
+def def_id(tenant, env, name, version):
+    """定义行自然键 ``_id`` = ``(tenant, env, name, version)``（D2；对齐 node ``defId``）。
+
+    作为存储层主键，同 ``(tenant,env,name,version)`` 二次写入必触发唯一键冲突
+    （SQLite UNIQUE / Mongo E11000），使「读最新行 +1」的并发窗口在存储层收口 ——
+    并发写同版本时后到者显式报错（控制面映射 409 CONFLICT），不产重复 version。
+    分隔符用 US（``\\u001f``）：schema name 不含该控制字符，拼接无歧义。
+    """
+    t = '' if tenant is None else str(tenant)
+    e = '' if env is None else str(env)
+    return f'{t}\u001f{e}\u001f{name}\u001f{version}'
+
+
 @contextmanager
 def _internal_ctx():
     """干净 internal 上下文（{internal: True}，丢弃触发者 roles）
@@ -177,9 +190,37 @@ async def persist_def(store, defn, opts):
     core_defn = _to_core_defn(defn)  # 函数值剔除（纯 JSON 入库，A3 前提）
     if latest is not None and same_defn(latest.get('defn'), core_defn):
         return latest
-    row = build_def_row(core_defn, opts, next_version(rows))
+    version = next_version(rows)
+    row = build_def_row(core_defn, opts, version)
+    # 自然键 `_id`（D2）：同版本并发写必冲突 → 存储层保证 version 唯一
+    row['_id'] = def_id(opts.get('tenant'), opts.get('env'), core_defn['name'], version)
     with _internal_ctx():
         return await store.insert(_SCHEMA_DEF, row)
+
+
+# 已重建进注册表的定义自然键（进程级；同名同版本只注册一次，避免每次 reload 全量覆盖）
+_applied: set = set()
+
+
+async def restore_defs(store, opts):
+    """从持久化定义重建注册表（D1 闭环桥）：``load_defs`` → 逐条 ``register(defn, internal)``。
+
+    网关 reload 在重装配前调用本函数，使「控制面 publish（写库）」与「协议面可见（注册）」
+    经 reload 衔接。已注册过的同版本跳过（幂等）；版本变化时以新 defn 覆盖注册。
+    注册走 internal 上下文：属系统重建动作，不受业务定义层门禁（MetaPolicy）影响。
+    返回 ``{'total': 库内最新 active 行数, 'applied': 本次新注册数}``。
+    """
+    opts = opts or {}
+    rows = await load_defs(store, opts)
+    applied = 0
+    for r in rows:
+        key = def_id(opts.get('tenant'), opts.get('env'), r['name'], r['version'])
+        if key in _applied:
+            continue
+        _schema_register(r['defn'], {'internal': True})
+        _applied.add(key)
+        applied += 1
+    return {'total': len(rows), 'applied': applied}
 
 
 async def rollback_to(store, opts):

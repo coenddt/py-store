@@ -139,3 +139,48 @@ def test_persist_missing_name_raises():
             await md.persist_def(store, {'fields': {}}, {'tenant': 't1', 'env': 'dev'})
 
     _run_in_sqlite(_run)
+
+
+# ─── D2：版本唯一性（行自然键 _id） ────────────────────────────
+
+def test_def_id_natural_key_shape():
+    assert md.def_id('t1', 'dev', 'Item', 2) == 't1\u001fdev\u001fItem\u001f2'
+    assert md.def_id(None, None, 'Item', 1) == '\u001f\u001fItem\u001f1'
+
+
+def test_d2_persist_writes_natural_id_and_version_unique():
+    """D2：persist 落行带自然键 _id；同版本二次写入 → 存储层唯一键冲突（显式上抛）"""
+
+    async def _run(store):
+        defn = {'name': 'UniqItem', 'fields': {'_id': {'type': 'string'}}}
+        r1 = await md.persist_def(store, defn, {'tenant': 't2', 'env': 'dev'})
+        assert r1['_id'] == md.def_id('t2', 'dev', 'UniqItem', 1)
+        # 并发写同版本的最小复现：绕过「读最新行 +1」直插同版本行
+        dup = md.build_def_row(defn, {'tenant': 't2', 'env': 'dev'}, 1)
+        dup['_id'] = md.def_id('t2', 'dev', 'UniqItem', 1)
+        with pytest.raises(Exception) as ei:
+            with md._internal_ctx():
+                await store.insert('__schemaDef', dup)
+        assert 'unique' in str(ei.value).lower()
+
+    _run_in_sqlite(_run)
+
+
+# ─── D1：从持久化定义重建注册表（发布闭环桥） ────────────────
+
+def test_d1_restore_defs_rebuilds_registry():
+    """D1：persist 只落库不注册；restore_defs 从库重建注册表（同版本幂等）"""
+
+    async def _run(store):
+        md._applied.clear()
+        defn = {'name': 'RestoredItem',
+                'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}}}
+        await md.persist_def(store, defn, {'tenant': 't3', 'env': 'dev'})
+        assert not store.has('RestoredItem')  # 原缺口：落库后协议面不可见
+        out = await md.restore_defs(store, {'tenant': 't3', 'env': 'dev'})
+        assert out['applied'] == 1
+        assert store.has('RestoredItem')      # 重建后即可见
+        out2 = await md.restore_defs(store, {'tenant': 't3', 'env': 'dev'})
+        assert out2['applied'] == 0           # 同版本幂等：不重复注册
+
+    _run_in_sqlite(_run)
