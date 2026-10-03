@@ -470,6 +470,15 @@ async def init(connections):
     return store
 
 
-# 框架统一入口（置于文件末尾：确保 init / store 已定义）
-from .bootstrap import create_app  # noqa: E402
+def __getattr__(name: str):
+    """惰性暴露框架统一入口 ``create_app``。
+
+    放在模块级 ``__getattr__``（PEP 562）而非顶部 ``from .bootstrap import create_app``，
+    以规避包内循环导入；因此无模块级导入，兼容 ruff E402 / I001。
+    """
+    if name == "create_app":
+        from .bootstrap import create_app
+
+        return create_app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

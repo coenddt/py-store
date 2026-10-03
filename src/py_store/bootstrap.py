@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 
 async def create_app(*, datasource: Any, schemas: Iterable[dict] = (), ctx: Any = None):
-    from . import init, store  # noqa: PLC0415 —— 延迟导入，规避包内循环导入
+    from . import init, store  # 延迟导入，规避包内循环导入
 
     if datasource is None:
         raise ValueError("ERR_BOOTSTRAP:缺 datasource")
