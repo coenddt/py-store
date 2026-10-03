@@ -300,12 +300,20 @@ def _validate_when(when, errors, where):
 _workflows: dict = {}
 
 
-def register(defn):
+def register(defn, ctx=None):
     """注册工作流定义（注册即静态校验，白名单外显式 Err；name 全局唯一）。
+
+    ``ctx``：可选定义层门禁上下文（``{'internal': True}`` / ``{'roles': [...]}``）。
+    判决唯一在 core（``_core.can_register``，与 ``schema.register`` 同一 MetaPolicy）；
+    默认 Open → 全放行。Closed 且 ctx 不过 → 抛 ``ERR_PERMISSION:``（定义不写入）。
 
     同名同形重复注册幂等通过（对齐 core schema.register 的复跑语义——场景 harness
     每后端复跑同一批用例时必须可重入）；同名异形显式 Err（禁止静默覆盖已注册定义）。
     """
+    # 定义层门禁：判决先于静态校验（拒绝即返回，零副作用；与 schema.register 同序）
+    if not _core.can_register(ctx):
+        name = defn.get('name') if isinstance(defn, dict) else ''
+        raise WorkflowError(f'ERR_PERMISSION: 无权注册或覆盖工作流定义 {name or ""}')
     errors = validate_defn(defn)
     if errors:
         raise WorkflowError('WORKFLOW_UNSUPPORTED: ' + '；'.join(errors))
