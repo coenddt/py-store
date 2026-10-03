@@ -16,6 +16,7 @@ import json
 import re
 import time
 from contextlib import contextmanager
+from typing import List
 
 from . import permission as _permission
 from .crud.exec import _call, _sources_of, run_atomic
@@ -299,7 +300,7 @@ def validate_planable(defn):
 
     与 ``validate_defn``（纯函数）分职：本函数需要 core 注册表，故独立、不入 validate_defn。
     """
-    errors = []
+    errors: List[str] = []
     if not isinstance(defn, dict):
         return errors
     steps = defn.get('steps')
