@@ -8,12 +8,16 @@
 from typing import Any, Iterable
 
 
-async def create_app(*, datasource: Any, schemas: Iterable[dict] = (), ctx: Any = None):
-    from . import init, store  # 延迟导入，规避包内循环导入
+async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
+                     fns: dict | None = None, ctx: Any = None):
+    from . import init, schema, store  # 延迟导入，规避包内循环导入
 
     if datasource is None:
         raise ValueError("ERR_BOOTSTRAP:缺 datasource")
     await init(datasource)
     for defn in schemas:
         store.register(defn, ctx)
+    for ref, impl in (fns or {}).items():
+        schema.set_fn(ref, impl)
+    schema.assert_fns_covered(schemas)  # A3：缺实现即抛，进程不启动
     return {"store": store}
