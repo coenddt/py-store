@@ -25,6 +25,9 @@ _meta = {'tenant': '', 'env': ''}
 # 落库失败累计计数（进程级；>0 表示有事件未入表——可观测，不静默）
 _fail_count = 0
 
+# 在途落库任务（进程级；graceful shutdown 前经 flush() 收口，消除 fire-and-forget 丢事件窗口 D8）
+_pending: set = set()
+
 
 def get_sink():
     """当前 sink（None = 默认 stderr 行为）；供接管方保存原值、退出时恢复（token-set/reset 同构）"""
@@ -82,12 +85,23 @@ def enable_feedback_table(store):
         except RuntimeError:
             loop = None
         if loop is not None:
-            loop.create_task(_write_feedback(store, row))
+            task = loop.create_task(_write_feedback(store, row))
+            _pending.add(task)
+            task.add_done_callback(_pending.discard)   # 完成即出集合
         else:
             _fail('无运行中事件循环，__feedback 事件未落库')
 
     set_sink(_sink)
     return lambda: set_sink(prev)
+
+
+async def flush():
+    """等待全部在途 `__feedback` 落库任务完成（graceful shutdown 前调用）。
+
+    落库失败已由 ``_write_feedback`` 计为 ``fail_count``（不抛），故此处 ``gather`` 不冒泡。
+    """
+    while _pending:
+        await asyncio.gather(*list(_pending), return_exceptions=True)
 
 
 def emit(event):

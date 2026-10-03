@@ -251,6 +251,10 @@ class Store:
         """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
         feedback.set_meta({'tenant': tenant, 'env': env})
 
+    async def flushFeedback(self):
+        """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flushFeedback）"""
+        await feedback.flush()
+
     # ── 缓存状态注记（B6；见 cache.py）──
     def setCacheStatus(self, fn):
         """注册缓存状态 provider：`x-cache` 注记位唯一取值来源；未注册恒 BYPASS"""
@@ -317,6 +321,7 @@ class Store:
     ensure_builtins = ensureBuiltins
     enable_feedback_table = enableFeedbackTable
     set_feedback_meta = setFeedbackMeta
+    flush_feedback = flushFeedback
     # 缓存状态注记（蛇形别名与上方驼峰同实现）
     set_cache_status = setCacheStatus
     cache_status = cacheStatus
