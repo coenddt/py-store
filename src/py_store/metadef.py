@@ -30,7 +30,7 @@ _TABLES = {'schema': _SCHEMA_DEF, 'workflow': _WORKFLOW_DEF}
 # 注册函数：(defn, internal) → 注册到对应注册表；internal 仅供系统重建（restore）使用
 _REGISTRARS = {
     'schema': lambda defn, internal=False: _schema_register(defn, {'internal': True} if internal else None),
-    'workflow': lambda defn, internal=False: _register_workflow(defn),
+    'workflow': lambda defn, internal=False: _register_workflow(defn, {'internal': True} if internal else None),
 }
 
 
@@ -263,7 +263,8 @@ async def rollback_to(store, opts):
         raise MetaDefError(f"metadef: 版本不存在 {opts.get('name')}@{version}")
     # 追加式回滚：以历史 defn 走 persist 语义（异形 → version+1；同形 → 返回当前最新）
     persisted = await persist_def(store, row['defn'], opts)
-    _REGISTRARS[kind](row['defn'])
+    # 系统重建动作：workflow 走 internal；schema 维持既有调用形态（False = 无 ctx，门禁行为零变更）
+    _REGISTRARS[kind](row['defn'], kind == 'workflow')
     return persisted
 
 
