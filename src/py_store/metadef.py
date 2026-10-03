@@ -20,6 +20,7 @@ from .schema import register as _schema_register
 # 内建定义表名（``__`` 前缀为内建保留名，对齐 workflow 的 name.startswith('__') 校验）
 _SCHEMA_DEF = '__schemaDef'
 _WORKFLOW_DEF = '__workflowDef'
+_FEEDBACK = '__feedback'
 # 读取投影（双端一致；对拍比较用）
 _DEF_FIELDS = '_id, tenant, env, name, version, defn, status, createdBy'
 
@@ -54,13 +55,35 @@ def _def_model(name, id_prefix):
 _SCHEMA_DEF_MODEL = _def_model(_SCHEMA_DEF, 'sdef')
 _WORKFLOW_DEF_MODEL = _def_model(_WORKFLOW_DEF, 'wdef')
 
+# 内建反馈事件表（05）：承载结构化降级/拦截事件（write 空名单——普通角色禁写，事件审计）
+_FEEDBACK_MODEL = {
+    'name': _FEEDBACK,
+    'system': True,
+    'collection': _FEEDBACK,
+    'idPrefix': 'fdbk',
+    'write': [],
+    'fields': {
+        '_id': {'type': 'string'},
+        'type': {'type': 'string'},
+        'code': {'type': 'string'},
+        'layer': {'type': 'string'},
+        'message': {'type': 'string'},
+        'hint': {'type': 'string'},
+        'tenant': {'type': 'string'},
+        'env': {'type': 'string'},
+        'now': {'type': 'number'},
+    },
+}
+
 
 def ensure_builtins():
-    """注册内建 ``__schemaDef``/``__workflowDef``（幂等；core 对重复三元组显式报错，故先 has 守卫）"""
+    """注册内建 ``__schemaDef``/``__workflowDef``/``__feedback``（幂等；core 对重复三元组显式报错，故先 has 守卫）"""
     if not _schema_has(_SCHEMA_DEF):
         _schema_register(_SCHEMA_DEF_MODEL)
     if not _schema_has(_WORKFLOW_DEF):
         _schema_register(_WORKFLOW_DEF_MODEL)
+    if not _schema_has(_FEEDBACK):
+        _schema_register(_FEEDBACK_MODEL)
 
 
 class MetaDefError(ValueError):

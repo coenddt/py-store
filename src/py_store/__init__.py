@@ -217,6 +217,15 @@ class Store:
         """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
         return metadef.ensure_builtins()
 
+    # ── 反馈事件落库（A6；见 feedback.py）──
+    def enableFeedbackTable(self):
+        """一键接线：注册内建 __feedback 并把 sink 指向落库；返回 disposer（恢复原 sink）"""
+        return feedback.enable_feedback_table(self)
+
+    def setFeedbackMeta(self, tenant: str = '', env: str = '') -> None:
+        """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
+        feedback.set_meta({'tenant': tenant, 'env': env})
+
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
     def registerWorkflow(self, defn: dict) -> dict:
         """注册工作流定义（注册即静态校验，白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
@@ -267,6 +276,8 @@ class Store:
     load_defs = loadDefs
     rollback_to = rollbackTo
     ensure_builtins = ensureBuiltins
+    enable_feedback_table = enableFeedbackTable
+    set_feedback_meta = setFeedbackMeta
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
