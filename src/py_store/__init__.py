@@ -210,12 +210,32 @@ class Store:
         return await metadef.load_defs(self, opts or {})
 
     async def restoreDefs(self, opts: dict | None = None) -> dict:
-        """从持久化定义重建注册表（D1 闭环桥；网关 reload 重装配前调用）"""
-        return await metadef.restore_defs(self, opts or {})
+        """从持久化定义重建注册表：schema + workflow 两类（网关 reload 重装配前调用）"""
+        base = opts or {}
+        s = await metadef.restore_defs(self, {**base, 'kind': 'schema'})
+        w = await metadef.restore_defs(self, {**base, 'kind': 'workflow'})
+        return {'total': s['total'] + w['total'], 'applied': s['applied'] + w['applied']}
 
     async def rollbackTo(self, opts: dict) -> dict:
-        """回滚到历史版本（重新 register 该版本 defn）"""
+        """回滚到历史版本（追加式，重新 register 该版本 defn）"""
         return await metadef.rollback_to(self, opts)
+
+    # 定义控制面：workflow 定义（kind=workflow；见 metadef.py）
+    async def persistWorkflowDef(self, defn: dict, opts: dict | None = None) -> dict:
+        """持久化 workflow 定义（同名同形幂等，异形 version+1）"""
+        return await metadef.persist_def(self, defn, {**(opts or {}), 'kind': 'workflow'})
+
+    async def listWorkflowDefs(self, opts: dict | None = None) -> list[dict]:
+        """列 workflow 定义行（按 version desc；name 缺省列全部）"""
+        return await metadef.list_defs(self, {**(opts or {}), 'kind': 'workflow'})
+
+    async def loadWorkflowDefs(self, opts: dict | None = None) -> list[dict]:
+        """各 name 的最新 active workflow 定义行"""
+        return await metadef.load_defs(self, {**(opts or {}), 'kind': 'workflow'})
+
+    async def rollbackWorkflowTo(self, opts: dict) -> dict:
+        """回滚 workflow 定义到历史版本（追加式）"""
+        return await metadef.rollback_to(self, {**(opts or {}), 'kind': 'workflow'})
 
     def ensureBuiltins(self) -> None:
         """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
@@ -280,6 +300,10 @@ class Store:
     load_defs = loadDefs
     restore_defs = restoreDefs
     rollback_to = rollbackTo
+    persist_workflow_def = persistWorkflowDef
+    list_workflow_defs = listWorkflowDefs
+    load_workflow_defs = loadWorkflowDefs
+    rollback_workflow_to = rollbackWorkflowTo
     ensure_builtins = ensureBuiltins
     enable_feedback_table = enableFeedbackTable
     set_feedback_meta = setFeedbackMeta
