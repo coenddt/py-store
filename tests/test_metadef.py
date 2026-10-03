@@ -50,14 +50,20 @@ def test_build_def_row_actor_defaults_empty():
 # ─── A1 / A2：真实 sqlite 落库闭环 ─────────────────────────────
 
 def _run_in_sqlite(body):
-    """建 sqlite 内存库 → 建 __schemaDef 表 → init → 执行业务协程"""
+    """建 sqlite 内存库 → 建 __schemaDef 表 → init → 执行业务协程
+
+    进程级连接映射是全局单例：用前快照、用后还原，避免把「已关闭的库」留给后续测试文件
+    （对齐 conftest 的注册表隔离思路）。
+    """
 
     async def _main():
         import aiosqlite
 
+        from py_store import datasource as _ds
         from py_store import ddl as ddl_mod
         from py_store import executors, init, store
         md.ensure_builtins()
+        prev = dict(_ds._connections)
         db = await aiosqlite.connect(':memory:')
         ddl = str(ddl_mod.generate('sqlite', ['__schemaDef']))
         for stmt in ddl.split('\n\n'):
@@ -69,6 +75,7 @@ def _run_in_sqlite(body):
             return await body(store)
         finally:
             await db.close()
+            _ds._connections = prev
 
     return asyncio.new_event_loop().run_until_complete(_main())
 
