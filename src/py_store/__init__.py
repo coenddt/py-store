@@ -468,3 +468,8 @@ async def init(connections):
     await _create_indexes_if_needed()
 
     return store
+
+
+# 框架统一入口（置于文件末尾：确保 init / store 已定义）
+from .bootstrap import create_app  # noqa: E402
+
