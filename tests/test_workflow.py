@@ -12,8 +12,22 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
+from py_store import schema as sc
 from py_store import workflow as wf
 from py_store.workflow import WorkflowError
+
+
+# B1 前置：GOOD 的 gql/mutation 引用 Inventory，注册期可规划性校验要求其已注册。
+# 本仓 conftest 的模块级夹具会在每模块清空注册表（clear_schemas），故按约定入口
+# `_register_test_schemas` 提供（只定义不执行，由夹具在清场后重放）。
+def _register_test_schemas():
+    sc.register({
+        'name': 'Inventory', 'collection': 'inventory', 'idPrefix': 'inv',
+        'fields': {
+            '_id': {'type': 'string'}, 'stock': {'type': 'int'},
+            'productId': {'type': 'string'}, 'warehouse': {'type': 'string'},
+        },
+    })
 
 GOOD = {
     'name': 'placeOrder',
@@ -322,3 +336,26 @@ def test_parity_run_doc_shape():
         assert sorted(run_doc['steps'][1]) == ['as', 'op', 'state']
     finally:
         wf._workflows.pop('shapeWf', None)
+
+
+# ─── B1：注册期 GQL 可规划性校验（结构 + 参数键完整） ─────────
+
+def test_b1_planable_unplanned_rejected():
+    bad = {'name': 'noModelWf', 'steps': [
+        {'op': 'query', 'as': 'a', 'gql': 'NoSuchModel{_id}', 'params': {}}]}
+    assert len(wf.validate_planable(bad)) == 1
+    with pytest.raises(wf.WorkflowError, match=r'WORKFLOW_UNSUPPORTED: steps\[0\]: gql 不可规划'):
+        wf.register(bad)
+
+
+def test_b1_planable_missing_param_key():
+    bad = {'name': 'missParamWf', 'steps': [
+        {'op': 'query', 'as': 'a', 'gql': 'Inventory($condition:@c0){_id}', 'params': {}}]}
+    assert wf.validate_planable(bad) == [
+        'steps[0]: gql 引用了未提供的参数 @c0（params 须提供该键）']
+
+
+def test_b1_planable_ok():
+    assert wf.validate_planable({'name': 'okWf', 'steps': [
+        {'op': 'query', 'as': 'a', 'gql': 'Inventory($condition:@c0){_id, stock}',
+         'params': {'c0': {'stock': 1}}}]}) == []
