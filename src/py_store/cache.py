@@ -23,7 +23,7 @@ def cache_status(ctx=None):
         return 'BYPASS'
     try:
         v = _provider(ctx)
-    except Exception as e:  # noqa: BLE001 — 异常回落 BYPASS 且必须留痕（禁静默）
+    except Exception as e:  # 异常回落 BYPASS 且必须留痕（禁静默）
         emit({'type': 'cache_status_failed', 'code': 'cacheStatusFailed', 'layer': 'host',
               'message': f'缓存状态 provider 抛错: {e}',
               'hint': '检查 set_cache_status 注入的 provider；本轮注记位不实现缓存，异常即回落 BYPASS'})

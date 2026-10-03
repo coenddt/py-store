@@ -9,8 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from py_store import cache
-from py_store import feedback
+from py_store import cache, feedback
 
 
 def _collect(body):
