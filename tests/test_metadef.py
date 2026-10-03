@@ -320,3 +320,47 @@ def test_a3_host_restore_defs_both_kinds():
         assert 'HostWf' in store.workflows()
 
     _run_in_sqlite(_run, ('__schemaDef', '__workflowDef'))
+
+
+def test_wf_restore_under_closed_meta_policy():
+    """Closed 定义层门禁下 restore_defs 仍以 internal 重建 workflow 定义"""
+
+    async def _run(store):
+        from py_store import schema as sc
+        from py_store import workflow as wf
+        md._applied.clear()
+        o = {'tenant': 't11', 'env': 'dev', 'kind': 'workflow'}
+        await md.persist_def(store, _wf_defn('WfRestoreGate'), o)
+        sc.set_meta_policy(True, [])
+        try:
+            out = await md.restore_defs(store, dict(o))
+            assert out['applied'] == 1
+            assert 'WfRestoreGate' in store.workflows()      # Closed 下仍重建（internal）
+        finally:
+            sc.set_meta_policy(False, [])
+            wf._workflows.pop('WfRestoreGate', None)
+
+    _run_in_sqlite(_run, ('__workflowDef',))
+
+
+def test_wf_rollback_under_closed_meta_policy():
+    """Closed 定义层门禁下 rollback_to 仍以 internal 重建 workflow 定义"""
+
+    async def _run(store):
+        from py_store import schema as sc
+        from py_store import workflow as wf
+        md._applied.clear()
+        o = {'tenant': 't11', 'env': 'dev', 'kind': 'workflow'}
+        await md.persist_def(store, _wf_defn('WfRbGate'), o)
+        await md.persist_def(store, _wf_defn('WfRbGate', 'Item(){ _id title }'), o)
+        sc.set_meta_policy(True, [])
+        try:
+            rb = await md.rollback_to(store, {'tenant': 't11', 'env': 'dev',
+                                              'name': 'WfRbGate', 'version': 1, 'kind': 'workflow'})
+            assert rb['version'] == 3                        # 追加式
+            assert store.get_workflow('WfRbGate')['steps'][0]['gql'] == 'Item(){ _id }'  # Closed 下仍重建
+        finally:
+            sc.set_meta_policy(False, [])
+            wf._workflows.pop('WfRbGate', None)
+
+    _run_in_sqlite(_run, ('__workflowDef',))

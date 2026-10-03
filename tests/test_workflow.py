@@ -134,6 +134,31 @@ def test_register_and_read_filter():
         wf._workflows.pop(GOOD['name'], None)
 
 
+def test_register_meta_gate():
+    from py_store import schema as sc
+
+    gate = {'name': 'gateWf', 'steps': [{'op': 'fail', 'message': 'x'}]}
+    wf._workflows.pop('gateWf', None)
+    try:
+        # Open（缺省）：无 ctx 放行
+        sc.set_meta_policy(False, [])
+        wf.register(gate)
+        wf._workflows.pop('gateWf', None)
+
+        # Closed：无 ctx → 显式 ERR_PERMISSION，且定义不写入
+        sc.set_meta_policy(True, [])
+        with pytest.raises(WorkflowError, match='ERR_PERMISSION:'):
+            wf.register(gate)
+        assert 'gateWf' not in wf._workflows
+
+        # Closed：internal 放行
+        wf.register(gate, {'internal': True})
+        assert 'gateWf' in wf._workflows
+    finally:
+        wf._workflows.pop('gateWf', None)
+        sc.set_meta_policy(False, [])  # 复位，防污染后续用例
+
+
 # ─── parity 锚：占位符解析 ───────────────────────────────────
 
 _RESOLVE_CTX = {'inv': {'_id': 'inv1', 'stock': 100}}
