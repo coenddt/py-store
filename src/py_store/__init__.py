@@ -251,9 +251,9 @@ class Store:
         feedback.set_meta({'tenant': tenant, 'env': env})
 
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
-    def registerWorkflow(self, defn: dict) -> dict:
-        """注册工作流定义（注册即静态校验，白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
-        return workflow.register(defn)
+    def registerWorkflow(self, defn: dict, ctx: dict | None = None) -> dict:
+        """注册工作流定义（可选 ``ctx`` 过定义层门禁；默认 Open。白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
+        return workflow.register(defn, ctx)
 
     def workflows(self, ctx: dict | None = None) -> list[str]:
         """全部可见工作流名（read 白名单过滤）"""
