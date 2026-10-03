@@ -30,6 +30,7 @@ from . import (
     datasource,
     ddl,
     feedback,
+    metadef,
     permission,
     schema,
     workflow,
@@ -195,6 +196,27 @@ class Store:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
         return ddl.generate(backend, names)
 
+    # ── meta-store 定义控制面（定义持久化与版本化；见 metadef.py）──
+    async def persistDef(self, defn: dict, opts: dict | None = None) -> dict:
+        """持久化定义（同名同形幂等，异形 version+1；A1/A2）"""
+        return await metadef.persist_def(self, defn, opts)
+
+    async def listDefs(self, opts: dict | None = None) -> list[dict]:
+        """列定义行（按 version desc；name 缺省列全部）"""
+        return await metadef.list_defs(self, opts or {})
+
+    async def loadDefs(self, opts: dict | None = None) -> list[dict]:
+        """各 name 的最新 active 行"""
+        return await metadef.load_defs(self, opts or {})
+
+    async def rollbackTo(self, opts: dict) -> dict:
+        """回滚到历史版本（重新 register 该版本 defn）"""
+        return await metadef.rollback_to(self, opts)
+
+    def ensureBuiltins(self) -> None:
+        """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
+        return metadef.ensure_builtins()
+
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
     def registerWorkflow(self, defn: dict) -> dict:
         """注册工作流定义（注册即静态校验，白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
@@ -239,6 +261,12 @@ class Store:
     register_workflow = registerWorkflow
     run_workflow = runWorkflow
     get_workflow = getWorkflow
+    # 定义控制面（蛇形别名与上方驼峰同实现）
+    persist_def = persistDef
+    list_defs = listDefs
+    load_defs = loadDefs
+    rollback_to = rollbackTo
+    ensure_builtins = ensureBuiltins
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
