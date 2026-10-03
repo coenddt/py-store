@@ -26,6 +26,7 @@ from pymongo.errors import PyMongoError
 
 from . import (
     ask,
+    cache,
     crud,
     datasource,
     ddl,
@@ -250,6 +251,15 @@ class Store:
         """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
         feedback.set_meta({'tenant': tenant, 'env': env})
 
+    # ── 缓存状态注记（B6；见 cache.py）──
+    def setCacheStatus(self, fn):
+        """注册缓存状态 provider：`x-cache` 注记位唯一取值来源；未注册恒 BYPASS"""
+        return cache.set_cache_status(fn)
+
+    def cacheStatus(self, ctx: dict | None = None) -> str:
+        """当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一）"""
+        return cache.cache_status(permission.get_context() if ctx is None else ctx)
+
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
     def registerWorkflow(self, defn: dict, ctx: dict | None = None) -> dict:
         """注册工作流定义（可选 ``ctx`` 过定义层门禁；默认 Open。白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
@@ -307,6 +317,9 @@ class Store:
     ensure_builtins = ensureBuiltins
     enable_feedback_table = enableFeedbackTable
     set_feedback_meta = setFeedbackMeta
+    # 缓存状态注记（蛇形别名与上方驼峰同实现）
+    set_cache_status = setCacheStatus
+    cache_status = cacheStatus
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
