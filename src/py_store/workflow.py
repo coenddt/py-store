@@ -268,6 +268,63 @@ def validate_defn(defn):
     return errors
 
 
+def _collect_param_keys(ast_value, out=None):
+    """递归收集 core 返回 ast 中所有 ``params`` 对象的字符串值（@key 名）。"""
+    if out is None:
+        out = set()
+    if isinstance(ast_value, dict):
+        params = ast_value.get('params')
+        if isinstance(params, dict):
+            # core `ast.params` 的值为 `@key` 形态（含前导 @，core parse.rs::parse_params
+            # 保留 ref 原值）；归一化去掉前导 @，使错误文案为 `@c0` 而非 `@@c0`。
+            for v in params.values():
+                if isinstance(v, str) and v:
+                    out.add(v[1:] if v.startswith('@') else v)
+        for v in ast_value.values():
+            _collect_param_keys(v, out)
+    elif isinstance(ast_value, _LIST_TYPES):
+        for v in ast_value:
+            _collect_param_keys(v, out)
+    return out
+
+
+def validate_planable(defn):
+    """注册期「只校验不绑参」可规划性校验 → 错误列表（空 = 通过）。纯内存、无 IO、无参数值绑定。
+
+    ① 结构性可规划：对每个 query 步骤的 gql 调 core 门面
+       ``_core.build_pipeline(gql, {}, None)``（params 传 {} = 不绑参；ctx 传 None）；
+       不可规划 → core 抛异常，此处汇聚为注册期错误。
+    ② 参数键完整：返回体 ``ast`` 暴露 ``params``（槽位→@key，含嵌套关系）；
+       gql 引用的每个 ``@key`` 须在 ``step['params']`` 顶层存在。
+
+    与 ``validate_defn``（纯函数）分职：本函数需要 core 注册表，故独立、不入 validate_defn。
+    """
+    errors = []
+    if not isinstance(defn, dict):
+        return errors
+    steps = defn.get('steps')
+    if not isinstance(steps, _LIST_TYPES):
+        return errors
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict) or step.get('op') != 'query':
+            continue
+        gql = step.get('gql')
+        if not isinstance(gql, str):
+            continue
+        where = f'steps[{i}]'
+        try:
+            built = _core.build_pipeline(gql, {}, None)
+        except Exception as e:  # 透传 core 文案，与 node 逐字节对齐
+            errors.append(f'{where}: gql 不可规划: {e}')
+            continue
+        params = step.get('params')
+        provided = set(params) if isinstance(params, dict) else set()
+        for key in sorted(_collect_param_keys(built.get('ast') if isinstance(built, dict) else None)):
+            if key not in provided:
+                errors.append(f'{where}: gql 引用了未提供的参数 @{key}（params 须提供该键）')
+    return errors
+
+
 def _split_when(when):
     """when → (op, param_key)；无歧义文法：含 exists 键即 op=exists（is 作参数键），
     其余算子的右值键统一 than（is 键已被 exists 参数占用；is/eq 算子同用 than）"""
@@ -317,6 +374,10 @@ def register(defn, ctx=None):
     errors = validate_defn(defn)
     if errors:
         raise WorkflowError('WORKFLOW_UNSUPPORTED: ' + '；'.join(errors))
+    # B1：注册期「只校验不绑参」可规划性（结构 + 参数键完整）；独立于纯函数 validate_defn
+    plan_errors = validate_planable(defn)
+    if plan_errors:
+        raise WorkflowError('WORKFLOW_UNSUPPORTED: ' + '；'.join(plan_errors))
     name = defn['name']
     if name in _workflows:
         if _workflows[name] == defn:
