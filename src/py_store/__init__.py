@@ -316,6 +316,9 @@ class Store:
     set_deny_write_roles = staticmethod(permission.set_deny_write_roles)
     setUnconfiguredPolicy = staticmethod(permission.set_unconfigured_policy)
     set_unconfigured_policy = staticmethod(permission.set_unconfigured_policy)
+    # 定义层门禁策略（判决唯一在 core）：closed 时仅 internal/白名单可注册或覆盖
+    setMetaPolicy = staticmethod(schema.set_meta_policy)
+    set_meta_policy = staticmethod(schema.set_meta_policy)
     # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
     # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
     setProfile = staticmethod(schema.set_profile)

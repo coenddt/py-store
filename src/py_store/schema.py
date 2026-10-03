@@ -77,15 +77,19 @@ def _to_core_defn(defn):
     return walk(defn)
 
 
-def register(defn):
+def register(defn, ctx=None):
     """注册一个 schema（core 注册 + Host 侧元数据镜像）
 
+    ``ctx``：可选定义层门禁上下文（``{'userId','roles',...}`` 或 ``{'internal': True}``）。
+    返回 ``None`` 兼容既有调用；门禁策略由 ``set_meta_policy`` 配置，默认 Open（全放行）。
+    判决唯一在 core（拒绝抛 ``ERR_PERMISSION:`` 前缀错误，定义不变）。
+
     归档表 `<Name>Deleted` 由 core 在 register 内**自动派生并注册**
-    （rust-store/core/src/schema/registry.rs:52-55）；Host 只补 Host 侧镜像，
+    （rust-store/core/src/schema/registry.rs）；Host 只补 Host 侧镜像，
     **不再调用 core.register** —— 否则同名条目二次进入 core.order，使 list()/
     generate_ddl() 出现重复表（基线实测 list=['User','UserDeleted','UserDeleted']）。
     """
-    core.register(_to_core_defn(defn))
+    core.register_with_ctx(_to_core_defn(defn), ctx)
 
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
@@ -226,6 +230,14 @@ def set_deny_write_roles(roles):
 def set_unconfigured_policy(policy):
     """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）"""
     core.set_unconfigured_policy(policy)
+
+
+def set_meta_policy(closed, roles):
+    """定义层门禁策略：`closed=True` 时仅 internal 或 `roles` 白名单可注册/覆盖。
+
+    判决唯一在 core；默认 Open（`register` 无 ctx 亦放行，保既有兼容）。
+    """
+    core.set_meta_policy(bool(closed), roles)
 
 
 def require_context():
