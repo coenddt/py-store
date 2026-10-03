@@ -47,6 +47,9 @@ _schemas: dict = {}
 # asyncFn 计算列回调映射（fnRef → 原生异步函数）
 _async_fns: dict = {}
 
+# 已注入实现的 fn_ref 集合（A3：启动期缺实现校验用；进程级状态，不进 clear_schemas）
+_fn_refs: set = set()
+
 # 内部标记：表示「该键需剔除」（对齐 JS JSON round-trip 中函数型 default 被移除）
 _DROP = object()
 
@@ -277,3 +280,33 @@ def text2query():
 def get_async_fn(fn_ref):
     """取 asyncFn 计算列实现（fnRef 缺省 = 计算列 key 名）"""
     return _async_fns.get(fn_ref)
+
+
+def set_fn(fn_ref, impl):
+    """公开回调注入：fn_ref → impl(item, ctx)（对齐 nodejs-store store.setFn）。
+
+    与 ``register`` 内 ``core.set_fn`` 同语义；impl 返回 ``None`` 即 null（无跨 FFI 归一问题）。
+    """
+    if not isinstance(fn_ref, str) or not fn_ref:
+        raise ValueError("ERR_FN_REF:fn_ref 须为非空字符串")
+    if not callable(impl):
+        raise ValueError("ERR_FN_IMPL:impl 须可调用")
+    core.set_fn(fn_ref, impl)
+    _fn_refs.add(fn_ref)
+
+
+def assert_fns_covered(defns):
+    """启动期校验：定义声明的 fn_ref 必须都有实现；缺则显式抛错（不静默）。
+
+    关系聚合（``val['agg']``）由框架处理，无需回调，跳过。
+    """
+    missing = []
+    for defn in defns or ():
+        for key, val in ((defn or {}).get('computes') or {}).items():
+            if val and val.get('agg'):
+                continue
+            ref = (val or {}).get('fnRef') or key
+            if ref not in _fn_refs:
+                missing.append(ref)
+    if missing:
+        raise RuntimeError(f"ERR_FN_MISSING:未注入回调实现 {', '.join(missing)}")

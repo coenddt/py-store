@@ -51,6 +51,8 @@ from .datasource import Session as Session
 from .llm import get_llm as get_llm
 from .llm import make_openai_compat as make_openai_compat
 from .llm import register_llm as register_llm
+from .schema import assert_fns_covered as assert_fns_covered
+from .schema import set_fn as set_fn
 from .schema import text2query
 from .sync import sync_schema
 
@@ -329,6 +331,11 @@ class Store:
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
     register = staticmethod(schema.register)
+    # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.setFn / store.assertFnsCovered）
+    set_fn = staticmethod(schema.set_fn)
+    setFn = staticmethod(schema.set_fn)
+    assert_fns_covered = staticmethod(schema.assert_fns_covered)
+    assertFnsCovered = staticmethod(schema.assert_fns_covered)
     has = staticmethod(schema.has)
     get = staticmethod(schema.get)
     # 数据源连接（多后端路由）
