@@ -110,6 +110,28 @@ class MetaDefError(ValueError):
 
 # ─── 纯逻辑（双端逐字节等价；parity 锚） ───────────────────────
 
+def _assert_serializable(value, path=''):
+    """深度检查 defn 是否含函数值 —— 持久化定义 = 纯 JSON 契约（N3）。
+
+    必须先于 ``_to_core_defn`` 调用：后者会把 ``fn/asyncFn`` 归一为 ``True`` 占位、把其余函数剔除，
+    使「含回调定义」静默降级入库，回滚/restore 即丢失回调（缺陷台账 D17）。
+    本函数在归一化**之前**显式拒绝（fail-fast），文案对齐 node ``_assertSerializable``（逐字节一致）。
+    """
+    if callable(value):
+        raise MetaDefError(
+            f'metadef: 定义含函数回调（{path}），不可持久化；'
+            '回调类定义禁止经控制面发布（定义内改用 fnRef 字符串，实现由宿主 register 时注入）'
+        )
+    if value is None or not isinstance(value, (dict, list, tuple)):
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _assert_serializable(v, f'{path}.{k}' if path else str(k))
+    else:
+        for i, v in enumerate(value):
+            _assert_serializable(v, f'{path}.{i}' if path else str(i))
+
+
 def stable_stringify(value):
     """稳定序列化（键序无关）：与 node ``_stableStringify`` 逐字节等价"""
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -204,6 +226,7 @@ async def persist_def(store, defn, opts):
         raise MetaDefError('metadef: defn.name 必填')
     opts = opts or {}
     _, table = _kind_of(opts)
+    _assert_serializable(defn, '')                  # ← 新增：先于 IO 与归一化
     name = defn['name']
     rows = await list_defs(store, {'tenant': opts.get('tenant'), 'env': opts.get('env'),
                                    'name': name, 'kind': opts.get('kind')})

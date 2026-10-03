@@ -232,6 +232,37 @@ def test_d21_rollback_visible_via_restore_defs():
     _run_in_sqlite(_run)
 
 
+# ─── N3：回调类定义不可持久化（持久化定义 = 纯 JSON）─────────────
+
+def test_n3_callback_defn_rejected_no_row():
+    """N3：含函数回调的 defn 经 persist_def 显式拒绝，库内零新增行"""
+
+    async def _run(store):
+        o = {'tenant': 't12', 'env': 'dev'}
+        defn = {'name': 'CbItem', 'fields': {'_id': {'type': 'string'}},
+                'computes': {'total': {'fn': lambda item: 1}}}
+        with pytest.raises(MetaDefError, match='不可持久化'):
+            await md.persist_def(store, defn, o)
+        rows = await md.list_defs(store, {**o, 'name': 'CbItem'})
+        assert len(rows) == 0  # 拒绝先于 IO：库内零新增行
+
+    _run_in_sqlite(_run)
+
+
+def test_n3_pure_json_defn_persists_same_shape():
+    """N3：纯 JSON defn（fnRef 字符串）正常落库且与入参同形"""
+
+    async def _run(store):
+        o = {'tenant': 't12', 'env': 'dev'}
+        defn = {'name': 'CbPure', 'fields': {'_id': {'type': 'string'}},
+                'computes': {'total': {'fnRef': 'sum', 'type': 'int'}}}
+        row = await md.persist_def(store, defn, o)
+        assert row['version'] == 1
+        assert md.same_defn(row['defn'], defn)
+
+    _run_in_sqlite(_run)
+
+
 # ─── workflow 定义持久化（kind=workflow，落 __workflowDef；审计 §8 N1）───────
 
 def test_wf_persist_idempotent_versioning_and_list():
