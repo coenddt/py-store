@@ -9,7 +9,8 @@ from typing import Any, Iterable
 
 
 async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
-                     fns: dict | None = None, ctx: Any = None):
+                     fns: dict | None = None, ctx: Any = None,
+                     feedback: bool = True, tenant: str = "", env: str = ""):
     from . import init, schema, store  # 延迟导入，规避包内循环导入
 
     if datasource is None:
@@ -20,4 +21,8 @@ async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
     for ref, impl in (fns or {}).items():
         schema.set_fn(ref, impl)
     schema.assert_fns_covered(schemas)  # A3：缺实现即抛，进程不启动
+    if feedback:
+        store.setFeedbackMeta(tenant or "", env or "")   # py 侧签名：(tenant, env)
+        store.enableFeedbackTable()                      # 内建 __feedback + sink 落库（幂等）
+    # 关闭：await store.flushFeedback()（py 侧为 async）收口在途落库
     return {"store": store}
