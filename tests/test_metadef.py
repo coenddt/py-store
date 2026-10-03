@@ -49,8 +49,8 @@ def test_build_def_row_actor_defaults_empty():
 
 # ─── A1 / A2：真实 sqlite 落库闭环 ─────────────────────────────
 
-def _run_in_sqlite(body):
-    """建 sqlite 内存库 → 建 __schemaDef 表 → init → 执行业务协程
+def _run_in_sqlite(body, tables=('__schemaDef',)):
+    """建 sqlite 内存库 → 建内建表（默认 __schemaDef）→ init → 执行业务协程
 
     进程级连接映射是全局单例：用前快照、用后还原，避免把「已关闭的库」留给后续测试文件
     （对齐 conftest 的注册表隔离思路）。
@@ -65,7 +65,7 @@ def _run_in_sqlite(body):
         md.ensure_builtins()
         prev = dict(_ds._connections)
         db = await aiosqlite.connect(':memory:')
-        ddl = str(ddl_mod.generate('sqlite', ['__schemaDef']))
+        ddl = str(ddl_mod.generate('sqlite', list(tables)))
         for stmt in ddl.split('\n\n'):
             if stmt.strip():
                 await db.execute(stmt.strip())
@@ -78,6 +78,11 @@ def _run_in_sqlite(body):
             _ds._connections = prev
 
     return asyncio.new_event_loop().run_until_complete(_main())
+
+
+def _wf_defn(name, gql='Item(){ _id }'):
+    """最小合法 workflow defn（注册期白名单通过；gql 内容不参与注册期校验）"""
+    return {'name': name, 'steps': [{'op': 'query', 'as': 'a', 'gql': gql}]}
 
 
 def test_a1_persist_one_row_and_idempotent():
@@ -225,3 +230,93 @@ def test_d21_rollback_visible_via_restore_defs():
         assert 'price' not in store.get('RbItem')['fields']   # 协议面按历史 defn 装配
 
     _run_in_sqlite(_run)
+
+
+# ─── workflow 定义持久化（kind=workflow，落 __workflowDef；审计 §8 N1）───────
+
+def test_wf_persist_idempotent_versioning_and_list():
+    """workflow：persist 同名同形幂等 + 异形 version+1 + list version desc"""
+
+    async def _run(store):
+        o = {'tenant': 't6', 'env': 'dev', 'kind': 'workflow'}
+        w1 = _wf_defn('WfPersist')
+        w2 = _wf_defn('WfPersist', 'Item(){ _id title }')
+        r1 = await md.persist_def(store, w1, o)
+        assert r1['version'] == 1
+        assert (await md.persist_def(store, w1, o))['version'] == 1   # 同名同形幂等
+        r2 = await md.persist_def(store, w2, o)
+        assert r2['version'] == 2                                     # 异形 version+1
+        rows = await md.list_defs(store, {'tenant': 't6', 'env': 'dev',
+                                          'name': 'WfPersist', 'kind': 'workflow'})
+        assert [r['version'] for r in rows] == [2, 1]                 # version desc
+        assert rows[0]['_id'] == md.def_id('t6', 'dev', 'WfPersist', 2)
+
+    _run_in_sqlite(_run, ('__workflowDef',))
+
+
+def test_wf_load_defs_latest_active():
+    """workflow：load_defs 取各 name 最新 active"""
+
+    async def _run(store):
+        o = {'tenant': 't7', 'env': 'dev', 'kind': 'workflow'}
+        await md.persist_def(store, _wf_defn('WfLoad'), o)
+        await md.persist_def(store, _wf_defn('WfLoad', 'Item(){ _id title }'), o)
+        await md.persist_def(store, {'name': 'WfOther', 'steps': [{'op': 'fail', 'message': 'x'}]}, o)
+        rows = await md.load_defs(store, o)
+        assert {r['name']: r['version'] for r in rows} == {'WfLoad': 2, 'WfOther': 1}
+
+    _run_in_sqlite(_run, ('__workflowDef',))
+
+
+def test_wf_restore_defs_rebuilds_workflow_registry():
+    """workflow：restore_defs(kind=workflow) 重建 workflow 注册表（幂等）"""
+
+    async def _run(store):
+        md._applied.clear()
+        o = {'tenant': 't8', 'env': 'dev'}
+        await md.persist_def(store, _wf_defn('WfRestore'), {**o, 'kind': 'workflow'})
+        assert 'WfRestore' not in store.workflows()          # 落库未注册
+        out = await md.restore_defs(store, {**o, 'kind': 'workflow'})
+        assert out['applied'] == 1
+        assert 'WfRestore' in store.workflows()              # 重建后可见
+        assert (await md.restore_defs(store, {**o, 'kind': 'workflow'}))['applied'] == 0
+
+    _run_in_sqlite(_run, ('__workflowDef',))
+
+
+def test_wf_rollback_append_only_and_reload():
+    """workflow：rollback 追加式 → load_defs 按历史 defn，本进程重注册"""
+
+    async def _run(store):
+        md._applied.clear()
+        o = {'tenant': 't10', 'env': 'dev', 'kind': 'workflow'}
+        v1 = _wf_defn('WfRb')
+        v2 = _wf_defn('WfRb', 'Item(){ _id title }')
+        await md.persist_def(store, v1, o)
+        await md.persist_def(store, v2, o)
+        rb = await md.rollback_to(store, {'tenant': 't10', 'env': 'dev',
+                                          'name': 'WfRb', 'version': 1, 'kind': 'workflow'})
+        assert rb['version'] == 3 and rb['defn'] == v1       # 追加式
+        latest = await md.load_defs(store, o)
+        assert latest[0]['version'] == 3 and latest[0]['defn'] == v1
+        assert store.get_workflow('WfRb')['steps'][0]['gql'] == 'Item(){ _id }'  # 本进程重注册
+
+    _run_in_sqlite(_run, ('__workflowDef',))
+
+
+def test_a3_host_restore_defs_both_kinds():
+    """宿主 restore_defs 同时重建 schema 与 workflow 两类（一次调用闭环）"""
+
+    async def _run(store):
+        md._applied.clear()
+        o = {'tenant': 't9', 'env': 'dev'}
+        await store.persist_def({'name': 'HostItem', 'fields': {'_id': {'type': 'string'}}}, o)
+        await store.persist_workflow_def(_wf_defn('HostWf'), o)
+        assert not store.has('HostItem')
+        assert 'HostWf' not in store.workflows()
+        out = await store.restore_defs(o)
+        assert out['applied'] == 2                            # 一次调用重建两类
+        assert store.has('HostItem')
+        assert 'HostWf' in store.workflows()
+
+    _run_in_sqlite(_run, ('__schemaDef', '__workflowDef'))
