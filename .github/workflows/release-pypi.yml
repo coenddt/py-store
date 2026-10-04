@@ -146,7 +146,20 @@ jobs:
         with:
           name: dist
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # 幂等：版本已存在则跳过（重跑 / tag 重指时不再撞「已存在」）
+      - name: Check storepy version on PyPI
+        id: core
+        run: |
+          V=$(basename dist/storepy-*.tar.gz | sed -E 's/^storepy-([0-9.]+)\.tar\.gz$/\1/')
+          if curl -sf "https://pypi.org/pypi/storepy/$V/json" >/dev/null; then
+            echo "storepy@$V 已在 PyPI，跳过发布"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: PyPI publish storepy (Trusted Publishing)
+        if: steps.core.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
       # L2 计算列包（独立版本，首发 0.1.0，与主包版本解耦）。
