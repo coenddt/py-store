@@ -13,7 +13,7 @@ import os
 
 from . import schema
 
-__all__ = ['read_config', 'collect_files', 'plan_load', 'load_defs']
+__all__ = ['collect_files', 'load_defs', 'plan_load', 'read_config']
 
 
 def read_config(path_or_obj, base_dir=None):
@@ -27,7 +27,7 @@ def read_config(path_or_obj, base_dir=None):
         with open(abs_path, 'r', encoding='utf-8') as fp:
             parsed = json.load(fp)
     except Exception as e:
-        raise RuntimeError(f'ERR:LOAD 读取 store.config.json 失败: {abs_path}: {e}')
+        raise RuntimeError(f'ERR:LOAD 读取 store.config.json 失败: {abs_path}: {e}') from e
     return parsed, base_dir or os.path.dirname(abs_path)
 
 
@@ -36,7 +36,7 @@ def collect_files(roots):
 
     返回 ``[{'rel', 'defn'}]``，``rel`` = 相对该定义根的路径（POSIX 分隔符）。
     """
-    out = []
+    out: list[dict] = []
     for root in roots or []:
         abs_root = os.path.abspath(root)
         if not os.path.exists(abs_root):
@@ -59,7 +59,7 @@ def _walk(dir_path, root, out):
                 with open(full, 'r', encoding='utf-8') as fp:
                     defn = json.load(fp)
             except Exception as e:
-                raise RuntimeError(f'ERR:LOAD 解析定义失败: {rel}: {e}')
+                raise RuntimeError(f'ERR:LOAD 解析定义失败: {rel}: {e}') from e
             out.append({'rel': rel, 'defn': defn})
 
 

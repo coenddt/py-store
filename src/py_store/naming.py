@@ -150,7 +150,7 @@ def _to_mongo(cmd):
 
 # ─── 反向：物理文档 → 逻辑文档（逐 schema 逆表） ──────────────
 
-_INV_CACHE = {}
+_INV_CACHE: dict[str, dict] = {}
 
 
 def clear_cache():

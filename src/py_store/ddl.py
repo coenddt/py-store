@@ -169,7 +169,7 @@ def _index_stmts(defn, backend):
         phys_keys = [_pname(backend, k) for k in keys]
         cols = ', '.join(
             f"{_q(backend, pk)} {'DESC' if v == -1 else 'ASC'}"
-            for pk, v in zip(phys_keys, keys.values()))
+            for pk, v in zip(phys_keys, keys.values(), strict=True))
         name = 'idx_' + table + '_' + '_'.join(phys_keys)
         out.append(
             f"CREATE {'UNIQUE ' if unique else ''}INDEX {_q(backend, name)} "
