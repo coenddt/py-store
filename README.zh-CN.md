@@ -92,13 +92,13 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 - **需要行级 / 字段级访问控制。** 按角色配置白名单，`guest` 永远不能写，`creator` 归属按 `doc.createdBy` 校验，属主条件会自动注入查询。
 - **正在构建 AI / 自然语言数据问答层。** 本库在设计时就考虑了 AI 查询宿主：`store.build_pipeline(...)` 可在不执行的情况下暴露规划好的查询，而降级 / 无法下推的路径会发出结构化反馈事件，而不是静默失败。
 - **正在 MongoDB 与 SQL 之间迁移**，并希望在过渡期保持同一套查询语法。
-- **多租户 SaaS。** 一份 schema 定义，N 个租户：把 schema 绑定到 `(source, namespace, collection)`，并在执行时用 `{"source", "namespace"}` 覆盖把任意查询或写入重新指向目标。
+- **多租户 SaaS。** 一份 schema 定义，N 个租户：通过 `(source, database, schema, collection)` 定位 schema，并在执行时用 `{"source", "database", "schema"}` 覆盖把任意查询或写入重新指向目标。
 
 典型具体场景（完整走查见 [`doc/use-cases/`](doc/use-cases/)）：
 
 | 场景 | 为什么适合 py-store |
 | --- | --- |
-| 按租户 schema/数据库隔离的多租户 SaaS | 每租户一个 `namespace` + 运行时路由覆盖，仅需一份 schema |
+| 按租户 schema/数据库隔离的多租户 SaaS | 每租户一个 `database` / `schema` + 运行时路由覆盖，仅需一份 schema |
 | FastAPI / 管理后台 | Schema 驱动 CRUD、软删除、计算列、RBAC |
 | 今天 MongoDB，明天 PostgreSQL | 同一 GQL + 同一 schema，只有数据源改变 |
 | AI 数据问答 / text-to-query agent | plan-only 的 `build_pipeline`、确定性的 command JSON、反馈事件 |
@@ -224,7 +224,7 @@ GQL 树形查询在每个后端各编译为一条原生查询 —— 再也不�
 - **智能 mutation** —— `mutation()` 依据 `_id` + 唯一索引自动识别 upsert，并递归填充关系子文档。
 - **内置软删除** —— 每个 schema 自动注册一个 `<Model>Deleted` 归档集合/表；`remove()` 先归档再删除。
 - **权限上下文** —— 基于 `ContextVar` 的角色（`super_admin`/`admin`/`guest`/`creator`…）、schema/字段级读写白名单、自动属主条件注入。
-- **多数据源 & 多租户** —— 通过 `(source, namespace, collection)` 定位 schema；按请求用路由覆盖重新指向目标。
+- **多数据源 & 多租户** —— 通过 `(source, database, schema, collection)` 定位 schema；按请求用路由覆盖重新指向目标。
 - **异步优先，Rust 核心** —— 构建在 PyMongo `AsyncMongoClient` 与共享的 Rust 核心（含 SQL 方言）之上。
 - **mutation 关系谓词** —— `update` / `remove` 按关联表字段过滤，下推到全部四个后端（此前 MongoDB 侧是静默 no-op）。
 - **自增主键** —— `_id` 声明 `{"type": "int", "strategy": "autoincrement"}` 即用数据库自增整数 ID；做不到自增的场景显式报错。
@@ -319,7 +319,7 @@ await store.upsert("Post", {"code": "A1"}, {...})    # 显式条件 upsert（不
 - 持久化前会剔除 `None` 值；`_id` 不能通过 `update` 修改。
 - `createdAt`/`updatedAt` 由框架维护 —— 不要手动设置。单位取决于 schema 的 `timestamps` 设置：默认毫秒，当 `timestamps: "s"` 时为秒。
 - 带**空条件**（`{}`、`None`、`{"$and": []}`）的 `update_many` / `remove` 会被直接拒绝 —— 它绝不会退化为全表写入。
-- 提供蛇形别名：`query_one`、`insert_many`、`update_many`、`build_pipeline`、…
+- 蛇形命名 API（唯一定名，无驼峰别名）：`query_one`、`insert_many`、`update_many`、`build_pipeline`、…
 
 ### 事务与原生 SQL
 
@@ -337,7 +337,7 @@ await store.transaction("default", transfer)
 - `store.transaction(source, fn)` 在单个 SQL 源上开启事务作用域：`fn` 内的每个 `execute_raw` / CRUD 调用都落到该源的事务连接，`commit` / `rollback` 作为一个整体（复用内部的 `run_in_transaction`）。Mongo 源按**运行时能力探测**（replica set / sharded）以 session 事务执行；standalone 或探测失败则按原样执行 `fn` 并发 `mongo_transaction_unsupported`（`deployment: standalone|unknown`）—— 绝不假装已原子。不支持事务（无 `with_transaction`）的执行器亦按原样执行，并发出一条 `transaction_not_atomic` 反馈（允许降级，绝不静默假装已事务化）。同源嵌套 transaction 会开保存点（内层失败只回滚本层）；句柄无保存点原语时降级并入外层并发 `nested_savepoint_unsupported`。
 - `store.execute_raw(source, sql, params=None, is_write=None)` 执行原生 SQL，编译由 core 的 `raw_stmt_compile` 完成，按 `params` 类型自动分两档：**位置档**（list/tuple/None）SQL 原样透传，占位符沿用各后端原生风格（MySQL / SQLite 用 `?`，PostgreSQL 用 `$1..$n`）；**命名档**（dict）SQL 文本中的 `:name` 编译为方言占位符（同名复用、跳过 `::` cast / 引号 / 注释边界；缺名 / 多余名显式抛 `RawSqlError`）。仅限 SQL 源 —— Mongo 源会抛出 `RawSqlError`（`py_store.RawSqlError` / `store.RawSqlError`）。
 - `is_write` 缺省时按 SQL 首词推断（SELECT / WITH / EXPLAIN / SHOW / PRAGMA / TABLE 视为读，其余按写 —— 默认写是安全方向）；显式传入则覆盖推断。返回 `{"rows", "affectedRows"}`：读取行，写取影响行数。
-- `store.execute_native(source, collection, pipeline=None, options=None)` 在 Mongo 源上执行原生聚合管道（对标 SQL 侧 `execute_raw` 的 Mongo 对位逃生口）：`pipeline` 为原生聚合管道，`options` 沿用驱动原生键名（`allowDiskUse` / `batchSize` / `hint` / `maxTimeMS`…，宿主不做白名单）。事务 / 会话作用域内自动透传 session（由事务强制接管，`options.session` 不可覆盖）；统一按读路径解析，`$merge` / `$out` 写管道请自行开事务。仅限 Mongo 源 —— SQL 源抛 `NativeCommandError` 并指引 `execute_raw`；MongoClient 形态须经 schema 声明 namespace。返回 `{"rows"}`。
+- `store.execute_native(source, collection, pipeline=None, options=None)` 在 Mongo 源上执行原生聚合管道（对标 SQL 侧 `execute_raw` 的 Mongo 对位逃生口）：`pipeline` 为原生聚合管道，`options` 沿用驱动原生键名（`allowDiskUse` / `batchSize` / `hint` / `maxTimeMS`…，宿主不做白名单）。事务 / 会话作用域内自动透传 session（由事务强制接管，`options.session` 不可覆盖）；统一按读路径解析，`$merge` / `$out` 写管道请自行开事务。仅限 Mongo 源 —— SQL 源抛 `NativeCommandError` 并指引 `execute_raw`；MongoClient 形态须经 schema 声明 `database`。返回 `{"rows"}`。
 - **非事务路径显式提交**：在 SQL 源上，`store.transaction` 之外的写命令由执行器显式提交（成功 `commit`；失败先 `rollback` 再上抛）。`aiosqlite` 默认非 autocommit，若缺少这次提交，写入只在当前连接可见、而 `execute_raw` 仍报成功 —— 是静默丢数据的隐患。需要整组原子的多语句写入，请放进 `store.transaction`。
 
 ### 会话（Session / 工作单元）
@@ -375,35 +375,39 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 
 ## 多数据源连接
 
-每个 schema 通过三元组 `(source, namespace, collection)` 定位 —— 该三元组在注册表中必须全局唯一（重复注册会报错，而不是静默错误路由）。
+每个 schema 通过 `(source, database, schema（仅 PostgreSQL）, collection)` 定位 —— 该元组在注册表中必须全局唯一（重复注册会报错，而不是静默错误路由）。定义文件本身不携带落点；`source` / `database` / `schema` 由定义目录结构 + 连接配置解析。
 
-- `source` —— `init({...})` 中的连接键（默认 `"default"`）。
-- `namespace` —— 连接内的数据库/schema：Mongo db 名、PG schema、MySQL database、SQLite attached db。可选；`None` = 连接默认。
-- `collection` —— 表/集合名。
+<!-- SPEC:LOCATION:BEGIN -->
+### Location: directory semantics + connection config (definitions carry no location)
+
+A schema definition file contains no location fields (no `source` / `database` / `schema`; `namespace` is removed). Location is resolved from the definition directory layout plus the connection config:
+
+- Under the definitions root `<defs-root>/`: the first directory level is the `database`; PostgreSQL adds a second level for `schema` (Mongo / MySQL / SQLite have no such level); deeper levels are free-form and flattened at load time (no hierarchy semantics).
+- The connection config (`store.config.json`) declares `sources` (`kind` + `databases`) and `defs`; `kind` decides whether that database directory is read one level deeper for `schema`.
+- Location fields are `source` / `database` / `schema` (PG only) / `collection`; the word `namespace` is removed.
+- Same-named schemas: exactly one primary (no `replica`); the rest declare `{ "name": "...", "replica": true }`, add only a link, and must not repeat the structure. Zero or two-or-more primaries is an error.
+- A duplicated `name` within one load batch is an error and the service does not start; re-loading the same `name` across versions bumps its version by 1.
+- Writes are synchronized within a single connection, across the primary plus all links, in one transaction; a write spanning a cross-connection link is explicitly rejected or degraded with a feedback event (never silent).
+<!-- SPEC:LOCATION:END -->
 
 ```python
 # 多个 Mongo 服务端：每个连接一个 source
 await init({"mongo_main": db, "pg_a": {"kind": "postgres", "exec": exec}})
 
-# 同一个 MongoClient 服务多个数据库：声明 namespace（db 名）
-await init({"cluster": client})
-store.register({"name": "User", "collection": "users", "datasource": "cluster",
-                "namespace": "tenant_42", ...})
-
-# SQL 跨 namespace 关联会原生下推（"ns_a"."t" JOIN "ns_b"."t"）；
+# SQL 跨 database / PG-schema 关联会原生下推（"db_a"."t" JOIN "db_b"."t"）；
 # 只有 Mongo 跨库关系会回退到内存联邦。
 ```
 
-**多租户路由覆盖** —— 一份 schema 定义，N 个租户。任意查询/写入都接受 `{ "source", "namespace" }` 覆盖，在执行时重新定位命令（权限与计算列仍遵循结构 schema）：
+**多租户路由覆盖** —— 一份 schema 定义，N 个租户。任意查询/写入都接受 `{ "source", "database", "schema" }` 覆盖，在执行时重新定位命令（权限与计算列仍遵循结构 schema）：
 
 ```python
-await store.query('User($condition:@c0){...}', params, {"namespace": "tenant_42"})
-await store.insert("Order", data, {"source": "pg_cluster", "namespace": "tenant_7"})
+await store.query('User($condition:@c0){...}', params, {"database": "tenant_42"})
+await store.insert("Order", data, {"source": "pg_cluster", "schema": "tenant_7"})
 ```
 
-**`route_override` 是受信的服务端参数** —— 它不带来源校验，因此把用户可控的输入转发给它，会让调用方把 `source`/`namespace` 重新指向另一个租户（CWE-639 授权绕过面）。切勿在此传入原始请求数据。
+**`route_override` 是受信的服务端参数** —— 它不带来源校验，因此把用户可控的输入转发给它，会让调用方把 `source`/`database`/`schema` 重新指向另一个租户（CWE-639 授权绕过面）。切勿在此传入原始请求数据。
 
-旧版单库用法（`init(db)` + 不带 `datasource`/`namespace` 的 schema）保持不变：命令携带 `source: "default"`、`namespace: None`。
+旧版单库用法（`init(db)` + 不带落点的 schema）保持不变：命令携带 `source: "default"`，`database` / `schema` 取连接默认。
 
 ## 权限上下文
 
@@ -486,6 +490,35 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
 - 直接对数组字段、整个对象字段或对象点路径做过滤，在每个后端都会被拒绝 —— 请把跨实体语义建模为 `relations`。
 - 关系谓词只支持**一层**关系；像 `orders.items.price` 这样的路径会被拒绝。
 - 无法读取的关系是错误，而不是静默的 `False`。
+
+<!-- SPEC:NAMING-STYLE:BEGIN -->
+### Naming: freeform definitions, system-directed translation
+
+Definitions (`collection`, fields, referenced relation fields, computed-column keys, `fnRef` values, index names) may use any style; the engine translates them to the target style. Contract keys (`fnRef`, `localField`, `foreignField`, `asyncFn`, `type`, ...) and the schema `name` are never translated.
+
+| Target | Style | Example (`orderTotal`) |
+|---|---|---|
+| MySQL / PostgreSQL / SQLite (physical) | snake_case | `order_total` |
+| MongoDB (physical) | camelCase | `orderTotal` |
+| Node.js / Java / C# / Rust (code; computed columns follow) | camelCase | `orderTotal` |
+| Go (code; computed columns follow) | PascalCase (must be exported) | `OrderTotal` |
+| Python (code; computed columns follow) | snake_case | `order_total` |
+
+Canonicalization (single implementation `core::naming`, re-exported by the bindings; hosts must not re-implement it): split on `_`, `-`, `.`, space and at lower/digit-to-upper boundaries; a trailing uppercase in a run followed by a lowercase starts the next token (`HTTPServer` -> `[http, server]`, `userID` -> `[user, id]`); digits stay inside a token (`order2Items` -> `[order2, items]`). Reassembly: snake = `t1_t2`, camel = `t1T2`, pascal = `T1T2`.
+
+Two logical names in one schema that canonicalize equal (`orderTotal` vs `order_total`), or a name that canonicalizes onto a reserved contract key (e.g. `fnref`), is an error `ERR_NAME_CONFLICT:` and the service does not start (never silently overwritten).
+<!-- SPEC:NAMING-STYLE:END -->
+
+<!-- SPEC:FNREF:BEGIN -->
+### Computed columns: `fnRef` binding by composite name + canonical match
+
+Computed columns live at the schema top level, `computes: { <key>: { type, fn | asyncFn | agg, fnRef?, depends?, read? } }` (`fn` / `asyncFn` / `agg` are mutually exclusive).
+
+- The logical `fnRef` defaults to `<schema.name>.<computed-column key>` (generated, never hand-written); since `name` is globally unique, the `fnRef` is globally unique too.
+- Host implementations bind by canonicalization: both the implementation's name in the host language style and the schema's logical `fnRef` are canonicalized to token sequences and compared. So Node's `orderAmountLabel` and Python's `order_amount_label` bind to the same logical computed column.
+- Reusing one implementation across schemas: write an explicit shared name (e.g. `"fnRef": "common.moneyLabel"`); naming goes from required to optional.
+- Every declared `fnRef` must have an implementation, otherwise the service fails to start with `ERR_FN_MISSING`.
+<!-- SPEC:FNREF:END -->
 
 ## 事务边界
 
@@ -605,7 +638,7 @@ run = await workflow.run('placeOrder', {'productId': 'p1', 'warehouse': 'w1', 'q
 每个已注册模型都会自动获得一个 `<Model>Deleted` 归档集合/表。`store.remove()` 先归档文档再删除；重新创建相同的 `_id` 不会冲突，因为归档写入是按 `_id` upsert。
 
 **它能用于多租户应用吗？**
-可以。把 schema 绑定到 `(source, namespace, collection)`，并按请求传入 `{"source", "namespace"}` 路由覆盖。只把 `route_override` 当作受信的服务端输入。
+可以。通过 `(source, database, schema, collection)` 定位 schema，并按请求传入 `{"source", "database", "schema"}` 路由覆盖。只把 `route_override` 当作受信的服务端输入。
 
 **它会执行迁移吗？**
 不会。`sync_schema()` 只通过内省*读取*物理结构（introspect → 合并 overlay → 注册）。schema 变更 / DDL 是你迁移工具的职责（如 Alembic）。若想要一个起点，`store.generate_ddl(backend)` 可从已注册 schema 渲染 `CREATE TABLE` 文本 —— 但它只是纯文本生成：绝不执行、也不写入 DDL。

@@ -1,5 +1,43 @@
 # Changelog
 
+## 4.0.0 (2026-10-04)
+
+**破坏性版本**：多源定位模型与命名翻译对齐 Rust core 4.0（`namespace` 删名、定义零落点、
+数据标识符按介质翻译）。与 `nodejs-store` 4.0.0 同构。
+
+### Breaking Changes
+
+1. **定位字段 `namespace` 删除 → `database`（PG 另加 `schema`）**：命令体定位形状改为
+   `{ source, database, schema, collection }`（`schema` 仅 PostgreSQL）；schema 定义文件
+   **不再携带任何落点字段**（`source` / `database` / `schema` 一律移除）；`route_override`
+   键更名 `{ source?, database?, schema? }`。
+2. **同批同名定义改为报错**：一个装载批次内出现重复 `name` 即报错、服务不启动（原为静默覆盖）；
+   同名 = 一份主 + 若干 `replica: true` 从链路（从链路只加链接、不重复结构）。
+3. **数据标识符下沉翻译**：定义里的 `collection` / 字段名 / 关联关系字段名 / 计算列键 /
+   `fnRef` / 索引名可用任意风格，由引擎翻译为目标介质风格（SQL 物理名 snake_case、Mongo 物理名
+   camelCase）；归一后撞名、或撞契约保留键（如字段名 `type` / `read` / `write`）⇒
+   `ERR_NAME_CONFLICT`，服务不启动（绝不静默覆盖）。
+4. **计算列 `fnRef` 默认复合名 + 归一匹配**：未显式声明时 `fnRef = <schema.name>.<计算列键>`；
+   宿主实现按归一（token 序列）匹配绑定；`fnRef` 全集必须有实现，否则 `ERR_FN_MISSING` 启动失败。
+5. **Python 宿主删除驼峰别名（仅蛇形）**：`Store` 门面只暴露蛇形命名（如 `query_one` /
+   `insert_many` / `build_pipeline` / `run_workflow`），驼峰别名（`queryOne` 等）移除。
+6. **`sync_schema` 定位参数更名**：`namespace=` → `database=`（并新增 PG 专用 `schema=`）。
+
+### Migration
+
+- 把定义 / 命令中的 `namespace` 替换为 `database`（PG 介质再加 `schema`）。
+- 删除 schema 定义文件里的落点字段（`source` / `database` / `schema`），改由定义目录 + 连接配置
+  解析（一级目录 = `database`；PG 二级 = `schema`；三级起自由打平）。
+- 按新语义重排定义目录；同名定义改为一份主 + `replica: true` 从链路。
+- `route_override` 键 `namespace` 改为 `database`（PG 可加 `schema`）。
+- 计算列 `fnRef` 若此前手写，改为省略（用默认复合名）或显式共享名；确认每个 `fnRef` 都有实现。
+- 抬高绑定依赖下限：`rust-store-py>=4.0.0,<5.0.0`（本版 `pyproject.toml` 已声明）。
+
+### Docs
+
+- README（英 / 中）/ `llms-full.txt` / `src/py_store/ask_knowledge.md` 新增三段规范：
+  命名风格与翻译 / 落点目录约定 / `fnRef` 绑定，由 `scripts/check-spec-snippets.js` 校验四载体一致。
+
 ## 3.0.0 (2026-10-02)
 
 ### Breaking（RBAC 内置角色清单化，设计 §11）

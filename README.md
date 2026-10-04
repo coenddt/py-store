@@ -93,13 +93,13 @@ Reach for `py-store` when any of these describe your situation:
 - **You need row-level / field-level access control.** Whitelists per role, `guest` can never write, `creator` ownership is checked against `doc.createdBy`, and owner conditions are injected automatically into queries.
 - **You are building an AI / natural-language data-QA layer.** The library was designed with AI query hosts in mind: `store.build_pipeline(...)` exposes the planned query without executing it, and degraded / non-pushdownable paths emit structured feedback events instead of failing silently.
 - **You are migrating between MongoDB and SQL** and want to keep one query syntax during the transition.
-- **Multi-tenant SaaS.** One schema definition, N tenants: bind a schema to `(source, namespace, collection)` and re-target any query or write at execution time with a `{"source", "namespace"}` override.
+- **Multi-tenant SaaS.** One schema definition, N tenants: locate a schema by `(source, database, schema, collection)` and re-target any query or write at execution time with a `{"source", "database", "schema"}` override.
 
 Typical concrete scenarios (see [`doc/use-cases/`](doc/use-cases/) for full walkthroughs):
 
 | Scenario | Why py-store fits |
 | --- | --- |
-| Multi-tenant SaaS with per-tenant schema/database | `namespace` per tenant + runtime route override, one schema |
+| Multi-tenant SaaS with per-tenant schema/database | `database` / `schema` per tenant + runtime route override, one schema |
 | FastAPI / admin backend | Schema-driven CRUD, soft-delete, computed columns, RBAC |
 | MongoDB today, PostgreSQL tomorrow | Same GQL + same schema, only the datasource changes |
 | AI data-QA / text-to-query agent | Plan-only `build_pipeline`, deterministic command JSON, feedback events |
@@ -225,7 +225,7 @@ GQL tree queries compile to a single native query per backend — never hand-wri
 - **Smart mutation** — `mutation()` auto-detects upsert by `_id` + unique index and recursively fills relation children.
 - **Soft-delete built in** — every schema auto-registers a `<Model>Deleted` archive collection/table; `remove()` archives before deleting.
 - **Permission context** — `ContextVar`-based roles (`super_admin`/`admin`/`guest`/`creator`...), schema/field-level read/write whitelists, automatic owner-condition injection.
-- **Multi-datasource & multi-tenant** — locate a schema by `(source, namespace, collection)`; re-target per request with a route override.
+- **Multi-datasource & multi-tenant** — locate a schema by `(source, database, schema, collection)`; re-target per request with a route override.
 - **Async-first, Rust core** — built on PyMongo's `AsyncMongoClient` and a shared Rust core with SQL dialects.
 - **Relation predicates in mutations** — filter `update` / `remove` by related-table fields, pushed down to all four backends (previously a silent no-op on MongoDB).
 - **Autoincrement primary keys** — declare `_id` as `{"type": "int", "strategy": "autoincrement"}` for database-assigned integer IDs, with explicit errors where autoincrement is impossible.
@@ -320,7 +320,7 @@ Notes:
 - `None` values are stripped before persisting; `_id` cannot be changed via `update`.
 - `createdAt`/`updatedAt` are framework-maintained — do not set them manually. Unit follows the schema's `timestamps` setting: milliseconds by default, or seconds when `timestamps: "s"`.
 - `update_many` / `remove` with an **empty condition** (`{}`, `None`, `{"$and": []}`) is rejected outright — it never falls through to a full-table write.
-- Snake-case aliases available: `query_one`, `insert_many`, `update_many`, `build_pipeline`, ...
+- Snake-case API (the only naming, no camelCase aliases): `query_one`, `insert_many`, `update_many`, `build_pipeline`, ...
 
 ### Transactions and raw SQL
 
@@ -338,7 +338,7 @@ await store.transaction("default", transfer)
 - `store.transaction(source, fn)` opens a transaction scope on one source: every `execute_raw` / CRUD call inside `fn` lands on that source's transaction connection, with `commit` / `rollback` as one unit (reuses the internal `run_in_transaction`). Mongo sources are probed at runtime (replica set / sharded) and wrapped in a session transaction; on standalone or probe failure `fn` runs as-is and emits `mongo_transaction_unsupported` (`deployment: standalone|unknown`) — it never pretends to be atomic. Executors without `with_transaction` also run `fn` as-is and emit a `transaction_not_atomic` feedback event (degradation is allowed, silent pretence is not). A nested same-source transaction opens a savepoint (an inner failure rolls back only that scope); without savepoint primitives it degrades by joining the outer transaction and emits `nested_savepoint_unsupported`.
 - `store.execute_raw(source, sql, params=None, is_write=None)` runs raw SQL, compiled by the core `raw_stmt_compile`. Two styles selected by the `params` type: **positional** (list/tuple/None) passes the SQL through as-is with native placeholders (`?` for MySQL / SQLite, `$1..$n` for PostgreSQL); **named** (dict) compiles `:name` tokens in the SQL into dialect placeholders (same-name reuse, `::` casts / quotes / comments kept intact; missing or unused names raise `RawSqlError`). SQL sources only — a Mongo source raises `RawSqlError` (`py_store.RawSqlError` / `store.RawSqlError`).
 - When `is_write` is omitted it is inferred from the SQL's first word (SELECT / WITH / EXPLAIN / SHOW / PRAGMA / TABLE count as reads, everything else as a write — defaulting to write is the safe direction); passing it explicitly overrides the inference. Returns `{"rows", "affectedRows"}`: rows for reads, the affected-row count for writes.
-- `store.execute_native(source, collection, pipeline=None, options=None)` runs a native aggregation pipeline on a Mongo source (the Mongo counterpart of the SQL-side `execute_raw` escape hatch): `pipeline` is a native aggregation pipeline, `options` uses driver-native keys (`allowDiskUse` / `batchSize` / `hint` / `maxTimeMS`..., no host-side whitelist). Inside a transaction / session the session is injected automatically (owned by the transaction; `options.session` cannot override it); resolution always follows the read path, so `$merge` / `$out` write stages require you to open a transaction yourself. Mongo sources only — a SQL source raises `NativeCommandError` pointing to `execute_raw`; the MongoClient form requires a schema-declared namespace. Returns `{"rows"}`.
+- `store.execute_native(source, collection, pipeline=None, options=None)` runs a native aggregation pipeline on a Mongo source (the Mongo counterpart of the SQL-side `execute_raw` escape hatch): `pipeline` is a native aggregation pipeline, `options` uses driver-native keys (`allowDiskUse` / `batchSize` / `hint` / `maxTimeMS`..., no host-side whitelist). Inside a transaction / session the session is injected automatically (owned by the transaction; `options.session` cannot override it); resolution always follows the read path, so `$merge` / `$out` write stages require you to open a transaction yourself. Mongo sources only — a SQL source raises `NativeCommandError` pointing to `execute_raw`; the MongoClient form requires a schema-declared `database`. Returns `{"rows"}`.
 - **The non-transactional path commits explicitly**: on SQL sources, a write plan that runs outside `store.transaction` is committed by the executor (`commit` on success; `rollback` then re-raise on failure). `aiosqlite` is not autocommit by default, so without that commit the write would be visible only on the current connection while `execute_raw` still reported success — a silent data-loss hazard. Multi-statement writes that must be atomic as a group belong inside `store.transaction`.
 
 ### Session (Unit of Work)
@@ -373,43 +373,47 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 
 ## Multi-datasource connections
 
-Every schema is located by the triple `(source, namespace, collection)` — the triple must be
-globally unique across the registry (duplicate registration raises instead of silently
-mis-routing).
+A schema is located by `(source, database, schema (PostgreSQL only), collection)` — the tuple
+is globally unique across the registry (duplicate registration raises instead of silently
+mis-routing). The definition file itself carries no location; `source` / `database` / `schema`
+are resolved from the definitions directory layout plus the connection config.
 
-- `source` — connection key in `init({...})` (default `"default"`).
-- `namespace` — database/schema inside the connection: Mongo db name, PG schema,
-  MySQL database, SQLite attached db. Optional; `None` = connection default.
-- `collection` — table/collection name.
+<!-- SPEC:LOCATION:BEGIN -->
+### Location: directory semantics + connection config (definitions carry no location)
+
+A schema definition file contains no location fields (no `source` / `database` / `schema`; `namespace` is removed). Location is resolved from the definition directory layout plus the connection config:
+
+- Under the definitions root `<defs-root>/`: the first directory level is the `database`; PostgreSQL adds a second level for `schema` (Mongo / MySQL / SQLite have no such level); deeper levels are free-form and flattened at load time (no hierarchy semantics).
+- The connection config (`store.config.json`) declares `sources` (`kind` + `databases`) and `defs`; `kind` decides whether that database directory is read one level deeper for `schema`.
+- Location fields are `source` / `database` / `schema` (PG only) / `collection`; the word `namespace` is removed.
+- Same-named schemas: exactly one primary (no `replica`); the rest declare `{ "name": "...", "replica": true }`, add only a link, and must not repeat the structure. Zero or two-or-more primaries is an error.
+- A duplicated `name` within one load batch is an error and the service does not start; re-loading the same `name` across versions bumps its version by 1.
+- Writes are synchronized within a single connection, across the primary plus all links, in one transaction; a write spanning a cross-connection link is explicitly rejected or degraded with a feedback event (never silent).
+<!-- SPEC:LOCATION:END -->
 
 ```python
 # Multiple Mongo servers: one source per connection
 await init({"mongo_main": db, "pg_a": {"kind": "postgres", "exec": exec}})
 
-# Same MongoClient serving multiple databases: declare namespace (db name)
-await init({"cluster": client})
-store.register({"name": "User", "collection": "users", "datasource": "cluster",
-                "namespace": "tenant_42", ...})
-
-# SQL cross-namespace joins are pushed down natively ("ns_a"."t" JOIN "ns_b"."t");
+# SQL cross-database / PG-schema joins are pushed down natively ("db_a"."t" JOIN "db_b"."t");
 # only Mongo cross-db relations fall back to in-memory federation.
 ```
 
 **Multi-tenant route override** — one schema definition, N tenants. Any query/write accepts
-a `{ "source", "namespace" }` override that re-targets commands at execution time
+a `{ "source", "database", "schema" }` override that re-targets commands at execution time
 (permissions and computed columns still follow the structural schema):
 
 ```python
-await store.query('User($condition:@c0){...}', params, {"namespace": "tenant_42"})
-await store.insert("Order", data, {"source": "pg_cluster", "namespace": "tenant_7"})
+await store.query('User($condition:@c0){...}', params, {"database": "tenant_42"})
+await store.insert("Order", data, {"source": "pg_cluster", "schema": "tenant_7"})
 ```
 
 **`route_override` is a trusted server-side parameter** — it carries no origin check, so
 forwarding user-controlled input into it lets a caller re-target another tenant's
-`source`/`namespace` (CWE-639 authorization-bypass surface). Never pass raw request data here.
+`source`/`database`/`schema` (CWE-639 authorization-bypass surface). Never pass raw request data here.
 
-Legacy single-db usage (`init(db)` + schema without `datasource`/`namespace`) is unchanged:
-commands carry `source: "default"`, `namespace: None`.
+Legacy single-db usage (`init(db)` + schema without location) is unchanged: commands carry
+`source: "default"` with the connection's default `database` / `schema`.
 
 ## Permission context
 
@@ -495,6 +499,35 @@ Boundary rules worth knowing up front (all **fail explicitly**, never silently d
 - Filtering on array fields directly, on a whole object field, or on object dot-paths is rejected on every backend — model cross-entity semantics as `relations` instead.
 - Relation predicates support **one level** of relation; paths like `orders.items.price` are rejected.
 - An unreadable relation is an error, not a silent `False`.
+
+<!-- SPEC:NAMING-STYLE:BEGIN -->
+### Naming: freeform definitions, system-directed translation
+
+Definitions (`collection`, fields, referenced relation fields, computed-column keys, `fnRef` values, index names) may use any style; the engine translates them to the target style. Contract keys (`fnRef`, `localField`, `foreignField`, `asyncFn`, `type`, ...) and the schema `name` are never translated.
+
+| Target | Style | Example (`orderTotal`) |
+|---|---|---|
+| MySQL / PostgreSQL / SQLite (physical) | snake_case | `order_total` |
+| MongoDB (physical) | camelCase | `orderTotal` |
+| Node.js / Java / C# / Rust (code; computed columns follow) | camelCase | `orderTotal` |
+| Go (code; computed columns follow) | PascalCase (must be exported) | `OrderTotal` |
+| Python (code; computed columns follow) | snake_case | `order_total` |
+
+Canonicalization (single implementation `core::naming`, re-exported by the bindings; hosts must not re-implement it): split on `_`, `-`, `.`, space and at lower/digit-to-upper boundaries; a trailing uppercase in a run followed by a lowercase starts the next token (`HTTPServer` -> `[http, server]`, `userID` -> `[user, id]`); digits stay inside a token (`order2Items` -> `[order2, items]`). Reassembly: snake = `t1_t2`, camel = `t1T2`, pascal = `T1T2`.
+
+Two logical names in one schema that canonicalize equal (`orderTotal` vs `order_total`), or a name that canonicalizes onto a reserved contract key (e.g. `fnref`), is an error `ERR_NAME_CONFLICT:` and the service does not start (never silently overwritten).
+<!-- SPEC:NAMING-STYLE:END -->
+
+<!-- SPEC:FNREF:BEGIN -->
+### Computed columns: `fnRef` binding by composite name + canonical match
+
+Computed columns live at the schema top level, `computes: { <key>: { type, fn | asyncFn | agg, fnRef?, depends?, read? } }` (`fn` / `asyncFn` / `agg` are mutually exclusive).
+
+- The logical `fnRef` defaults to `<schema.name>.<computed-column key>` (generated, never hand-written); since `name` is globally unique, the `fnRef` is globally unique too.
+- Host implementations bind by canonicalization: both the implementation's name in the host language style and the schema's logical `fnRef` are canonicalized to token sequences and compared. So Node's `orderAmountLabel` and Python's `order_amount_label` bind to the same logical computed column.
+- Reusing one implementation across schemas: write an explicit shared name (e.g. `"fnRef": "common.moneyLabel"`); naming goes from required to optional.
+- Every declared `fnRef` must have an implementation, otherwise the service fails to start with `ERR_FN_MISSING`.
+<!-- SPEC:FNREF:END -->
 
 ## Transaction boundary
 
@@ -612,7 +645,7 @@ Use `store.set_context({"userId": ..., "roles": [...]})` plus schema-level `read
 Every registered model automatically gets a `<Model>Deleted` archive collection/table. `store.remove()` archives the document first, then deletes it; re-creating the same `_id` does not collide because the archive write is upsert-by-`_id`.
 
 **Is it usable for multi-tenant applications?**
-Yes. Bind a schema to `(source, namespace, collection)` and pass a `{"source", "namespace"}` route override per request. Treat `route_override` as trusted server-side input only.
+Yes. Locate a schema by `(source, database, schema, collection)` and pass a `{"source", "database", "schema"}` route override per request. Treat `route_override` as trusted server-side input only.
 
 **Does it run migrations?**
 No. `sync_schema()` only *reads* physical structure via introspection (introspect → merge overlay → register). Schema changes / DDL are your migration tool's job (Alembic, etc.). If you want a starting point, `store.generate_ddl(backend)` renders `CREATE TABLE` text from the registered schemas — but it is pure text generation: it never runs or writes DDL.
