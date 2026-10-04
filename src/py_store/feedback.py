@@ -78,8 +78,12 @@ def enable_feedback_table(store):
     prev = get_sink()
 
     def _sink(event):
-        row = {**(event or {}), 'tenant': _meta.get('tenant', ''),
-               'env': _meta.get('env', ''), 'now': int(time.time() * 1000)}
+        # 事件类别键 `type` 与 field 级契约保留键冲突（core §6.3）→ 落库列名为 `eventType`
+        e = event or {}
+        row = {k: v for k, v in e.items() if k != 'type'}
+        row['eventType'] = e.get('type')
+        row.update({'tenant': _meta.get('tenant', ''),
+                    'env': _meta.get('env', ''), 'now': int(time.time() * 1000)})
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
