@@ -42,6 +42,9 @@ from . import (
 from . import (
     introspect as introspect,
 )
+from . import (
+    load as load,
+)
 from .ask import AskExhausted as AskExhausted
 from .ask import AskResult as AskResult
 from .datasource import NativeCommandError as NativeCommandError
@@ -51,6 +54,7 @@ from .datasource import Session as Session
 from .llm import get_llm as get_llm
 from .llm import make_openai_compat as make_openai_compat
 from .llm import register_llm as register_llm
+from .load import load_defs as load_defs
 from .schema import assert_fns_covered as assert_fns_covered
 from .schema import set_fn as set_fn
 from .schema import text2query
@@ -331,6 +335,8 @@ class Store:
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
     register = staticmethod(schema.register)
+    # 运行期目录装载（读 store.config.json → 收集定义 → core 纯规划 → 带定位批量注册）
+    load_defs = staticmethod(load.load_defs)
     # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.setFn / store.assertFnsCovered）
     set_fn = staticmethod(schema.set_fn)
     setFn = staticmethod(schema.set_fn)

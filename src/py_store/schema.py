@@ -108,7 +108,11 @@ def register(defn, ctx=None):
     generate_ddl() 出现重复表（基线实测 list=['User','UserDeleted','UserDeleted']）。
     """
     core.register_with_ctx(_to_core_defn(defn), ctx)
+    return _mirror(defn)
 
+
+def _mirror(defn):
+    """Host 侧元数据镜像 + 内嵌回调绑定（``register`` 与 ``register_batch`` 共用）"""
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
     for key, val in (defn.get('computes') or {}).items():
@@ -164,6 +168,23 @@ def register(defn, ctx=None):
         }
 
     return _schemas[defn['name']]
+
+
+def register_batch(items, ctx=None):
+    """带定位批量注册（D13 批次唯一）：``items = [{'defn', 'location'}]``。
+
+    判决唯一在 core（``core.register_batch``：分组 / 主唯一 / 链路 / 版本）；本层只转发 +
+    对**主定义**做 Host 元数据镜像（从定义 ``replica: true`` 是链路声明，非独立结构，不入镜像）。
+    落点**不进 defn**（定义文件零落点）。
+    """
+    core.register_batch(
+        [{'defn': _to_core_defn(it['defn']), 'location': it['location']} for it in items],
+        ctx,
+    )
+    for it in items:
+        defn = it.get('defn')
+        if defn and not defn.get('replica'):
+            _mirror(defn)
 
 
 def get(name):
