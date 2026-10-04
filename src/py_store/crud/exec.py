@@ -5,8 +5,9 @@
 本模块只做 Host 三件事里最底层的一件：把 core 产出的 Command JSON
 路由到对应数据源连接并执行。不确定性输入由本层供给（now 时钟、newId 随机 ID）。
 
-路由规则见 ``..datasource``：命令自带 ``source`` / ``namespace`` 三元组，按 ``source``
-选连接、``namespace`` 定位连接内的库（Mongo 双形态严格校验），
+路由规则见 ``..datasource``：命令自带 ``source`` / ``database`` / ``schema`` / ``collection``
+定位四元组，按 ``source`` 选连接、``database``（PG 另加 ``schema``）定位连接内的库/schema
+（Mongo 双形态严格校验），
 Mongo 走原生驱动，SQL 走 ``translate → exec``。对齐 ``nodejs-store/src/crud/exec.js``。
 """
 
@@ -17,6 +18,7 @@ from collections.abc import Mapping
 from .. import datasource as _datasource
 from ..executors.mongo import exec_mongo as _exec_mongo
 from ..feedback import emit as _emit_feedback
+from ..naming import _to_logical, _to_mongo
 from ..permission import PermissionError, get_context
 from ..schema import get as _schema_get
 
@@ -117,12 +119,13 @@ async def _exec_on(source, cmd):
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
     connection = await _datasource.resolve_connection(source, _datasource.is_write_cmd(cmd))
     if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
-        # Mongo 事务视图：db 按命令 namespace 解析，session 透传给驱动
-        db = _datasource.mongo_db(connection['conn'], source, cmd.get('namespace'))
-        return await _exec_mongo(db, cmd, session=connection.get('session'))
-    db = _datasource.mongo_db(connection, source, cmd.get('namespace'))
+        # Mongo 事务视图：db 按命令 database 解析，session 透传给驱动
+        db = _datasource.mongo_db(connection['conn'], source, cmd.get('database'))
+        return _to_logical(await _exec_mongo(db, _to_mongo(cmd), session=connection.get('session')), cmd)
+    db = _datasource.mongo_db(connection, source, cmd.get('database'))
     if db is not None:
-        return await _exec_mongo(db, cmd)
+        # Mongo 物理名翻译（逻辑 → camelCase）；执行后按 schema 逆表回映射（物理 → 逻辑）
+        return _to_logical(await _exec_mongo(db, _to_mongo(cmd)), cmd)
     return await _datasource.exec_sql(source, connection, cmd)
 
 

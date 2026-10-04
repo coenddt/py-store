@@ -49,7 +49,7 @@ async def mutation(schema_name, data, route_override=None):
     mutation — 智能持久化
 
     自动判断 upsert/insert，支持父子文档关联填充。
-    ``route_override`` 可选：多租户路由 ``{'source', 'namespace'}``。
+    ``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``。
     """
     is_array = isinstance(data, list)
     items = data if is_array else [data]

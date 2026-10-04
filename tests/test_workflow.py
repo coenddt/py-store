@@ -307,7 +307,7 @@ def _run_shape_async():
             await db.execute(st)
         await db.execute(
             'CREATE TABLE shape_items (_id VARCHAR(64) PRIMARY KEY, n INTEGER, '
-            'createdAt BIGINT, updatedAt BIGINT, deletedAt BIGINT, __present TEXT)')
+            'created_at BIGINT, updated_at BIGINT, deleted_at BIGINT, __present TEXT)')
         await db.commit()
         await init({'default': executors.create_connection('sqlite', db)})
         permission.set_context({'userId': 'u1', 'roles': ['admin']})
@@ -317,7 +317,7 @@ def _run_shape_async():
             {'op': 'fail', 'when': {'lt': '{{it.n}}', 'than': 0}, 'message': 'neg'},
             {'op': 'mutation', 'as': 'w', 'model': 'ShapeItem', 'data': {'n': 1}},
         ]})
-        run_doc = await store.runWorkflow('shapeWf', {})
+        run_doc = await store.run_workflow('shapeWf', {})
         await db.close()
         return run_doc
 

@@ -25,7 +25,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from py_store import executors, init, permission, store
+from py_store import executors, init, naming, permission, store
 from py_store import schema as _sc
 
 # 进程级唯一 token（M-4）：表 / 集合名统一加此后缀，`_reset()` 只清理自己的表。
@@ -58,7 +58,7 @@ MYSQL_DDL = [
          title VARCHAR(255),
          status VARCHAR(64),
          views INT,
-         deletedAt BIGINT,
+         deleted_at BIGINT,
          __present VARCHAR(255),
          PRIMARY KEY (_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -87,7 +87,7 @@ PG_DDL = [
     f'CREATE TABLE pg_posts_{E2E_TOKEN} '
     f'(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT)',
     f"""CREATE TABLE pg_posts_{E2E_TOKEN}_deleted (
-         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deletedAt" BIGINT, __present TEXT
+         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deleted_at" BIGINT, __present TEXT
        )""",
     f'CREATE TABLE widgets_{E2E_TOKEN} '
     f'(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION, __present TEXT)',
@@ -105,7 +105,7 @@ SQLITE_DDL = [
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT
        )""",
     f"""CREATE TABLE sq_posts_{E2E_TOKEN}_deleted (
-         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deletedAt INTEGER, __present TEXT
+         _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deleted_at INTEGER, __present TEXT
        )""",
     f'CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL, __present TEXT)',
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
@@ -249,8 +249,9 @@ async def _setup_mongo(ctx):
     ctx.client = client
     ctx.driver = db
     ctx.conn = db
-    # M-4：只清理本 token 的集合（并发进程 / 跨仓实例互不干扰）
-    ctx.reset_collections = [f'mg_posts_{E2E_TOKEN}', f'mg_posts_{E2E_TOKEN}_deleted']
+    # M-4：只清理本 token 的集合；Mongo 落库用物理集合名（core::naming camelCase），按单点翻译后再清
+    ctx.reset_collections = [naming.physical(f'mg_posts_{E2E_TOKEN}'),
+                             naming.physical(f'mg_posts_{E2E_TOKEN}_deleted')]
     _register_post(ctx)
     ctx.ready = True
 

@@ -193,7 +193,8 @@ _POSTS = [
 
 def _db_with_posts(posts=None, reverse_phase2=False):
     coll = _ScriptedColl(_POSTS if posts is None else posts, reverse_phase2=reverse_phase2)
-    return _FakeDb({'hp_posts': coll}), coll
+    # Mongo 物理集合名为 camelCase（core::naming 翻译）；逻辑 collection=hp_posts → hpPosts
+    return _FakeDb({'hpPosts': coll}), coll
 
 
 # ─────────────────────────────────────────────────────────────
@@ -277,8 +278,8 @@ def test_federated_unit_two_phase_empty_phase1_short_circuits():
 def test_federation_degraded_emits_feedback_and_keeps_result():
     """跨源关系子级 `$limit` 无法下推 → plan.degraded 必须 emit `federation_degraded`（禁静默）"""
     db = _FakeDb({
-        'hp_users': _ScriptedColl([{'_id': 'u1', 'name': 'A'}]),
-        'hp_orders': _ScriptedColl([{'_id': 'o1', 'userId': 'u1', 'code': 'c1'}]),
+        'hpUsers': _ScriptedColl([{'_id': 'u1', 'name': 'A'}]),
+        'hpOrders': _ScriptedColl([{'_id': 'o1', 'userId': 'u1', 'code': 'c1'}]),
     })
     _crud_mod.set_connections({'hp_mongo_a': db, 'hp_mongo_b': db})
     events = []
@@ -313,7 +314,7 @@ def test_async_fn_without_host_impl_raises():
     # 模拟「core 已声明 asyncFn、Host 侧实现未登记」（如回调未就绪）—— 必须显式报错
     saved = _sc._async_fns.pop('hp_missing_async')
     db, _ = _db_with_posts()
-    db._colls['hp_async_only'] = _ScriptedColl([{'_id': '1', 'a': 1}])
+    db._colls['hpAsyncOnly'] = _ScriptedColl([{'_id': '1', 'a': 1}])
     _crud_mod.set_db(db)
     try:
         with pytest.raises(RuntimeError, match='未注册实现'):
@@ -332,11 +333,11 @@ def test_store_facade_read_paths():
     _crud_mod.set_db(db)
 
     assert _run(store.query('HpPost{ _id, title }'))[0]['_id'] == 'p1'
-    assert _run(store.queryOne('HpPost{ _id, title }'))['_id'] == 'p1'
-    counted = _run(store.queryWithCount('HpPost{ _id }'))
+    assert _run(store.query_one('HpPost{ _id, title }'))['_id'] == 'p1'
+    counted = _run(store.query_with_count('HpPost{ _id }'))
     assert counted['total'] == 3
 
-    built = store.buildPipeline('HpPost{ _id, title }')
+    built = store.build_pipeline('HpPost{ _id, title }')
     assert built['ast']['model'] == 'HpPost'
     assert built['ast']['fields'] == ['_id', 'title'], built['ast']
     assert built['tokens'], 'build_pipeline 应返回 token 流'
@@ -387,12 +388,12 @@ def test_init_creates_index_and_skips_existing():
     """init 幂等建索引：无同名索引则创建（inline 选项随命令下发），已有同名索引则跳过"""
     db = _IndexDb(_IndexColl)
     _run(init({'default': db}))
-    assert db['hp_indexed'].created == [([('title', 1)], {'unique': True})], \
-        db['hp_indexed'].created
+    assert db['hpIndexed'].created == [([('title', 1)], {'unique': True})], \
+        db['hpIndexed'].created
 
     db2 = _IndexDb(lambda: _IndexColl(existing=[{'name': 'title_1'}]))
     _run(init({'default': db2}))
-    assert db2['hp_indexed'].created == [], '同名索引已存在时不得重复创建'
+    assert db2['hpIndexed'].created == [], '同名索引已存在时不得重复创建'
 
 
 def test_index_create_failure_emits_feedback_and_does_not_block_init():
@@ -413,9 +414,9 @@ def test_index_list_failure_treated_as_no_index_and_keys_less_entry_skipped():
     """列举索引失败（集合尚未存在）→ 视为无索引继续创建；无 keys 的索引项直接跳过"""
     db = _IndexDb(lambda: _IndexColl(list_fail=True))
     _run(init({'default': db}))
-    assert db['hp_indexed'].created == [([('title', 1)], {'unique': True})], \
+    assert db['hpIndexed'].created == [([('title', 1)], {'unique': True})], \
         '列举失败应退化为「无既有索引」，不阻断创建'
 
     db2 = _IndexDb(_IndexColl)
     _run(init({'default': db2}))
-    assert db2['hp_index_no_keys'].created == [], '无 keys 的索引项应跳过'
+    assert db2['hpIndexNoKeys'].created == [], '无 keys 的索引项应跳过'

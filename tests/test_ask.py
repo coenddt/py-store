@@ -333,7 +333,7 @@ def test_t8_guest_summary_filters_admin_only_and_overreach_denied():
     assert 'name' in aku['fields']
     assert 'displayName' not in aku['computes']   # read 白名单计算列收窄
     assert 'upperName' in aku['computes']
-    assert all(k not in m for m in s for k in ('indexes', 'datasource', 'namespace'))
+    assert all(k not in m for m in s for k in ('indexes', 'datasource', 'database', 'schema'))
     # 越权查询：guest 投影 admin 专属字段 role → 权限层剥离（数据不出，见模块 docstring 留痕）
     _mock([{'_id': 'aku1', 'name': 'bob', 'role': 'admin'}])
     llm = FakeLlm(_out('AkUser($condition:@c0){_id, role}', {'c0': {}}))

@@ -1,17 +1,17 @@
 """
 数据源路由（多后端）
 
-core 产出的 Command 携带 ``source`` / ``namespace`` / ``collection`` 三元组
-（见 rust-store/core 的 Command 契约），Host 只按 ``source`` 选连接、按 ``namespace``
-定位连接内的库/schema：
+core 产出的 Command 携带 ``source`` / ``database`` / ``schema`` / ``collection`` 定位四元组
+（见 rust-store/core 的 Command 契约），Host 只按 ``source`` 选连接、
+按 ``database``（PG 另加 ``schema``）定位连接内的库/schema：
   - Mongo 源：直接交原生驱动（``db[collection]``）
   - SQL 源（mysql / postgres / sqlite）：先经 core ``dialect_translate`` 翻译为
     SQL 语句序列，再交该连接的 ``exec`` 执行器
 
-Mongo 连接支持两种形态（绝不猜，按命令的 namespace 严格校验）：
-  - db 实例（PyMongo Database）：命令 ``namespace`` 必须为 None（db 实例无法跨库，
+Mongo 连接支持两种形态（绝不猜，按命令的 database 严格校验）：
+  - db 实例（PyMongo Database）：命令 ``database`` 必须为 None（db 实例无法跨库，
     非 None 显式报错）
-  - MongoClient：命令 ``namespace`` 必须非 None（db 名）→ ``client.get_database(ns)``
+  - MongoClient：命令 ``database`` 必须非 None（db 名）→ ``client.get_database(db)``
 
 数据源名缺省为 ``default``；``init`` 传入单个 Mongo db 实例/MongoClient 时自动归一为
 ``{default: 连接}``，保证既有单库调用零变更。对齐 ``nodejs-store/src/datasource.js``。
@@ -131,27 +131,27 @@ def has_connection(source):
     return _connections.get(source) is not None
 
 
-def mongo_db(connection, source, namespace):
+def mongo_db(connection, source, database):
     """
-    Mongo 源：按命令的 ``namespace`` 解析目标 db（两种形态，绝不猜）
+    Mongo 源：按命令的 ``database`` 解析目标 db（两种形态，绝不猜）
 
-      - db 实例（非 SQL 描述符的驱动实例，含鸭子类型 db）：namespace 必须为 None，
+      - db 实例（非 SQL 描述符的驱动实例，含鸭子类型 db）：database 必须为 None，
         非 None 显式报错；
-      - MongoClient：namespace 必须非 None，返回 ``client.get_database(namespace)``；
+      - MongoClient：database 必须非 None，返回 ``client.get_database(database)``；
       - 非 Mongo（SQL 描述符 Mapping）返回 None，由调用方走 SQL 路径。
     """
     if is_sql(connection):
         return None
     if _is_mongo_client(connection):
-        if not namespace:
+        if not database:
             raise RuntimeError(
-                f'数据源 {source} 是 MongoClient，命令缺少 namespace'
-                '（MongoClient 形态必须在 schema 声明 namespace 即 db 名）')
-        return connection.get_database(namespace)
-    if namespace:
+                f'数据源 {source} 是 MongoClient，命令缺少 database'
+                '（MongoClient 形态必须在 schema 声明 database 即 db 名）')
+        return connection.get_database(database)
+    if database:
         raise RuntimeError(
-            f'数据源 {source} 是 Mongo db 实例，命令携带了 namespace="{namespace}"'
-            '（db 实例不支持跨库；跨库请改传 MongoClient 并用 schema.namespace 声明库名）')
+            f'数据源 {source} 是 Mongo db 实例，命令携带了 database="{database}"'
+            '（db 实例不支持跨库；跨库请改传 MongoClient 并用 schema.database 声明库名）')
     return connection
 
 
@@ -202,10 +202,10 @@ def connection_of_schema(name):
 
 
 def db_of_schema(name):
-    """某 schema 的 Mongo db 句柄（按镜像的 datasource + namespace 解析；SQL 源返回 None）"""
+    """某 schema 的 Mongo db 句柄（按镜像的 datasource + database 解析；SQL 源返回 None）"""
     s = _get_schema(name)
     source = s.get('datasource') or DEFAULT_SOURCE
-    return mongo_db(get_connection(source), source, s.get('namespace') or None)
+    return mongo_db(get_connection(source), source, s.get('database') or None)
 
 
 def route(cmd):
@@ -528,7 +528,7 @@ async def execute_native(source, collection, pipeline, options=None):
         ``options.session`` 不可覆盖）；统一按读路径解析（``is_write=False``），
         ``$merge``/``$out`` 写管道请自行开事务；
       - 仅支持 Mongo 源：SQL 源显式报错并指引 ``execute_raw``（绝不静默）；
-        MongoClient 形态须经 schema 声明 namespace（``mongo_db`` 既有校验，缺名即报错）；
+        MongoClient 形态须经 schema 声明 database（``mongo_db`` 既有校验，缺名即报错）；
       - 返回 ``{'rows': list}``。
     """
     conn = await resolve_connection(source, is_write=False)
@@ -540,7 +540,7 @@ async def execute_native(source, collection, pipeline, options=None):
         raise NativeCommandError(
             f'数据源 {source} 是 SQL 源（原生 Mongo 命令入口仅支持 mongo；SQL 源请用 execute_raw）')
     elif _is_mongo_client(conn) or hasattr(conn, 'get_collection'):
-        # 全局裸连接：MongoClient（须声明 namespace，缺名由 mongo_db 显式报错）/ db 实例
+        # 全局裸连接：MongoClient（须声明 database，缺名由 mongo_db 显式报错）/ db 实例
         db = mongo_db(conn, source, None)
         session = None
     else:

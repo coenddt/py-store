@@ -29,7 +29,7 @@ async def introspect(db, options=None):
     indexes = []
 
     # attached db 过滤：PRAGMA database_list 校验库名存在（main/temp/ATTACH 的库名），
-    # 表清单改从 `<db>.sqlite_master` 读取；显式库名作为 namespace 透出到 def。
+    # 表清单改从 `<db>.sqlite_master` 读取；显式库名作为 database 透出到 def。
     database = (options or {}).get('database')
     master_from = 'sqlite_master'
     if database is not None:
@@ -43,7 +43,7 @@ async def introspect(db, options=None):
         db, f"SELECT name FROM {master_from} WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 
     for (name,) in table_rows:
-        tables.append({'name': name, 'namespace': database}
+        tables.append({'name': name, 'database': database}
                       if database is not None else {'name': name})
 
         for c in await _all(db, f'PRAGMA table_info({_quote(name)})'):

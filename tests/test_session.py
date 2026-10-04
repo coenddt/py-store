@@ -386,7 +386,8 @@ def test_update_probe_and_write_same_tx(monkeypatch):
 # ─── #10 Mongo 源直通（不告警） ──────────────────────────────
 
 def test_session_mongo_passthrough():
-    db = _FakeDb({'sess_mongo': [{'_id': 'm1', 'v': 'x'}]})
+    # Mongo 物理集合名（core::naming）：逻辑 sess_mongo → sessMongo
+    db = _FakeDb({'sessMongo': [{'_id': 'm1', 'v': 'x'}]})
     _sc.register({
         'name': 'SessMongo', 'collection': 'sess_mongo', 'timestamps': False,
         'fields': {'v': {'type': 'string'}}, 'relations': {}, 'datasource': 'sess_mongo',

@@ -95,6 +95,21 @@ def _to_core_defn(defn):
     return walk(defn)
 
 
+def _loc_of(defn):
+    """单条 defn 的落点注入（Location）。
+
+    发布契约是「定义零落点」；但**既有** defn 仍可能带 ``datasource``/``database``/``schema``
+    （多源路由的历史写法）。01 起 core 不再解析定义内落点字段 ⇒ 本层把它们**显式**注入
+    ``Location``（与 06 装载器 / 07 federation 夹具的落点注入同构），否则 ``source`` 恒为
+    ``default``、多源路由失效。缺省（无 ``datasource``）⇒ ``default``。
+    """
+    return {
+        'source': (defn or {}).get('datasource') or None,
+        'database': (defn or {}).get('database') or None,
+        'schema': (defn or {}).get('schema') or None,
+    }
+
+
 def register(defn, ctx=None):
     """注册一个 schema（core 注册 + Host 侧元数据镜像）
 
@@ -106,8 +121,14 @@ def register(defn, ctx=None):
     （rust-store/core/src/schema/registry.rs）；Host 只补 Host 侧镜像，
     **不再调用 core.register** —— 否则同名条目二次进入 core.order，使 list()/
     generate_ddl() 出现重复表（基线实测 list=['User','UserDeleted','UserDeleted']）。
+
+    落点经 ``_loc_of`` 显式注入（与 nodejs-store store.register 同构）：01 起 core 不再
+    解析定义内 ``datasource``/``database``/``schema``，须经 Location 传入否则 source 恒 default。
     """
-    core.register_with_ctx(_to_core_defn(defn), ctx)
+    core.register_batch(
+        [{'defn': _to_core_defn(defn), 'location': _loc_of(defn)}],
+        ctx,
+    )
     return _mirror(defn)
 
 
@@ -132,7 +153,10 @@ def _mirror(defn):
     _schemas[defn['name']] = {
         'name': defn['name'],
         'collection': defn.get('collection') or defn['name'],
-        'namespace': defn.get('namespace') or None,
+        # 落点定位（定义文件零落点；由装载器注入 defn）：database = 连接内库
+        # （Mongo/MySQL/SQLite/PG），schema = 仅 PG 的 schema 层
+        'database': defn.get('database') or None,
+        'schema': defn.get('schema') or None,
         'idPrefix': defn.get('idPrefix') or '',
         'timestamps': defn.get('timestamps') is not False,
         # 时间戳单位（'ms'/'s'/None=不维护）；值合法性由 core.register 校验
@@ -154,7 +178,8 @@ def _mirror(defn):
         _schemas[f"{defn['name']}Deleted"] = {
             'name': f"{defn['name']}Deleted",
             'collection': f"{defn.get('collection') or defn['name']}_deleted",
-            'namespace': defn.get('namespace') or None,
+            'database': defn.get('database') or None,
+            'schema': defn.get('schema') or None,
             'idPrefix': '',
             'timestamps': True,
             'timestampUnit': 'ms',
@@ -211,6 +236,8 @@ def clear_schemas():
     _schemas.clear()
     _async_fns.clear()
     _dup_signatures.clear()
+    from . import naming as _naming  # 局部导入规避包内循环导入
+    _naming.clear_cache()
 
 
 # 去重告警签名（同一重复形态只告警一次，避免 list() 高频调用刷屏）

@@ -369,7 +369,8 @@ def test_ddl_present_and_archive_includes_json_columns():
     assert 'CREATE TABLE `ddl_probes`' in sql
     assert 'CREATE TABLE `ddl_probes_deleted`' in sql
     assert '`__present` VARCHAR(255)' in sql
-    assert '`deletedAt` BIGINT' in sql
+    # 数据标识符按目标介质翻译（snake_case）：deletedAt → deleted_at
+    assert '`deleted_at` BIGINT' in sql
     assert 'PRIMARY KEY (`_id`)' in sql
     # object / array 建 JSON 列（同 core field_column_ref::Json）
     assert '`nested` JSON' in sql
@@ -384,8 +385,9 @@ def test_ddl_timestamps_and_no_index():
     })
     sql = store.generate_ddl('postgres', ['DdlTs'])
 
-    assert '"createdAt" BIGINT' in sql
-    assert '"updatedAt" BIGINT' in sql
+    # 数据标识符按目标介质翻译（snake_case）：createdAt/updatedAt → created_at/updated_at
+    assert '"created_at" BIGINT' in sql
+    assert '"updated_at" BIGINT' in sql
     assert '"__present" TEXT' in sql
     # 阶段3：schema.indexes 落地为 CREATE INDEX（原「不建索引」铁律已放开）
     assert 'CREATE INDEX "idx_ddl_ts_name" ON "ddl_ts" ("name" ASC)' in sql

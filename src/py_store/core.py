@@ -37,16 +37,17 @@ def _dev_fallback():
 
 
 def _load():
+    # 开发期 LOCAL_CORE=1 时以相邻 rust-store 调试产物为**唯一来源**（优先于 site-packages，
+    # 否则已安装的旧绑定会遮蔽新 API，如 register_batch）
+    dev = _dev_fallback()
+    if dev is not None and not isinstance(dev, dict):
+        return dev
     try:
         return importlib.import_module('rust_store_py')
     except ImportError as e:
-        fallback = _dev_fallback()
-        if fallback is not None and not isinstance(fallback, dict):
-            return fallback
-
         hints = [f'rust_store_py: {e}']
-        if isinstance(fallback, dict):
-            hints.append(fallback['__error'])
+        if isinstance(dev, dict):
+            hints.append(dev['__error'])
         raise ImportError(
             '无法加载 rust-store 原生核心（rust-store-py 绑定产物）。\n'
             '请安装 pip 依赖 rust-store-py；开发期如需从相邻 rust-store 仓库加载，\n'

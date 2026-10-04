@@ -89,13 +89,12 @@ def _reset_profile():
 def test_profile_default_is_standard():
     assert _sc.get_profile() == 'standard'
     assert store.get_profile() == 'standard'
-    assert store.getProfile() == 'standard'
 
 
 def test_profile_roundtrip():
     _sc.set_profile('text2query')
     assert _sc.get_profile() == 'text2query'
-    store.setProfile('standard')
+    store.set_profile('standard')
     assert store.get_profile() == 'standard'
 
 

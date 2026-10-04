@@ -122,7 +122,8 @@ class _FakeDb:
 
     def __getitem__(self, name):
         if name not in self._colls:
-            self._colls[name] = _MemColl(self._docs if name == 'hc_posts' else [])
+            # Mongo 物理集合名（core::naming）：逻辑 hc_posts → hcPosts
+            self._colls[name] = _MemColl(self._docs if name == 'hcPosts' else [])
         return self._colls[name]
 
 

@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 from py_store import datasource as _ds
-from py_store import feedback, store
+from py_store import feedback, naming, store
 from py_store import schema as _sc
 from py_store.crud.exec import run_atomic
 from py_store.executors.mongo import exec_mongo, open_transaction
@@ -368,14 +368,16 @@ def _run_real(scenario):
 
 def test_real_rs0_session_commits():
     async def scenario(_client, db):
-        await db['mx_real'].drop()
+        # Mongo 落库用物理集合名（core::naming camelCase）：逻辑 mx_real → mxReal
+        coll = naming.physical('mx_real')
+        await db[coll].drop()
         _register_mongo('MxReal', 'mx_real', collection='mx_real')
         _ds.set_connections({'mx_real': db})
         async with store.session() as s:
             await s.insert('MxReal', {'v': 'a'})
             await s.insert('MxReal', {'v': 'b'})
-        n = await db['mx_real'].count_documents({})
-        await db['mx_real'].drop()
+        n = await db[coll].count_documents({})
+        await db[coll].drop()
         return n
 
     assert _run_real(scenario) == 2, 'rs0 会话事务提交后全部可见'
@@ -383,7 +385,8 @@ def test_real_rs0_session_commits():
 
 def test_real_rs0_session_aborts_on_error():
     async def scenario(_client, db):
-        await db['mx_real_b'].drop()
+        coll = naming.physical('mx_real_b')
+        await db[coll].drop()
         _register_mongo('MxRealB', 'mx_real', collection='mx_real_b')
         _ds.set_connections({'mx_real': db})
         try:
@@ -392,8 +395,8 @@ def test_real_rs0_session_aborts_on_error():
                 raise RuntimeError('boom')
         except RuntimeError:
             pass
-        n = await db['mx_real_b'].count_documents({})
-        await db['mx_real_b'].drop()
+        n = await db[coll].count_documents({})
+        await db[coll].drop()
         return n
 
     assert _run_real(scenario) == 0, 'rs0 会话事务异常 → abort，全部不可见'

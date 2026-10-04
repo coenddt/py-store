@@ -118,7 +118,7 @@ def describe_for_ai(ctx=None) -> list[dict]:
          core-py 未导出 ``readable_computes`` 判决，配了 read 的计算列不进摘要并 emit
          告警（宁缺勿泄；执行面判决始终在 core，收窄只影响摘要暴露面）；
          无 ctx → 仅暴露模型名与字段名，不暴露类型细节（防探针）；
-      3. 不输出 indexes / datasource / namespace（运维细节不进 prompt）。
+      3. 不输出 indexes / datasource / database / schema（运维细节不进 prompt）。
     """
     summaries = []
     for name in schema.list():

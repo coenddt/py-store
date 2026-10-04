@@ -12,7 +12,7 @@ from .schema import register as _register
 
 
 async def sync_schema(backend, driver, introspect_options=None, overlay=None,
-                      datasource=None, namespace=None, register_defs=True):
+                      datasource=None, database=None, schema=None, register_defs=True):
     """
     同步一个数据源的物理结构到 Registry。
 
@@ -21,7 +21,8 @@ async def sync_schema(backend, driver, introspect_options=None, overlay=None,
     :param introspect_options: 透传给 introspection（如 PG 的 ``{'schema': 'public'}``）
     :param overlay: 本地 overlay schemaJSON（权限/计算列/覆盖）
     :param datasource: 绑定到该 schema 的数据源名（写入每个 def）
-    :param namespace: 连接内的库/schema 名（写入每个 def；缺省 = 连接默认）
+    :param database: 连接内的库名（Mongo/MySQL/SQLite/PG；写入每个 def；缺省 = 连接默认）
+    :param schema: PG schema 名（仅 PG 介质；写入每个 def）
     :param register_defs: 是否直接注册（False 时仅返回 defs）
     :returns: 合并后的 schemaJSON 列表
     """
@@ -31,8 +32,10 @@ async def sync_schema(backend, driver, introspect_options=None, overlay=None,
         defs = _core.merge_schema(defs, overlay)
     if datasource:
         defs = [dict(d, datasource=datasource) for d in defs]
-    if namespace:
-        defs = [dict(d, namespace=namespace) for d in defs]
+    if database:
+        defs = [dict(d, database=database) for d in defs]
+    if schema:
+        defs = [dict(d, schema=schema) for d in defs]
     if register_defs:
         for d in defs:
             _register(d)

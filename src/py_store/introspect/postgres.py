@@ -85,11 +85,10 @@ async def introspect(driver, options=None):
         raise TypeError('postgres introspection 需要 asyncpg 的连接或连接池')
 
     opts = options or {}
-    # 查询按 schema 过滤（缺省 public）；显式传入 schema/namespace 时作为 namespace
-    # 透出到 def（缺省不透出 = 连接默认 search_path，保持既有行为零变更）。
-    explicit = 'schema' in opts or 'namespace' in opts
-    schema = opts.get('schema') or opts.get('namespace') or 'public'
-    namespace = schema if explicit else None
+    # 查询按 schema 过滤（缺省 public）；显式传入 schema 时作为 schema 透出到 def
+    # （缺省不透出 = 连接默认 search_path，保持既有行为零变更）。
+    explicit = 'schema' in opts
+    schema = opts.get('schema') or 'public'
 
     tables = await driver.fetch(_TABLES, schema)
     columns = await driver.fetch(_COLUMNS, schema)
@@ -97,8 +96,8 @@ async def introspect(driver, options=None):
     index_rows = await driver.fetch(_INDEXES, schema)
 
     return {
-        'tables': [dict(r, namespace=namespace) for r in tables]
-        if namespace else [dict(r) for r in tables],
+        'tables': [dict(r, schema=schema) for r in tables]
+        if explicit else [dict(r) for r in tables],
         'columns': [
             {
                 'table': c['table'],

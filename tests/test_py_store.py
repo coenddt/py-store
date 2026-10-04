@@ -67,13 +67,15 @@ def test_schema_get_unregistered_raises():
         raise AssertionError('应抛出 KeyError')
 
 
-def test_store_camel_and_snake_aliases():
+def test_store_snake_only():
     from py_store import store
-    assert callable(store.query) and callable(store.query_one)          # 蛇形：显式方法
-    # 驼峰与蛇形为**同一实现**的别名（全显式绑定，非 __getattr__ 动态查找）
-    assert store.queryOne.__func__ is store.query_one.__func__
-    assert store.queryWithCount.__func__ is store.query_with_count.__func__
-    assert store.buildPipeline.__func__ is store.build_pipeline.__func__
+    # 蛇形：显式方法（D12 / A8 后的唯一定名）
+    assert callable(store.query) and callable(store.query_one)
+    assert callable(store.query_with_count) and callable(store.build_pipeline)
+    # 驼峰别名已按 D12 / A8 移除（仅保留蛇形）
+    assert not hasattr(store, 'queryOne')
+    assert not hasattr(store, 'queryWithCount')
+    assert not hasattr(store, 'buildPipeline')
     assert store.register is _sc.register                               # 其余 API：显式绑定
     assert store.PermissionError is perm.PermissionError
     assert not hasattr(store, 'quer')                                   # 拼错属性即 AttributeError
@@ -210,7 +212,8 @@ class _FakeDb:
     def __init__(self, coll=None):
         self._colls = {}
         if coll is not None:
-            self._colls['commercial_ledger'] = coll
+            # Mongo 物理集合名为 camelCase（core::naming）；逻辑 commercial_ledger → commercialLedger
+            self._colls['commercialLedger'] = coll
 
     def __getitem__(self, name):
         if name not in self._colls:

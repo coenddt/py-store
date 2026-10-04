@@ -3,13 +3,16 @@
 对齐 ``nodejs-store/tests/multi-datasource.test.js``（共享断言语义）：
 
   - B1: 两个 Mongo db 实例 source，同名集合 users，各查各库无串源
-  - B2: 单 MongoClient source，两个 schema 声明不同 namespace（db 名），各查各库
-  - B3: (source, namespace, collection) 冲突注册 → 抛错（fail fast，非静默串源）
-  - B4: 同 SQL 连接双 namespace（SQLite attached db 代演 PG schema）各自命中
-  - B9: 旧用法 init(db) + schema 无 datasource/namespace → source='default'、
-        namespace=None，行为零变更
-  - B10: namespace 非空但 source 为 db 实例 / client 缺 namespace → 显式报错
-  - B11: sync_schema({ namespace }) 回写 def 的 namespace，与手动声明等价
+  - B2: 单 MongoClient source，两个 schema 声明不同 database（db 名），各查各库
+  - B3: (source, database, collection) 冲突注册 → 抛错（fail fast，非静默串源）
+  - B4: 同 SQL 连接双 database（SQLite attached db 代演 PG schema）各自命中
+  - B9: 旧用法 init(db) + schema 无 datasource/database → source='default'、
+        database=None，行为零变更
+  - B10: database 非空但 source 为 db 实例 / client 缺 database → 显式报错
+  - B11: sync_schema({ database }) 回写 def 的 database，与手动声明等价
+
+注：落点（source/database/schema）现由 core ``register_batch`` 的 ``Location`` 注入；
+宿主 ``schema.register`` 已按 node 同构从 defn 读取并注入（见 schema._loc_of）。
 
 B5-B8（联邦下推 / routeOverride）在 core 侧：``rust-store/core/tests/pushdown_usecases.rs``。
 运行：``PYTHONPATH=src python -m pytest py-store/tests/test_multi_datasource.py -q``
@@ -120,23 +123,24 @@ def test_b1_two_mongo_db_instances_same_collection_no_cross_read():
     assert got_b == [{'_id': 'b1', 'side': 'B'}], 'B 源应命中 B 库数据'
 
 
-# ─── B2：单 MongoClient，双 namespace（db 名） ───────────────
+# ─── B2：单 MongoClient，双 database（db 名） ───────────────
 
-def test_b2_single_mongo_client_two_namespaces():
+def test_b2_single_mongo_client_two_databases():
     client = FakeClient()
-    client.dbs['tenant_a'] = FakeDb({'b2_docs': [{'_id': 't1', 'tag': 'T-A'}]})
-    client.dbs['tenant_b'] = FakeDb({'b2_docs': [{'_id': 't2', 'tag': 'T-B'}]})
+    # Mongo 物理集合名为 camelCase（core::naming 翻译）；逻辑 collection=b2_docs → b2Docs
+    client.dbs['tenant_a'] = FakeDb({'b2Docs': [{'_id': 't1', 'tag': 'T-A'}]})
+    client.dbs['tenant_b'] = FakeDb({'b2Docs': [{'_id': 't2', 'tag': 'T-B'}]})
 
-    # 同 collection 名，仅靠 namespace 区分（三元组唯一性由 namespace 维度保证）
+    # 同 collection 名，仅靠 database 区分（四元组唯一性由 database 维度保证）
     _sc.register({
         'name': 'B2DocA', 'collection': 'b2_docs', 'timestamps': False,
         'fields': {'tag': {'type': 'string'}}, 'relations': {},
-        'datasource': 'mongo_cluster', 'namespace': 'tenant_a',
+        'datasource': 'mongo_cluster', 'database': 'tenant_a',
     })
     _sc.register({
         'name': 'B2DocB', 'collection': 'b2_docs', 'timestamps': False,
         'fields': {'tag': {'type': 'string'}}, 'relations': {},
-        'datasource': 'mongo_cluster', 'namespace': 'tenant_b',
+        'datasource': 'mongo_cluster', 'database': 'tenant_b',
     })
 
     _run(init({'mongo_cluster': client}))
@@ -146,28 +150,29 @@ def test_b2_single_mongo_client_two_namespaces():
 
     assert got_a == [{'_id': 't1', 'tag': 'T-A'}]
     assert got_b == [{'_id': 't2', 'tag': 'T-B'}]
-    assert 'tenant_a' in client.db_names, '应按 namespace 取 client.get_database(tenant_a)'
-    assert 'tenant_b' in client.db_names, '应按 namespace 取 client.get_database(tenant_b)'
+    assert 'tenant_a' in client.db_names, '应按 database 取 client.get_database(tenant_a)'
+    assert 'tenant_b' in client.db_names, '应按 database 取 client.get_database(tenant_b)'
 
 
-# ─── B3：三元组冲突注册 → 抛错 ───────────────────────────────
+# ─── B3：定位四元组冲突注册 → 抛错 ───────────────────────────
 
-def test_b3_conflicting_triple_registration_raises():
+def test_b3_conflicting_quad_registration_raises():
     _sc.register({
         'name': 'B3First', 'collection': 'b3_same', 'timestamps': False,
         'fields': {'v': {'type': 'string'}}, 'relations': {},
-        'datasource': 'b3_src', 'namespace': 'b3_ns',
+        'datasource': 'b3_src', 'database': 'b3_ns',
     })
     import re
-    with pytest.raises(Exception, match=re.compile('三元组|已注册|唯一|conflict', re.I)):
+    with pytest.raises(Exception, match=re.compile(
+            '定位冲突|冲突|已占用|已注册|唯一|conflict', re.I)):
         _sc.register({
             'name': 'B3Second', 'collection': 'b3_same', 'timestamps': False,
             'fields': {'v': {'type': 'string'}}, 'relations': {},
-            'datasource': 'b3_src', 'namespace': 'b3_ns',
+            'datasource': 'b3_src', 'database': 'b3_ns',
         })
 
 
-# ─── B4：同 SQL 连接双 namespace（SQLite attached 代演 PG schema） ──
+# ─── B4：同 SQL 连接双 database（SQLite attached 代演 PG schema） ──
 
 def _aiosqlite_or_skip():
     try:
@@ -177,7 +182,7 @@ def _aiosqlite_or_skip():
     return aiosqlite
 
 
-def test_b4_same_sql_connection_two_namespaces():
+def test_b4_same_sql_connection_two_databases():
     aiosqlite = _aiosqlite_or_skip()
 
     async def scenario():
@@ -191,12 +196,12 @@ def test_b4_same_sql_connection_two_namespaces():
         _sc.register({
             'name': 'B4RowA', 'collection': 'b4_rows', 'idPrefix': 'b4a_',
             'timestamps': False, 'fields': {'tag': {'type': 'string'}},
-            'relations': {}, 'datasource': 'b4_sqlite', 'namespace': 'app_a',
+            'relations': {}, 'datasource': 'b4_sqlite', 'database': 'app_a',
         })
         _sc.register({
             'name': 'B4RowB', 'collection': 'b4_rows', 'idPrefix': 'b4b_',
             'timestamps': False, 'fields': {'tag': {'type': 'string'}},
-            'relations': {}, 'datasource': 'b4_sqlite', 'namespace': 'app_b',
+            'relations': {}, 'datasource': 'b4_sqlite', 'database': 'app_b',
         })
 
         await init({'b4_sqlite': executors.create_connection('sqlite', db)})
@@ -209,7 +214,7 @@ def test_b4_same_sql_connection_two_namespaces():
         assert [d['tag'] for d in got_a] == ['NS-A']
         assert [d['tag'] for d in got_b] == ['NS-B']
 
-        # 物理落库位置核对：namespace 即 attached db
+        # 物理落库位置核对：database 即 attached db
         async def count(schema_name, doc_id):
             cur = await db.execute(
                 f'SELECT COUNT(*) FROM {schema_name}.b4_rows WHERE _id = ?', (doc_id,))
@@ -224,10 +229,11 @@ def test_b4_same_sql_connection_two_namespaces():
     asyncio.run(scenario())
 
 
-# ─── B9：旧用法零变更（default source + None namespace） ─────
+# ─── B9：旧用法零变更（default source + None database） ──────
 
 def test_b9_legacy_single_db_defaults():
-    db = FakeDb({'b9_legacy': [{'_id': 'l1', 'name': 'legacy'}]})
+    # 物理集合名为 camelCase；逻辑 collection=b9_legacy → b9Legacy
+    db = FakeDb({'b9Legacy': [{'_id': 'l1', 'name': 'legacy'}]})
     _sc.register({
         'name': 'B9Legacy', 'collection': 'b9_legacy', 'timestamps': False,
         'fields': {'name': {'type': 'string'}}, 'relations': {},
@@ -238,7 +244,7 @@ def test_b9_legacy_single_db_defaults():
     plan = _sc.core.plan_query('B9Legacy{_id, name}', {})
     for c in plan['commands']:
         assert c['source'] == 'default'
-        assert c['namespace'] is None
+        assert c['database'] is None
 
     got = _run(store.query('B9Legacy{_id, name}'))
     assert got == [{'_id': 'l1', 'name': 'legacy'}]
@@ -246,19 +252,19 @@ def test_b9_legacy_single_db_defaults():
 
 # ─── B10：Mongo 双形态严格校验（不猜） ───────────────────────
 
-def test_b10_namespace_on_db_instance_raises():
+def test_b10_database_on_db_instance_raises():
     import re
-    with pytest.raises(RuntimeError, match=re.compile('db 实例|namespace', re.I)):
+    with pytest.raises(RuntimeError, match=re.compile('db 实例|database', re.I)):
         datasource.mongo_db(FakeDb(), 's', 'tenant_x')
 
 
-def test_b10_client_without_namespace_raises():
+def test_b10_client_without_database_raises():
     import re
-    with pytest.raises(RuntimeError, match=re.compile('namespace', re.I)):
+    with pytest.raises(RuntimeError, match=re.compile('database', re.I)):
         datasource.mongo_db(FakeClient(), 's', None)
 
 
-# ─── B8：route_override 同一 schema 落不同租户 namespace ─────
+# ─── B8：route_override 同一 schema 落不同租户 database ──────
 
 def test_b8_route_override_multi_tenant():
     aiosqlite = _aiosqlite_or_skip()
@@ -279,22 +285,22 @@ def test_b8_route_override_multi_tenant():
         await init({'b8_sqlite': executors.create_connection('sqlite', db)})
 
         # 带 override 写入租户库
-        doc = await store.insert('B8Row', {'tag': 'T42'}, {'namespace': 'tenant_42'})
+        doc = await store.insert('B8Row', {'tag': 'T42'}, {'database': 'tenant_42'})
 
         # 带 override 读：命中租户库；不带 override 读：默认库为空
-        got_tenant = await store.query('B8Row{_id, tag}', None, {'namespace': 'tenant_42'})
+        got_tenant = await store.query('B8Row{_id, tag}', None, {'database': 'tenant_42'})
         assert [d['_id'] for d in got_tenant] == [doc['_id']]
         assert await store.query('B8Row{_id, tag}') == []
         assert await store.count('B8Row') == 0
-        assert await store.count('B8Row', {}, {'namespace': 'tenant_42'}) == 1
+        assert await store.count('B8Row', {}, {'database': 'tenant_42'}) == 1
         await db.close()
 
     asyncio.run(scenario())
 
 
-# ─── B11：sync_schema({ namespace }) 回写 def ────────────────
+# ─── B11：sync_schema({ database }) 回写 def ─────────────────
 
-def test_b11_sync_schema_writes_namespace():
+def test_b11_sync_schema_writes_database():
     aiosqlite = _aiosqlite_or_skip()
 
     async def scenario():
@@ -307,26 +313,26 @@ def test_b11_sync_schema_writes_namespace():
             'sqlite', db,
             introspect_options={'database': 'aux'},
             datasource='b11_sqlite',
-            namespace='aux',
+            database='aux',
             register_defs=False,
         )
 
         defn = next((d for d in defs if d['collection'] == 'b11_widgets'), None)
         assert defn is not None, '应产出 b11_widgets 定义'
-        assert defn['namespace'] == 'aux', 'namespace 应回写到 def'
+        assert defn['database'] == 'aux', 'database 应回写到 def'
         assert defn['datasource'] == 'b11_sqlite'
 
-        # 注册后路由与手动声明 namespace 的 schema 等价（同一 attached db 可查）
+        # 注册后路由与手动声明 database 的 schema 等价（同一 attached db 可查）
         manual = _sc.register({
             'name': 'B11Manual', 'collection': 'b11_widgets', 'idPrefix': 'b11_',
             'timestamps': False, 'fields': {'sku': {'type': 'string'}},
-            'relations': {}, 'datasource': 'b11_sqlite', 'namespace': 'aux',
+            'relations': {}, 'datasource': 'b11_sqlite', 'database': 'aux',
         })
-        assert manual['namespace'] == 'aux'
-        # 等价性：sync_schema 产出的 def 与手动声明的定位三元组一致
-        assert {'source': defn['datasource'], 'namespace': defn['namespace'],
+        assert manual['database'] == 'aux'
+        # 等价性：sync_schema 产出的 def 与手动声明的定位四元组一致
+        assert {'source': defn['datasource'], 'database': defn['database'],
                 'collection': defn['collection']} == \
-               {'source': manual['datasource'], 'namespace': manual['namespace'],
+               {'source': manual['datasource'], 'database': manual['database'],
                 'collection': manual['collection']}
 
         await init({'b11_sqlite': executors.create_connection('sqlite', db)})

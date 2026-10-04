@@ -32,6 +32,7 @@ from . import (
     ddl,
     feedback,
     metadef,
+    naming,
     permission,
     schema,
     workflow,
@@ -71,11 +72,10 @@ class Store:
     """以属性方式访问各 API（**全显式类方法，无动态查找**）
 
     CRUD / mutation 各方法均支持可选 ``route_override``
-    （``{'source', 'namespace'}`` 多租户路由，覆盖命令定位；权限与计算列
+    （``{'source', 'database', 'schema'}`` 多租户路由，覆盖命令定位；权限与计算列
     仍按结构 schema 判定，见 multi-datasource-routing-plan.md §6）。
 
-    驼峰命名对齐 JS 端（nodejs-store）既有约定，蛇形为 Python 风格命名；
-    两者指向同一实现，仅为命名差异（新增 API 只需定义一次）。
+    Python 侧仅暴露蛇形命名（D12 / A8）。
     """
 
     async def query(self, gql: str, params: dict | None = None,
@@ -134,9 +134,10 @@ class Store:
 
     async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
                           overlay: list | None = None, datasource: str | None = None,
-                          namespace: str | None = None, register_defs: bool = True) -> list[dict[str, Any]]:
+                          database: str | None = None, schema: str | None = None,
+                          register_defs: bool = True) -> list[dict[str, Any]]:
         return await sync_schema(backend, driver, introspect_options, overlay,
-                                 datasource, namespace, register_defs)
+                                 datasource, database, schema, register_defs)
 
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
@@ -204,74 +205,74 @@ class Store:
         return ddl.generate(backend, names)
 
     # ── meta-store 定义控制面（定义持久化与版本化；见 metadef.py）──
-    async def persistDef(self, defn: dict, opts: dict | None = None) -> dict:
+    async def persist_def(self, defn: dict, opts: dict | None = None) -> dict:
         """持久化定义（同名同形幂等，异形 version+1；A1/A2）"""
         return await metadef.persist_def(self, defn, opts)
 
-    async def listDefs(self, opts: dict | None = None) -> list[dict]:
+    async def list_defs(self, opts: dict | None = None) -> list[dict]:
         """列定义行（按 version desc；name 缺省列全部）"""
         return await metadef.list_defs(self, opts or {})
 
-    async def loadDefs(self, opts: dict | None = None) -> list[dict]:
-        """各 name 的最新 active 行"""
-        return await metadef.load_defs(self, opts or {})
+    # 注：定义控制面的「各 name 最新 active 行」经 `metadef.load_defs` 模块函数调用；
+    # 门面 `store.load_defs` 归运行期目录装载器（见类体下文
+    # `load_defs = staticmethod(load.load_defs)` 与 bootstrap.py），二者不得同名遮蔽。
 
-    async def restoreDefs(self, opts: dict | None = None) -> dict:
+    async def restore_defs(self, opts: dict | None = None) -> dict:
         """从持久化定义重建注册表：schema + workflow 两类（网关 reload 重装配前调用）"""
         base = opts or {}
         s = await metadef.restore_defs(self, {**base, 'kind': 'schema'})
         w = await metadef.restore_defs(self, {**base, 'kind': 'workflow'})
         return {'total': s['total'] + w['total'], 'applied': s['applied'] + w['applied']}
 
-    async def rollbackTo(self, opts: dict) -> dict:
+    async def rollback_to(self, opts: dict) -> dict:
         """回滚到历史版本（追加式，重新 register 该版本 defn）"""
         return await metadef.rollback_to(self, opts)
 
     # 定义控制面：workflow 定义（kind=workflow；见 metadef.py）
-    async def persistWorkflowDef(self, defn: dict, opts: dict | None = None) -> dict:
+    async def persist_workflow_def(self, defn: dict, opts: dict | None = None) -> dict:
         """持久化 workflow 定义（同名同形幂等，异形 version+1）"""
         return await metadef.persist_def(self, defn, {**(opts or {}), 'kind': 'workflow'})
 
-    async def listWorkflowDefs(self, opts: dict | None = None) -> list[dict]:
+    async def list_workflow_defs(self, opts: dict | None = None) -> list[dict]:
         """列 workflow 定义行（按 version desc；name 缺省列全部）"""
         return await metadef.list_defs(self, {**(opts or {}), 'kind': 'workflow'})
 
-    async def loadWorkflowDefs(self, opts: dict | None = None) -> list[dict]:
+    async def load_workflow_defs(self, opts: dict | None = None) -> list[dict]:
         """各 name 的最新 active workflow 定义行"""
         return await metadef.load_defs(self, {**(opts or {}), 'kind': 'workflow'})
 
-    async def rollbackWorkflowTo(self, opts: dict) -> dict:
+    async def rollback_workflow_to(self, opts: dict) -> dict:
         """回滚 workflow 定义到历史版本（追加式）"""
         return await metadef.rollback_to(self, {**(opts or {}), 'kind': 'workflow'})
 
-    def ensureBuiltins(self) -> None:
+    def ensure_builtins(self) -> None:
         """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
         return metadef.ensure_builtins()
 
     # ── 反馈事件落库（A6；见 feedback.py）──
-    def enableFeedbackTable(self):
+    def enable_feedback_table(self):
         """一键接线：注册内建 __feedback 并把 sink 指向落库；返回 disposer（恢复原 sink）"""
         return feedback.enable_feedback_table(self)
 
-    def setFeedbackMeta(self, tenant: str = '', env: str = '') -> None:
+    def set_feedback_meta(self, tenant: str = '', env: str = '') -> None:
         """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
         feedback.set_meta({'tenant': tenant, 'env': env})
 
-    async def flushFeedback(self):
-        """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flushFeedback）"""
+    async def flush_feedback(self):
+        """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flush_feedback）"""
         await feedback.flush()
 
     # ── 缓存状态注记（B6；见 cache.py）──
-    def setCacheStatus(self, fn):
+    def set_cache_status(self, fn):
         """注册缓存状态 provider：`x-cache` 注记位唯一取值来源；未注册恒 BYPASS"""
         return cache.set_cache_status(fn)
 
-    def cacheStatus(self, ctx: dict | None = None) -> str:
+    def cache_status(self, ctx: dict | None = None) -> str:
         """当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一）"""
         return cache.cache_status(permission.get_context() if ctx is None else ctx)
 
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
-    def registerWorkflow(self, defn: dict, ctx: dict | None = None) -> dict:
+    def register_workflow(self, defn: dict, ctx: dict | None = None) -> dict:
         """注册工作流定义（可选 ``ctx`` 过定义层门禁；默认 Open。白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
         return workflow.register(defn, ctx)
 
@@ -279,82 +280,41 @@ class Store:
         """全部可见工作流名（read 白名单过滤）"""
         return workflow.list(ctx)
 
-    def getWorkflow(self, name: str, ctx: dict | None = None) -> dict:
+    def get_workflow(self, name: str, ctx: dict | None = None) -> dict:
         """按名取工作流定义（read 白名单过滤；不可见与不存在同形——防枚举）"""
         return workflow.get(name, ctx)
 
-    async def runWorkflow(self, name: str, input: dict | None = None, *,
-                          dry_run: bool = False,
-                          route_override: dict | None = None) -> dict[str, Any]:
+    async def run_workflow(self, name: str, input: dict | None = None, *,
+                           dry_run: bool = False,
+                           route_override: dict | None = None) -> dict[str, Any]:
         """触发工作流 → 完整 run 文档（终态 failed/rejected 不抛错，以 run.status + error 表达）"""
         return await workflow.run(name, input, dry_run=dry_run, route_override=route_override)
 
     # ── AI 问数（L1，只读）：自然语言 → LLM 翻译 → text2query 沙箱执行 → 结构化回喂 ──
     # 护栏（档位/ctx/route_override）全部服务端硬编码于 ask.py，零暴露进 LLM 消息面（D5）
     # （先于 ask 赋值取 describe_for_ai：赋值后类体命名空间的 ask 不再是模块）
-    describeForAi = staticmethod(ask.describe_for_ai)
-    describe_for_ai = describeForAi
+    describe_for_ai = staticmethod(ask.describe_for_ai)
     ask = staticmethod(ask.ask)
     # 问数结果/耗尽错误（实例可被 store.AskExhausted 捕获；对齐 PermissionError 先例）
     AskResult = AskResult
     AskExhausted = AskExhausted
-
-    # ── 驼峰别名（与上方同名蛇形方法为**同一实现**，仅命名差异）──
-    queryOne = query_one
-    queryWithCount = query_with_count
-    queryFederated = query_federated
-    insertMany = insert_many
-    updateMany = update_many
-    syncSchema = sync_schema
-    buildPipeline = build_pipeline
-    executeRaw = execute_raw
-    executeNative = execute_native
-    generateDdl = generate_ddl
-    # 工作流编排（蛇形别名与上方驼峰同实现）
-    register_workflow = registerWorkflow
-    run_workflow = runWorkflow
-    get_workflow = getWorkflow
-    # 定义控制面（蛇形别名与上方驼峰同实现）
-    persist_def = persistDef
-    list_defs = listDefs
-    load_defs = loadDefs
-    restore_defs = restoreDefs
-    rollback_to = rollbackTo
-    persist_workflow_def = persistWorkflowDef
-    list_workflow_defs = listWorkflowDefs
-    load_workflow_defs = loadWorkflowDefs
-    rollback_workflow_to = rollbackWorkflowTo
-    ensure_builtins = ensureBuiltins
-    enable_feedback_table = enableFeedbackTable
-    set_feedback_meta = setFeedbackMeta
-    flush_feedback = flushFeedback
-    # 缓存状态注记（蛇形别名与上方驼峰同实现）
-    set_cache_status = setCacheStatus
-    cache_status = cacheStatus
 
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
     register = staticmethod(schema.register)
     # 运行期目录装载（读 store.config.json → 收集定义 → core 纯规划 → 带定位批量注册）
     load_defs = staticmethod(load.load_defs)
-    # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.setFn / store.assertFnsCovered）
+    # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.set_fn / store.assert_fns_covered）
     set_fn = staticmethod(schema.set_fn)
-    setFn = staticmethod(schema.set_fn)
     assert_fns_covered = staticmethod(schema.assert_fns_covered)
-    assertFnsCovered = staticmethod(schema.assert_fns_covered)
     has = staticmethod(schema.has)
     get = staticmethod(schema.get)
     # 数据源连接（多后端路由）
-    setConnections = staticmethod(crud.set_connections)
     set_connections = staticmethod(crud.set_connections)
     # 权限控制（ContextVar 上下文）
-    setContext = staticmethod(permission.set_context)
-    getContext = staticmethod(permission.get_context)
     set_context = staticmethod(permission.set_context)
     get_context = staticmethod(permission.get_context)
-    scopedRoles = staticmethod(permission.scoped_roles)
     scoped_roles = staticmethod(permission.scoped_roles)
-    runAsInternal = staticmethod(permission.run_as_internal)
     run_as_internal = staticmethod(permission.run_as_internal)
     # 自定义权限错误（实例可被 store.PermissionError 捕获）
     PermissionError = permission.PermissionError
@@ -363,45 +323,30 @@ class Store:
     # 原生 Mongo 命令入口错误（实例可被 store.NativeCommandError 捕获）
     NativeCommandError = datasource.NativeCommandError
     # 上下文强制开关（fail-secure：开启后 ctx 缺失报 ERR_NO_CONTEXT，内部调用走 run_as_internal）
-    setRequireContext = staticmethod(schema.set_require_context)
     set_require_context = staticmethod(schema.set_require_context)
-    requireContext = staticmethod(schema.require_context)
     require_context = staticmethod(schema.require_context)
     # RBAC 动态策略（判决唯一在 core；本层仅透传配置与查询面）
-    setRbac = staticmethod(permission.set_rbac)
     set_rbac = staticmethod(permission.set_rbac)
-    rbacEnabled = staticmethod(permission.rbac_enabled)
     rbac_enabled = staticmethod(permission.rbac_enabled)
-    rbacCan = staticmethod(permission.rbac_can)
     rbac_can = staticmethod(permission.rbac_can)
-    rbacReadableFields = staticmethod(permission.rbac_readable_fields)
     rbac_readable_fields = staticmethod(permission.rbac_readable_fields)
-    rbacWritableFields = staticmethod(permission.rbac_writable_fields)
     rbac_writable_fields = staticmethod(permission.rbac_writable_fields)
-    rbacRowCondition = staticmethod(permission.rbac_row_condition)
     rbac_row_condition = staticmethod(permission.rbac_row_condition)
     # 角色清单与未配置姿态（清单化语义，判决唯一在 core；本层仅透传配置）
-    setExemptRoles = staticmethod(permission.set_exempt_roles)
     set_exempt_roles = staticmethod(permission.set_exempt_roles)
-    setDenyWriteRoles = staticmethod(permission.set_deny_write_roles)
     set_deny_write_roles = staticmethod(permission.set_deny_write_roles)
-    setUnconfiguredPolicy = staticmethod(permission.set_unconfigured_policy)
     set_unconfigured_policy = staticmethod(permission.set_unconfigured_policy)
     # 定义层门禁策略（判决唯一在 core）：closed 时仅 internal/白名单可注册或覆盖
-    setMetaPolicy = staticmethod(schema.set_meta_policy)
     set_meta_policy = staticmethod(schema.set_meta_policy)
     # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
     # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
-    setProfile = staticmethod(schema.set_profile)
     set_profile = staticmethod(schema.set_profile)
-    getProfile = staticmethod(schema.get_profile)
     get_profile = staticmethod(schema.get_profile)
     # 档位拒绝错误（实例可被 store.ProfileViolation 捕获；权限错误另见 PermissionError）
     ProfileViolation = crud.ProfileViolation
     # text2query 便捷上下文（进入设档、退出恢复；同 scoped_roles 的 token-set/reset）
     text2query = staticmethod(text2query)
     # 反馈事件通道（兜底/降级/拦截的统一出口，接入自动反馈闭环）
-    setFeedbackSink = staticmethod(feedback.set_sink)
     set_feedback_sink = staticmethod(feedback.set_sink)
     # 置最后：`list` 遮蔽内置名，须位于全部方法/类型注解之后
     list = staticmethod(schema.list)
@@ -417,13 +362,14 @@ async def _create_indexes_if_needed():
         s = schema.get(name)
         # 索引创建是初始化的辅助动作（非命令路由）：schema 绑定的 source 暂未在
         # 当前连接映射中时软跳过，不阻塞 init（命令路由的 fail fast 不在此处）；
-        # 其余配置错误（namespace 形态不匹配等）按 fail-fast 由 db_of_schema 上抛
+        # 其余配置错误（database 形态不匹配等）按 fail-fast 由 db_of_schema 上抛
         if not datasource.has_connection(datasource.source_of_schema(name)):
             continue
-        db = datasource.db_of_schema(name)  # Mongo 按 (datasource, namespace) 解析；SQL 源返回 None
+        db = datasource.db_of_schema(name)  # Mongo 按 (datasource, database) 解析；SQL 源返回 None
         if db is None:
             continue  # SQL 后端不建索引（铁律 6）
-        coll = db[s['collection']]
+        # 物理集合名：与命令执行路径同源（core::naming 的 camelCase 翻译，单点）
+        coll = db[naming.physical(s['collection'])]
         try:
             index_cursor = await coll.list_indexes()
             existing_indexes = await index_cursor.to_list(length=None)
@@ -440,12 +386,13 @@ async def _create_indexes_if_needed():
                 final_options = {k: v for k, v in idx.items() if k not in ('keys', 'options')}
                 final_options.update(explicit_options)
 
-                # 检查是否已有同 key 模式的索引（忽略选项差异）
-                name_from_keys = '_'.join(f'{k}_{v}' for k, v in keys.items())
+                # 检查是否已有同 key 模式的索引（忽略选项差异）；键按目标介质翻译为物理名
+                phys_keys = [(naming.physical(k), v) for k, v in keys.items()]
+                name_from_keys = '_'.join(f'{k}_{v}' for k, v in phys_keys)
                 if any(ei.get('name') == name_from_keys for ei in existing_indexes):
                     continue
 
-                await coll.create_index(list(keys.items()), **final_options)
+                await coll.create_index(phys_keys, **final_options)
             except PyMongoError as e:
                 # 索引创建失败不阻塞 init（辅助动作），但必须走统一反馈通道：
                 # 无 sink 时由 feedback 默认落 stderr（不双份打印），宿主可 set_sink 接管。
@@ -469,7 +416,7 @@ async def init(connections):
       - 单源简写：``init(db)`` / ``init(client)``（PyMongo async 的 db 实例或
         MongoClient，自动归一为 ``{'default': 连接}``）
 
-    连接按命令的 ``source`` 路由、``namespace`` 定位库（schema 声明）；缺省绑定回落 ``default``。
+    连接按命令的 ``source`` 路由、``database`` 定位库（schema 声明）；缺省绑定回落 ``default``。
     """
     if connections is None or (
             not isinstance(connections, Mapping)

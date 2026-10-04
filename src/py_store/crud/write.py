@@ -16,7 +16,7 @@ async def _plan_with_probe(plan_fn):
 
 
 async def insert(schema_name, data, route_override=None):
-    """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'namespace'}``）"""
+    """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``）"""
     s = _get_schema(schema_name)
     plan = _call(lambda: _core.plan_insert(
         schema_name, data, _now_for(schema_name), _generate_id(s) if s['idPrefix'] else '', _ctx(),

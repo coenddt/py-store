@@ -16,6 +16,7 @@ DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回
 对齐 nodejs-store/src/ddl.js（两端输出逐字节一致）。
 """
 
+from .core import native as _native
 from .feedback import emit as _emit_feedback
 from .schema import get as _get_schema
 from .schema import list as _list_schema
@@ -65,35 +66,51 @@ def _declared_type(field_def):
     return field_def
 
 
+def _pname(backend, logical):
+    """逻辑名 → 本后端物理标识符（设计 §6）：SQL 后端恒 snake_case。
+
+    保留名（I3）：``_id`` 物理主键、``__``/``^__`` 前缀哨兵列不翻译。
+    唯一算法在 core::naming（禁自研）。对齐 nodejs-store/src/ddl.js::pname。
+    """
+    if not isinstance(logical, str) or logical == '':
+        return logical
+    if logical == '_id' or logical.startswith('__') or logical.startswith('^__'):
+        return logical
+    return _native.translate_name(logical, backend)
+
+
 def _columns(defn, backend):
-    """返回 [(name, sql_type, pk)]，顺序：声明的字段（标量 / object·array JSON 列）→ timestamps → __present"""
+    """返回 [(name, sql_type, pk, auto)]，顺序：声明的字段（标量 / object·array JSON 列）→
+    timestamps → __present；name 为该后端物理列名（snake_case）。"""
     i = _idx(backend)
     cols = []
     fields = defn.get('fields') or {}
     for name, fdef in fields.items():
         ftype = _declared_type(fdef)
+        col = _pname(backend, name)
         if name == '_id':
             fdef = fdef if isinstance(fdef, dict) else {}
             if fdef.get('strategy') == 'autoincrement':
-                cols.append((name, _ID_AUTO_TYPE[i], True, True))
+                cols.append((col, _ID_AUTO_TYPE[i], True, True))
             else:
-                cols.append((name, _ID_TYPE[i], True, False))
+                cols.append((col, _ID_TYPE[i], True, False))
             continue
         if ftype in _NON_COLUMN:
             # object/array → 单列 JSON 文本（同 core field_column_ref::Json）
-            cols.append((name, _JSON_TYPE[i], False, False))
+            cols.append((col, _JSON_TYPE[i], False, False))
             continue
         if ftype not in _TYPES:
             raise ValueError(
                 f'DDL 生成：字段 "{defn["name"]}.{name}" 类型 {ftype!r} 未知，'
                 f'支持 {sorted(_TYPES)}')
-        cols.append((name, _TYPES[ftype][i], False, False))
+        cols.append((col, _TYPES[ftype][i], False, False))
     if not any(c[2] for c in cols):
         raise ValueError(f'DDL 生成：schema "{defn["name"]}" 缺少 _id 字段')
     if defn.get('timestamps') is not False:
         for ts in _TIMESTAMP_FIELDS:
-            if not any(c[0] == ts for c in cols):
-                cols.append((ts, _TYPES['number'][i], False, False))
+            col = _pname(backend, ts)
+            if not any(c[0] == col for c in cols):
+                cols.append((col, _TYPES['number'][i], False, False))
     cols.append(('__present', _PRESENT_TYPE[i], False, False))
     return cols
 
@@ -115,7 +132,7 @@ def _warn_present_overflow(defn, cols):
 
 
 def _create_table(defn, backend):
-    table = defn.get('collection') or defn.get('name')
+    table = _pname(backend, defn.get('collection') or defn.get('name'))
     cols = _columns(defn, backend)
     if backend == 'mysql':
         _warn_present_overflow(defn, cols)
@@ -141,7 +158,7 @@ def _index_stmts(defn, backend):
     索引名 `idx_<collection>_<f1>_<f2>`（对齐 SQL 常规命名）；keys 值 1/-1 → ASC/DESC。
     """
     out = []
-    table = defn.get('collection') or defn.get('name')
+    table = _pname(backend, defn.get('collection') or defn.get('name'))
     for idx in defn.get('indexes') or []:
         if not isinstance(idx, dict):
             continue
@@ -149,9 +166,11 @@ def _index_stmts(defn, backend):
         if not isinstance(keys, dict) or not keys:
             continue
         unique = bool(idx.get('unique') or (idx.get('options') or {}).get('unique'))
+        phys_keys = [_pname(backend, k) for k in keys]
         cols = ', '.join(
-            f"{_q(backend, k)} {'DESC' if v == -1 else 'ASC'}" for k, v in keys.items())
-        name = 'idx_' + table + '_' + '_'.join(keys)
+            f"{_q(backend, pk)} {'DESC' if v == -1 else 'ASC'}"
+            for pk, v in zip(phys_keys, keys.values()))
+        name = 'idx_' + table + '_' + '_'.join(phys_keys)
         out.append(
             f"CREATE {'UNIQUE ' if unique else ''}INDEX {_q(backend, name)} "
             f"ON {_q(backend, table)} ({cols})")
@@ -339,7 +358,7 @@ def generate_migration(backend, old_defn, new_defn):
             'MIGRATION_UNSUPPORTED: ' + '；'.join(plan['errors']) +
             '（首批白名单：加表/加列/类型放宽/加索引；破坏性变更请走显式数据迁移脚本）')
 
-    table = new_defn.get('collection') or new_defn.get('name')
+    table = _pname(backend, new_defn.get('collection') or new_defn.get('name'))
     stmts = []
     # 固定生成序：加列 → 放宽类型 → 加索引（addTable 与其余 op 互斥，天然居首）
     order = {'addColumn': 0, 'widenColumn': 1, 'addIndex': 2}
@@ -358,7 +377,7 @@ def generate_migration(backend, old_defn, new_defn):
             ftype = _declared_type(field)
             col_type = _field_sql_type(backend, field)
             default = field.get('default') if isinstance(field, dict) else None
-            col_sql = f'{_q(backend, name)} {col_type}'
+            col_sql = f'{_q(backend, _pname(backend, name))} {col_type}'
             if default is not None:
                 if ftype in _NON_COLUMN:
                     raise ValueError(
@@ -371,6 +390,7 @@ def generate_migration(backend, old_defn, new_defn):
         elif op == 'widenColumn':
             name = ch['name']
             nf = new_defn['fields'][name]
+            col = _pname(backend, name)
             col_type = _field_sql_type(backend, nf)
             if backend == 'sqlite':
                 # N1 实测：SQLite 无 ALTER COLUMN（官方重建表 12 步流程），首批显式拒绝
@@ -378,11 +398,11 @@ def generate_migration(backend, old_defn, new_defn):
                     f'MIGRATION_UNSUPPORTED: SQLite 不支持类型变更 '
                     f'（{ch["from"]} → {ch["to"]} 需重建表）；加列/加索引/加表已支持')
             if backend == 'mysql':
-                stmts.append(f'ALTER TABLE {_q(backend, table)} MODIFY COLUMN {_q(backend, name)} {col_type}')
+                stmts.append(f'ALTER TABLE {_q(backend, table)} MODIFY COLUMN {_q(backend, col)} {col_type}')
             else:
                 stmts.append(
-                    f'ALTER TABLE {_q(backend, table)} ALTER COLUMN {_q(backend, name)} '
-                    f'TYPE {col_type} USING {_q(backend, name)}::{col_type}')
+                    f'ALTER TABLE {_q(backend, table)} ALTER COLUMN {_q(backend, col)} '
+                    f'TYPE {col_type} USING {_q(backend, col)}::{col_type}')
         elif op == 'addIndex':
             stmts.extend(_index_stmts({'collection': table, 'indexes': [ch['index']]}, backend))
         else:  # 防御：diff 层不会产出其他 op

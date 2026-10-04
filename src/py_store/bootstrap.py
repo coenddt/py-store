@@ -34,7 +34,7 @@ async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
         schema.set_fn(ref, impl)
     schema.assert_fns_covered(defns)  # A3：缺实现即抛，进程不启动
     if feedback:
-        store.setFeedbackMeta(tenant or "", env or "")   # py 侧签名：(tenant, env)
-        store.enableFeedbackTable()                      # 内建 __feedback + sink 落库（幂等）
-    # 关闭：await store.flushFeedback()（py 侧为 async）收口在途落库
+        store.set_feedback_meta(tenant or "", env or "")   # py 侧签名：(tenant, env)
+        store.enable_feedback_table()                      # 内建 __feedback + sink 落库（幂等）
+    # 关闭：await store.flush_feedback()（py 侧为 async）收口在途落库
     return {"store": store}

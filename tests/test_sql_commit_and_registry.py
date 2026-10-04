@@ -106,15 +106,21 @@ def test_generate_ddl_has_no_duplicate_table():
     assert sql.count('CREATE TABLE "reg_ddl_deleted"') == 1
 
 
-def test_registry_dedupe_emits_feedback():
-    """防御网：core 注册表若仍出现重复名 → list() 去重并告警（禁静默）"""
+def test_registry_dedupe_emits_feedback(monkeypatch):
+    """防御网：core 注册表若仍出现重复名 → list() 去重并告警（禁静默）
+
+    01 起 core ``register_batch`` 对同名**原地覆盖**（`order` 位置不变，不重复入列），
+    已无法经公开 API 制造重复名；此处 monkeypatch `schema.core` 直接注入重复名，仍验证
+    Host 侧去重 + ``schemaDuplicateName`` 告警的纵深防御（断言强度不变）。
+    """
     events = []
     feedback.set_sink(events.append)
-    defn = {'name': 'RegDup', 'collection': 'reg_dup', 'idPrefix': 'rq',
-            'fields': {'_id': {'type': 'string'}}}
-    # 绕过 Host register（其已修），直调 core 两次制造重复
-    schema_mod.core.register(defn)
-    schema_mod.core.register(defn)
+
+    class _DupCore:
+        def list(self):
+            return ['RegDup', 'RegDup', 'RegDupDeleted']
+
+    monkeypatch.setattr(schema_mod, 'core', _DupCore())
 
     assert store.list().count('RegDup') == 1
     assert any(e.get('code') == 'schemaDuplicateName' for e in events), events

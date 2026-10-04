@@ -24,7 +24,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from py_store import executors, init, permission, store
+from py_store import executors, init, naming, permission, store
 from py_store import schema as _sc
 
 # 进程级唯一 token（M-4）：表 / 集合名统一加此后缀，`_reset()` 只清理自己的表。
@@ -39,7 +39,7 @@ MYSQL_DDL = [
     f'DROP TABLE IF EXISTS fed_orders_{E2E_TOKEN}',
     f"""CREATE TABLE fed_orders_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
-         userId VARCHAR(64),
+         user_id VARCHAR(64),
          code VARCHAR(255),
          amount DOUBLE,
          __present VARCHAR(255),
@@ -88,7 +88,8 @@ async def _setup_mongo():
         return
     state.mongo_client = client
     state.mongo_db = client.get_default_database()
-    await state.mongo_db[f'fed_users_{E2E_TOKEN}'].delete_many({})
+    # Mongo 落库用物理集合名（core::naming camelCase），按单点翻译后再清
+    await state.mongo_db[naming.physical(f'fed_users_{E2E_TOKEN}')].delete_many({})
     state.mongo_ready = True
 
 
@@ -184,7 +185,7 @@ async def _reset():
     async with state.mysql_pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(f'DELETE FROM fed_orders_{E2E_TOKEN}')
-    await state.mongo_db[f'fed_users_{E2E_TOKEN}'].delete_many({})
+    await state.mongo_db[naming.physical(f'fed_users_{E2E_TOKEN}')].delete_many({})
 
 
 _LOOP = None

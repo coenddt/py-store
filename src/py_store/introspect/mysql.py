@@ -70,7 +70,7 @@ async def introspect(driver, options=None):
 
     database = (options or {}).get('database')
     # 显式传 database（连接串不带库或跨库同步）→ 参数化 table_schema；
-    # 缺省用当前连接的 DATABASE()。显式库名会作为 namespace 透出到 def。
+    # 缺省用当前连接的 DATABASE()。显式库名会作为 database 透出到 def。
     schema_filter = 'table_schema = %s' if database is not None else 'table_schema = DATABASE()'
     params = (database,) if database is not None else ()
     def tables_sql(base):
@@ -88,8 +88,8 @@ async def introspect(driver, options=None):
     index_rows = await run(tables_sql(_INDEXES), params)
 
     return {
-        # 显式库名 → 行携带 namespace（core schema_from_rows 会写进 def）
-        'tables': [dict(t, namespace=database) for t in tables]
+        # 显式库名 → 行携带 database（core schema_from_rows 会写进 def）
+        'tables': [dict(t, database=database) for t in tables]
         if database is not None else list(tables),
         'columns': [
             {

@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT.parent.parent / 'src'))  # py-store/src
 
 from py_store import executors, init, permission, schema as sc, store, workflow  # noqa: E402
 from py_store import feedback as fb  # noqa: E402
+from py_store import naming  # noqa: E402
 
 # 主场景表 + autoincrement 探针表（均有归档表；探针表 AutoOrder 由 checks.register_auto_schema 注册）
 MAIN_TABLES = [
@@ -155,7 +156,8 @@ def _builtin_ddl(kind):
 async def reset(kind, driver):
     if kind == 'mongodb':
         for c in MAIN_TABLES + ARCHIVE_TABLES:
-            await driver[c].delete_many({})
+            # Mongo 落库用物理集合名（core::naming camelCase）：按单点翻译后再清，否则旧物理集合残留
+            await driver[naming.physical(c)].delete_many({})
         return
     if kind == 'mysql':
         async with driver.acquire() as conn:
@@ -255,7 +257,7 @@ async def run_step(h, step):
         elif op == 'register_workflow':
             result = workflow.register(step['defn'])
         elif op == 'run_workflow':
-            result = await store.runWorkflow(step['name'], step.get('input'),
+            result = await store.run_workflow(step['name'], step.get('input'),
                                              dry_run=bool(step.get('dryRun')))
         else:
             raise RuntimeError(f'未知 op: {op}')
@@ -300,7 +302,7 @@ async def assert_step(h, step, oracle_rows):
         return False, '不可翻译却静默返回了结果（既无错误也无告警）'
 
     if kind == 'run':
-        # run 文档断言：runWorkflow 统一契约不抛错；error 键显式存在时严格相等
+        # run 文档断言：run_workflow 统一契约不抛错；error 键显式存在时严格相等
         # （含 null——no-error-masking §二：成功态 error 必须为 null 的正向断言）
         if err is not None:
             return False, f'run_workflow 不应抛错（统一契约），实际: {err}'

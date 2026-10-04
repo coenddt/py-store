@@ -77,7 +77,7 @@ async def query(gql, params=None, route_override=None):
     支持的 params 键（通过 GQL 的 @key 引用）:
       $condition / $sort / $skip / $limit
 
-    ``route_override``（多租户路由，可选）：``{'source', 'namespace'}`` 覆盖命令定位，
+    ``route_override``（多租户路由，可选）：``{'source', 'database', 'schema'}`` 覆盖命令定位，
     权限/计算列仍按结构 schema 判定（见 multi-datasource-routing-plan.md §6）。
     注意：``route_override`` 为**受信服务端参数**，禁止透传用户输入（否则可被用于跨源路由，CWE-639）。
     """

@@ -371,9 +371,9 @@ def test_sync_schema_overlay_and_register_flag(monkeypatch):
     overlay = [{'name': 'cov_sync', 'fields': {'ov': {'type': 'int'}}}]
 
     defs = _run(sync.sync_schema(
-        'sqlite', None, overlay=overlay, datasource='cov_ds', namespace='cov_ns',
+        'sqlite', None, overlay=overlay, datasource='cov_ds', database='cov_db',
         register_defs=False))
-    assert defs[0]['datasource'] == 'cov_ds' and defs[0]['namespace'] == 'cov_ns'
+    assert defs[0]['datasource'] == 'cov_ds' and defs[0]['database'] == 'cov_db'
     assert 'ov' in defs[0]['fields'], 'overlay 字段应合入'
     assert _sc.has('cov_sync') is False, 'register_defs=False 时不得注册'
 

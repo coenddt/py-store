@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT.parent.parent / 'src'))  # py_store/src
 from py_store import executors, init, permission, schema as sc, store  # noqa: E402
 
 from py_store import feedback as fb  # noqa: E402
+from py_store import naming  # noqa: E402
 
 
 # 主场景 + 探针的 reset 表/集合（探针表无归档 DDL，不参与删除）
@@ -172,7 +173,8 @@ def _ddl(kind):
 async def reset(kind, driver):
     if kind == 'mongodb':
         for c in MAIN_TABLES + ARCHIVE_TABLES:
-            await driver[c].delete_many({})
+            # Mongo 落库用物理集合名（core::naming camelCase）：按单点翻译后再清，否则旧物理集合残留
+            await driver[naming.physical(c)].delete_many({})
         return
     if kind == 'mysql':
         async with driver.acquire() as conn:
