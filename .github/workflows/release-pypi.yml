@@ -123,10 +123,16 @@ jobs:
         run: python -m pip install --upgrade build
       - name: Build sdist & wheel
         run: python -m build
+      - name: Build store-fns-py (L2)
+        run: python -m build packages/store-fns-py --outdir dist-storefns
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-storefns
+          path: dist-storefns/*
 
   publish:
     name: PyPI publish (Trusted Publishing)
@@ -143,3 +149,26 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+      # L2 计算列包（独立版本，首发 0.1.0，与主包版本解耦）。
+      # PyPI 尚无该项目，OIDC Trusted Publishing 需在 PyPI 侧逐项目登记，故此处走
+      # account-scoped token（PYPI_API_TOKEN）；版本已存在则跳过，避免后续 tag 撞重复发布。
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-storefns
+          path: dist-storefns
+      - name: Check store-fns-py version on PyPI
+        id: fns
+        run: |
+          V=$(basename dist-storefns/store_fns_py-*.tar.gz | sed -E 's/^store_fns_py-([0-9.]+)\.tar\.gz$/\1/')
+          if curl -sf "https://pypi.org/pypi/store-fns-py/$V/json" >/dev/null; then
+            echo "store-fns-py@$V 已在 PyPI，跳过发布"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish store-fns-py (L2)
+        if: steps.fns.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-storefns
+          password: ${{ secrets.PYPI_API_TOKEN }}
