@@ -35,7 +35,7 @@ Schema 管理 — 薄适配层
 
 from contextlib import contextmanager
 
-from .core import core
+from .core import core, native
 from .feedback import emit as _emit_feedback
 
 # 缓存内置 list 类型（本模块的 list() 函数会遮蔽内置名）
@@ -44,11 +44,26 @@ _LIST_TYPES = (list, tuple)
 # Host 侧元数据镜像
 _schemas: dict = {}
 
-# asyncFn 计算列回调映射（fnRef → 原生异步函数）
+# asyncFn 计算列回调映射（core_key → 原生异步函数）
 _async_fns: dict = {}
 
-# 已注入实现的 fn_ref 集合（A3：启动期缺实现校验用；进程级状态，不进 clear_schemas）
-_fn_refs: set = set()
+# L2 实现池：归一 key → (name, impl)（§8.2 匹配靠归一；进程级状态，不进 clear_schemas）
+_fn_impls: dict = {}
+
+
+def _norm_key(name) -> str:
+    """归一 key：用 core 透出算法（禁宿主自实现，总纲 §5）。"""
+    return ''.join(native.canonical(str(name)))
+
+
+def _logical_fn_ref(schema_name, key, comp):
+    """逻辑 fnRef：显式优先，否则 ``<schema.name>.<key>``（§6.5）。"""
+    return (comp or {}).get('fnRef') or f"{schema_name}.{key}"
+
+
+def _core_fn_key(key, comp):
+    """core 侧回调查找键：显式 fnRef 优先，否则 key（保持 core 语义，cache.rs:47）。"""
+    return (comp or {}).get('fnRef') or key
 
 # 内部标记：表示「该键需剔除」（对齐 JS JSON round-trip 中函数型 default 被移除）
 _DROP = object()
@@ -97,16 +112,18 @@ def register(defn, ctx=None):
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
     for key, val in (defn.get('computes') or {}).items():
-        fn_ref = val.get('fnRef') or key
-        if val.get('fn'):
-            core.set_fn(fn_ref, val['fn'])
-        if val.get('asyncFn'):
-            _async_fns[fn_ref] = val['asyncFn']
+        core_key = _core_fn_key(key, val)          # core 查找键（本步不改 core 语义）
+        # 注2：仅「可调用」才走内嵌绑定；纯 JSON `"fn": true`（bool）不在此绑定，
+        #      由 assert_fns_covered 从 L2 实现池解析绑定（否则会绑定出坏回调）。
+        if callable(val.get('fn')):
+            core.set_fn(core_key, val['fn'])
+        if callable(val.get('asyncFn')):
+            _async_fns[core_key] = val['asyncFn']
         # 镜像保留声明元数据（callable 白名单外天然剔除）：
         # agg 形态与 read 白名单供 AI 摘要（ask.describe_for_ai）等消费者读取，
         # 可执行物（fn/asyncFn）不入镜像（执行判决唯一在 core 规划 + Host 尾处理）
         computes[key] = {k: val[k] for k in ('type', 'depends', 'agg', 'read') if k in val}
-        computes[key]['fnRef'] = fn_ref
+        computes[key]['fnRef'] = _logical_fn_ref(defn['name'], key, val)
 
     _schemas[defn['name']] = {
         'name': defn['name'],
@@ -278,25 +295,46 @@ def text2query():
 
 
 def get_async_fn(fn_ref):
-    """取 asyncFn 计算列实现（fnRef 缺省 = 计算列 key 名）"""
+    """取 asyncFn 计算列实现（入参为 core 侧 fnRefs 查找键，即 core_key）"""
     return _async_fns.get(fn_ref)
 
 
-def set_fn(fn_ref, impl):
-    """公开回调注入：fn_ref → impl(item, ctx)（对齐 nodejs-store store.setFn）。
+def set_fn(impl_name, impl):
+    """公开回调注入：``impl_name → impl(item, ctx)``（来自 L2 包扁平字典）。
 
-    与 ``register`` 内 ``core.set_fn`` 同语义；impl 返回 ``None`` 即 null（无跨 FFI 归一问题）。
+    实现名与 schema 逻辑 fn_ref 由 ``_norm_key`` 归一后匹配（§6.5）；
+    归一后重复 ⇒ ValueError（禁静默覆盖）。绑定 core 由 ``assert_fns_covered`` 统一完成。
     """
-    if not isinstance(fn_ref, str) or not fn_ref:
-        raise ValueError("ERR_FN_REF:fn_ref 须为非空字符串")
+    if not isinstance(impl_name, str) or not impl_name:
+        raise ValueError("ERR_FN_REF:impl_name 须为非空字符串")
     if not callable(impl):
         raise ValueError("ERR_FN_IMPL:impl 须可调用")
-    core.set_fn(fn_ref, impl)
-    _fn_refs.add(fn_ref)
+    k = _norm_key(impl_name)
+    prev = _fn_impls.get(k)
+    if prev and prev[0] != impl_name:
+        raise ValueError(f'ERR_FN_CONFLICT:实现名 "{impl_name}" 与 "{prev[0]}" 归一后相同（{k}）')
+    _fn_impls[k] = (impl_name, impl)
+
+
+def _bind_one(schema_name, key, comp):
+    """解析单个回调计算列的实现并绑定 core；无实现返回 False。"""
+    embedded = comp and (comp.get('fn') or comp.get('asyncFn'))
+    if callable(embedded):
+        impl = embedded
+    else:
+        impl = (_fn_impls.get(_norm_key(_logical_fn_ref(schema_name, key, comp))) or (None, None))[1]
+    if not callable(impl):
+        return False
+    core_key = _core_fn_key(key, comp)
+    if comp.get('fn'):
+        core.set_fn(core_key, impl)
+    if comp.get('asyncFn'):
+        _async_fns[core_key] = impl
+    return True
 
 
 def assert_fns_covered(defns):
-    """启动期校验：定义声明的 fn_ref 必须都有实现；缺则显式抛错（不静默）。
+    """启动期：解析每个回调计算列的实现并绑定 core；缺实现 ⇒ 显式抛 ``ERR_FN_MISSING``（不静默）。
 
     关系聚合（``val['agg']``）由框架处理，无需回调，跳过。
     """
@@ -305,8 +343,7 @@ def assert_fns_covered(defns):
         for key, val in ((defn or {}).get('computes') or {}).items():
             if val and val.get('agg'):
                 continue
-            ref = (val or {}).get('fnRef') or key
-            if ref not in _fn_refs:
-                missing.append(ref)
+            if not _bind_one(defn['name'], key, val):
+                missing.append(_logical_fn_ref(defn['name'], key, val))
     if missing:
         raise RuntimeError(f"ERR_FN_MISSING:未注入回调实现 {', '.join(missing)}")
