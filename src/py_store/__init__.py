@@ -263,6 +263,10 @@ class Store:
         """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flush_feedback）"""
         await feedback.flush()
 
+    def register_provider(self, kind, mod):
+        """注册资源 provider 类型（转发模块级注册表；mod 须具 create 属性）"""
+        return resource.register_provider(kind, mod)
+
     def configure_resource(self, cfg):
         return resource.configure(cfg)
 
