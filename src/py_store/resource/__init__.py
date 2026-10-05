@@ -81,7 +81,12 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None):
             "mime": mime or "application/octet-stream", "size": len(data), "kind": kind or "file",
         })
     if locations:
-        await _call(crud.insert_many, _cfg["schema"]["location"], locations)
+        existing = await _call(
+            crud.query, _loc_gql(_cfg["schema"]["location"]), {"c0": {"resourceId": resource_id}})
+        have = {r["backend"] for r in existing}
+        fresh = [loc for loc in locations if loc["backend"] not in have]
+        if fresh:
+            await _call(crud.insert_many, _cfg["schema"]["location"], fresh)
     if bind:
         await _call(crud.insert, _cfg["schema"]["binding"], {
             "resourceId": resource_id, "businessTable": bind["businessTable"],
