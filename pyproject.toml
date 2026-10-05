@@ -45,6 +45,7 @@ classifiers = [
 mysql = ["asyncmy>=0.2.9"]
 postgres = ["asyncpg>=0.29"]
 sqlite = ["aiosqlite>=0.19"]
+resource = ["boto3"]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.16", "mypy>=1.0"]
 
 [project.urls]

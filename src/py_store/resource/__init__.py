@@ -98,7 +98,10 @@ async def open(resource_id, *, order=None):
     crud = _crud()
     rows = await _call(crud.query, _loc_gql(_cfg["schema"]["location"]), {"c0": {"resourceId": resource_id}})
     seq = list(order) if order else list(_pool.keys())
-    rank = lambda b: seq.index(b) if b in seq else 2 ** 31
+
+    def rank(b):
+        return seq.index(b) if b in seq else 2 ** 31
+
     rows = sorted(rows, key=lambda r: (rank(r["backend"]), r.get("priority") or 0))
     last_err = None
     for loc in rows:

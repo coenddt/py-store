@@ -1,0 +1,98 @@
+"""资源能力（宿主旁路 B 档）单测：假 store + 真 local provider + 内存 provider。
+
+覆盖：put fan-out 2 副本 + sha1 内容寻址；open 跳过 failed 副本降级到 memory；url 纯拼接（外部直返）。
+
+运行：$env:PYTHONPATH='py-store/src'; python -m pytest py-store/tests/test_resource.py -q
+（本地需让 `import rust_store_py` 命中含 resource_content_path 的新构建，见执行文档 02）
+"""
+
+import asyncio
+import re
+import tempfile
+
+from py_store import resource
+
+
+class _MemoryProvider:
+    @staticmethod
+    def create(options=None):
+        writes = {}
+
+        async def put(key, data, opts=None):
+            writes[key] = bytes(data)
+
+        async def get(key, opts=None):
+            if key not in writes:
+                raise KeyError('miss')
+            return writes[key]
+
+        async def remove(key, opts=None):
+            writes.pop(key, None)
+
+        async def exists(key, opts=None):
+            return key in writes
+
+        return {'kind': 'memory', 'put': put, 'get': get, 'remove': remove, 'exists': exists}
+
+
+class _FakeStore:
+    def __init__(self):
+        self.rows = []
+
+    async def exists(self, schema, cond):
+        return any(r['_schema'] == schema and r.get('_id') == cond.get('_id') for r in self.rows)
+
+    async def insert(self, schema, data):
+        self.rows.append({'_schema': schema, **data})
+        return data
+
+    async def insert_many(self, schema, docs):
+        for d in docs:
+            self.rows.append({'_schema': schema, **d})
+        return docs
+
+    async def query(self, gql, params):
+        rid = params['c0']['resourceId']
+        return [r for r in self.rows if r['_schema'] == 'ResourceLocation' and r.get('resourceId') == rid]
+
+    async def remove(self, schema, cond):
+        for i in range(len(self.rows) - 1, -1, -1):
+            r = self.rows[i]
+            hit = (r['resourceId'] == cond['resourceId']) if 'resourceId' in cond else (r.get('_id') == cond.get('_id'))
+            if r['_schema'] == schema and hit:
+                del self.rows[i]
+        return {'deletedCount': 1}
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def test_put_fanout_open_degrade_url():
+    async def scenario():
+        store = _FakeStore()
+        resource.register_provider('memory', _MemoryProvider)
+        with tempfile.TemporaryDirectory() as tmp:
+            resource.configure({
+                'store': store,
+                'providers': [{'kind': 'local', 'options': {'baseDir': tmp}}, {'kind': 'memory'}],
+                'url': {'baseUrl': 'https://cdn', 'pathTemplate': '/{contentPath}'},
+            })
+
+            out = await resource.put(bytes=b'hello', file_name='a.txt', mime='text/plain')
+            assert len(out['locations']) == 2
+            assert re.match(r'^[0-9a-f]{40}$', out['resourceId'])
+
+            for r in store.rows:
+                if r['_schema'] == 'ResourceLocation' and r['backend'] == 'local':
+                    r['status'] = 'failed'
+
+            got = await resource.open(out['resourceId'])
+            assert got['backend'] == 'memory'
+            assert got['bytes'] == b'hello'
+
+            sha1 = out['sha1']
+            assert await resource.url(out['resourceId']) == f'https://cdn/objects/{sha1[:2]}/{sha1}'
+            assert await resource.url('https://x/y.png') == 'https://x/y.png'
+
+    _run(scenario())
