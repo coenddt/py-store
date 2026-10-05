@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+from typing import Any
 
 from ..core import native
 from ..feedback import emit as _emit_feedback
 from . import providers
 
 _DEFAULT_SCHEMA = {"resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding"}
-_cfg = {"schema": dict(_DEFAULT_SCHEMA), "store": None, "providers": [], "url": {}, "sign": None}
+_cfg: dict[str, Any] = {"schema": dict(_DEFAULT_SCHEMA), "store": None, "providers": [], "url": {}, "sign": None}
 _pool: dict = {}
 
 _BYTES_TYPES = (bytes, bytearray)
