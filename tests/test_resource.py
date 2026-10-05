@@ -10,7 +10,7 @@ import asyncio
 import re
 import tempfile
 
-from py_store import resource
+from py_store import feedback, resource
 
 
 class _MemoryProvider:
@@ -94,5 +94,88 @@ def test_put_fanout_open_degrade_url():
             sha1 = out['sha1']
             assert await resource.url(out['resourceId']) == f'https://cdn/objects/{sha1[:2]}/{sha1}'
             assert await resource.url('https://x/y.png') == 'https://x/y.png'
+
+    _run(scenario())
+
+
+class _BrokenGetProvider:
+    @staticmethod
+    def create(options=None):
+        async def put(key, data, opts=None):
+            return None
+
+        async def get(key, opts=None):
+            raise RuntimeError('disk boom')
+
+        async def remove(key, opts=None):
+            return None
+
+        async def exists(key, opts=None):
+            return False
+
+        return {'kind': 'badget', 'put': put, 'get': get, 'remove': remove, 'exists': exists}
+
+
+class _BrokenPutProvider:
+    @staticmethod
+    def create(options=None):
+        async def put(key, data, opts=None):
+            raise RuntimeError('boom')
+
+        async def get(key, opts=None):
+            raise RuntimeError('boom')
+
+        async def remove(key, opts=None):
+            return None
+
+        async def exists(key, opts=None):
+            return False
+
+        return {'kind': 'broken', 'put': put, 'get': get, 'remove': remove, 'exists': exists}
+
+
+def test_open_degrade_on_provider_failure():
+    async def scenario():
+        store = _FakeStore()
+        events = []
+        prev = feedback.get_sink()
+        feedback.set_sink(events.append)
+        try:
+            resource.register_provider('badget', _BrokenGetProvider)
+            resource.register_provider('memory', _MemoryProvider)
+            resource.configure({'store': store,
+                                'providers': [{'kind': 'badget'}, {'kind': 'memory'}], 'url': {}})
+            out = await resource.put(bytes=b'hello')
+            got = await resource.open(out['resourceId'])
+            assert got['backend'] == 'memory'
+            assert got['bytes'] == b'hello'
+            assert any(e['code'] == 'resourceLocationDegraded' for e in events)
+        finally:
+            feedback.set_sink(prev)
+
+    _run(scenario())
+
+
+def test_partial_write_failure_persists_failed_and_feedback():
+    async def scenario():
+        store = _FakeStore()
+        events = []
+        prev = feedback.get_sink()
+        feedback.set_sink(events.append)
+        try:
+            resource.register_provider('broken', _BrokenPutProvider)
+            resource.register_provider('memory', _MemoryProvider)
+            resource.configure({'store': store,
+                                'providers': [{'kind': 'memory'}, {'kind': 'broken'}], 'url': {}})
+            out = await resource.put(bytes=b'x')
+            by_backend = {loc['backend']: loc for loc in out['locations']}
+            assert by_backend['broken']['status'] == 'failed'
+            assert by_backend['memory']['status'] == 'ok'
+            assert any(e['code'] == 'resourceLocationWriteFailed' for e in events)
+
+            got = await resource.open(out['resourceId'])
+            assert got['backend'] == 'memory'
+        finally:
+            feedback.set_sink(prev)
 
     _run(scenario())
