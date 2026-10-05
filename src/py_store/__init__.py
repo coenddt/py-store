@@ -34,6 +34,7 @@ from . import (
     metadef,
     naming,
     permission,
+    resource,
     schema,
     workflow,
 )
@@ -261,6 +262,21 @@ class Store:
     async def flush_feedback(self):
         """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flush_feedback）"""
         await feedback.flush()
+
+    def configure_resource(self, cfg):
+        return resource.configure(cfg)
+
+    async def resource_put(self, **kw):
+        return await resource.put(**kw)
+
+    async def resource_open(self, rid, **kw):
+        return await resource.open(rid, **kw)
+
+    async def resource_remove(self, rid):
+        return await resource.remove(rid)
+
+    async def resource_url(self, ref, **kw):
+        return await resource.url(ref, **kw)
 
     # ── 缓存状态注记（B6；见 cache.py）──
     def set_cache_status(self, fn):
