@@ -5,6 +5,7 @@
 
 import asyncio
 import io
+import types
 
 import pytest
 
@@ -232,3 +233,14 @@ def test_s3_provider():
     providers.create_provider('s3', {'bucket': 'b', 'endpoint': 'http://127.0.0.1:9000',
                                      'forcePathStyle': True,
                                      'credentials': {'accessKeyId': 'x', 'secretAccessKey': 'y'}})
+
+
+def test_store_facade_register_provider():
+    import py_store
+
+    class _StubProvider:
+        pass
+
+    mod = types.SimpleNamespace(create=lambda options=None: _StubProvider())
+    py_store.store.register_provider('stub-x', mod)
+    assert providers._REG['stub-x'] is mod
