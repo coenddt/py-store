@@ -71,7 +71,7 @@ jobs:
           python-version: '3.12'
       # 必须装全 DB extras：否则 e2e 因缺驱动全 skip → 覆盖率崩塌 → 门禁误红
       - name: Install with dev + db extras
-        run: python -m pip install -e ".[dev,mysql,postgres,sqlite]"
+        run: python -m pip install -e ".[dev,mysql,postgres,sqlite,resource]"
       - name: Ruff check
         run: python -m ruff check src tests stress
       # 三段规范（命名 / 落点 / fnRef）在四载体归一后必须逐段一致

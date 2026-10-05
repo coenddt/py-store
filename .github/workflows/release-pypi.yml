@@ -102,7 +102,7 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U e2e -d postgres -c 'CREATE DATABASE mongo_store_e2e_real';
       - name: Install with dev + db extras
-        run: python -m pip install -e ".[dev,mysql,postgres,sqlite]"
+        run: python -m pip install -e ".[dev,mysql,postgres,sqlite,resource]"
       - name: Ruff check
         run: python -m ruff check src tests stress
       - name: Mypy check
