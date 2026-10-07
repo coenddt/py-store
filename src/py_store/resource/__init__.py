@@ -130,8 +130,10 @@ async def open(resource_id, *, order=None):
                             "message": f'资源副本读取失败，降级到下一副本（backend={loc["backend"]}, id={resource_id}）：{e}',
                             "hint": "检查该 provider 可用性；该副本可能需要重建"})
     if last_err is not None:
-        raise last_err
-    raise FileNotFoundError(f"资源不存在或无可读副本: {resource_id}")
+        raise last_err  # 有副本行但读取失败：原样重抛（500 透传），禁改语义
+    # core 稳定前缀（与 ERR_PERMISSION: / ERR_GQL_PARSE: 同构）：适配层按前缀判定 → 404，
+    # 禁按中文文案匹配。仅「按 resource_id 查到零 ResourceLocation 行」时抛出。
+    raise FileNotFoundError(f"ERR_RESOURCE_NOT_FOUND:资源不存在或无可读副本: {resource_id}")
 
 
 async def remove(resource_id):

@@ -10,6 +10,8 @@ import asyncio
 import re
 import tempfile
 
+import pytest
+
 from py_store import feedback, resource
 
 
@@ -150,6 +152,45 @@ def test_open_degrade_on_provider_failure():
             assert got['backend'] == 'memory'
             assert got['bytes'] == b'hello'
             assert any(e['code'] == 'resourceLocationDegraded' for e in events)
+        finally:
+            feedback.set_sink(prev)
+
+    _run(scenario())
+
+
+def test_open_missing_resource_raises_prefixed_error():
+    """零副本行 → 抛 FileNotFoundError 且带 ERR_RESOURCE_NOT_FOUND: 稳定前缀（spec/03 判定顺序第 4 层）。"""
+    async def scenario():
+        store = _FakeStore()
+        resource.register_provider('memory', _MemoryProvider)
+        resource.configure({'store': store, 'providers': [{'kind': 'memory'}], 'url': {}})
+
+        rid = '0' * 40
+        prefix = 'ERR_RESOURCE_NOT_FOUND:'
+        with pytest.raises(FileNotFoundError) as ei:
+            await resource.open(rid)
+        assert str(ei.value).startswith(prefix), str(ei.value)
+        assert str(ei.value)[len(prefix):] == f'资源不存在或无可读副本: {rid}'
+
+    _run(scenario())
+
+
+def test_open_provider_failure_reraises_without_prefix():
+    """有副本行但 provider 读取失败 → 原样重抛、不带前缀（保持 500 语义，禁伪装成「不存在」）。"""
+    async def scenario():
+        store = _FakeStore()
+        prev = feedback.get_sink()
+        feedback.set_sink(lambda e: None)
+        try:
+            resource.register_provider('badget', _BrokenGetProvider)
+            resource.configure({'store': store, 'providers': [{'kind': 'badget'}], 'url': {}})
+            store.rows.append({'_schema': 'ResourceLocation', 'resourceId': 'a' * 40,
+                               'backend': 'badget', 'key': 'k', 'status': 'ok', 'priority': 0})
+
+            with pytest.raises(RuntimeError) as ei:
+                await resource.open('a' * 40)
+            assert str(ei.value) == 'disk boom'
+            assert not str(ei.value).startswith('ERR_RESOURCE_NOT_FOUND:')
         finally:
             feedback.set_sink(prev)
 
