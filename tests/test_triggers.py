@@ -271,6 +271,30 @@ def test_a6_cross_source_non_atomic():
     assert n == 1, '跨源触发写已落库（顺序执行，非原子）'
 
 
+def test_a6_session_cross_source_fail_closed():
+    """A6 会话内跨源触发 fail-closed：NonAtomicWriteError 且全部回滚"""
+
+    async def scenario():
+        from py_store import NonAtomicWriteError
+        db_a, db_b = await _setup()
+        try:
+            async with store.session() as s:
+                await s.insert('TXOrder', {'amount': 1})
+        except NonAtomicWriteError:
+            pass
+        else:
+            raise AssertionError('应抛 NonAtomicWriteError')
+        n_order = await _count(db_a, 'SELECT COUNT(*) FROM t_x_order')
+        n_audit = await _count(db_b, 'SELECT COUNT(*) FROM t_x_audit')
+        await db_a.close()
+        await db_b.close()
+        return n_order, n_audit
+
+    n_order, n_audit = _run(scenario())
+    assert n_order == 0, '主写已回滚'
+    assert n_audit == 0, '触发写已回滚'
+
+
 def test_a8_same_transaction_dedupe():
     """A8 同事务去重：同名触发只执行一次（若不去重将主键冲突整体失败）"""
 
