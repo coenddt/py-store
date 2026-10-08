@@ -49,6 +49,9 @@ from . import (
 )
 from .ask import AskExhausted as AskExhausted
 from .ask import AskResult as AskResult
+from .crud import triggers as triggers
+from .crud.triggers import assert_trigger_fns_covered as assert_trigger_fns_covered
+from .crud.triggers import set_trigger_fn as set_trigger_fn
 from .datasource import NativeCommandError as NativeCommandError
 from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
@@ -324,9 +327,12 @@ class Store:
     register = staticmethod(schema.register)
     # 运行期目录装载（读 store.config.json → 收集定义 → core 纯规划 → 带定位批量注册）
     load_defs = staticmethod(load.load_defs)
-    # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.set_fn / store.assert_fns_covered）
+    # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.set_fn / assert_fns_covered）
     set_fn = staticmethod(schema.set_fn)
     assert_fns_covered = staticmethod(schema.assert_fns_covered)
+    # 触发器回调注入与启动期缺实现校验（对齐 nodejs-store store.setTriggerFn / assertTriggerFnsCovered）
+    set_trigger_fn = staticmethod(triggers.set_trigger_fn)
+    assert_trigger_fns_covered = staticmethod(triggers.assert_trigger_fns_covered)
     has = staticmethod(schema.has)
     get = staticmethod(schema.get)
     # 数据源连接（多后端路由）
@@ -373,6 +379,9 @@ class Store:
 
 
 store = Store()
+
+# 触发链执行器装配：回调实现经门面（host['store']）消费 CRUD API
+triggers.set_store(store)
 
 # 索引名对齐 MongoDB 自动命名（k1_v1_k2_v2），用于幂等创建
 async def _create_indexes_if_needed():

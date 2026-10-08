@@ -149,7 +149,27 @@ def _sources_of(plan):
         cmd = (step or {}).get('command') or {}
         if cmd:
             out.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
+    # 触发链命令的源（plan_insert 直接产出 triggers；plan_update 二次规划才产出）
+    for t in (plan or {}).get('triggers') or []:
+        cmd = (t or {}).get('command') or {}
+        if cmd:
+            out.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
     return out or {_datasource.DEFAULT_SOURCE}
+
+
+def declare_trigger_sources(base_sources, triggers):
+    """触发链触及源的原子性声明（update 专用：其 triggers 在事务内二次规划后才产出，
+    顶层 ``_sources_of`` 已不及）——触发源超出已声明源集时发 ``non_atomic_write``
+    （含全部涉及源），此后顺序执行；会话内不发声明（跨源写由既有 fail-closed 拒绝）。
+    对齐 nodejs-store ``declareTriggerSources``。"""
+    uniq = set(base_sources)
+    for t in triggers or ():
+        cmd = (t or {}).get('command') or {}
+        if cmd:
+            uniq.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
+    if len(uniq) > 1 and _datasource.current_session() is None:
+        _warn_multi_source(uniq)
+    return uniq
 
 
 def _warn_multi_source(sources):

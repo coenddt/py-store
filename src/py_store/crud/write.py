@@ -2,8 +2,17 @@
 
 from ..schema import core as _core
 from ..schema import get as _get_schema
-from .exec import _call, _ctx, _exec, _now_for, _sources_of, run_atomic
+from .exec import (
+    _call,
+    _ctx,
+    _exec,
+    _now_for,
+    _sources_of,
+    declare_trigger_sources,
+    run_atomic,
+)
 from .id import _generate_id
+from .triggers import run_triggers
 
 
 async def _plan_with_probe(plan_fn):
@@ -18,15 +27,32 @@ async def _plan_with_probe(plan_fn):
 async def insert(schema_name, data, route_override=None):
     """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``）"""
     s = _get_schema(schema_name)
+    now = _now_for(schema_name)
     plan = _call(lambda: _core.plan_insert(
-        schema_name, data, _now_for(schema_name), _generate_id(s) if s['idPrefix'] else '', _ctx(),
+        schema_name, data, now, _generate_id(s) if s['idPrefix'] else '', _ctx(),
         route_override))
-    result = await _exec(plan['command'])
-    returns = plan['returns']
-    # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
-    if isinstance(returns, dict) and not returns.get('_id')             and isinstance(result, dict) and result.get('_id') is not None:
-        returns = {**returns, '_id': result['_id']}
-    return returns
+
+    def _finish(result):
+        returns = plan['returns']
+        # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
+        if (isinstance(returns, dict) and not returns.get('_id')
+                and isinstance(result, dict) and result.get('_id') is not None):
+            return {**returns, '_id': result['_id']}
+        return returns
+
+    # 无触发器：保持原路径（零回归）
+    if not plan.get('triggers'):
+        return _finish(await _exec(plan['command']))
+    # 有触发器：主写 + 触发链同一原子作用域（单源真事务 / 跨源发 non_atomic_write）
+    ctx = _ctx()
+
+    async def _do():
+        result = await _exec(plan['command'])
+        await run_triggers(plan['triggers'], root=result, before=None, now=now, ctx=ctx,
+                           executed=set())
+        return _finish(result)
+
+    return await run_atomic(_sources_of(plan), _do)
 
 
 async def insert_many(schema_name, docs, route_override=None):
@@ -74,12 +100,20 @@ async def update(schema_name, condition, data, options=None, route_override=None
 
     async def _do():
         out = first
+        before = None
         if out.get('needsProbe'):
-            probe_doc = await _exec(out['needsProbe'])
+            before = await _exec(out['needsProbe'])          # 探针文档 = before（含 onFields 投影）
             out = _call(lambda: _core.plan_update(
                 schema_name, condition, data, options, now, ctx,
-                probe_doc is not None, probe_doc, route_override))
+                before is not None, before, route_override))
+        # 触发链触及源并入原子性声明（update 的 triggers 二次规划才产出；跨源 → non_atomic_write）
+        if out.get('triggers'):
+            declare_trigger_sources(sources, out['triggers'])
         result = await _exec(out['command'])
+        # 主写有命中才触发（0 行命中 = 无 after，无从引用；配触发器的 update 由 core 强制发探针）
+        if out.get('triggers') and result:
+            await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
+                               executed=set())
         return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
 
     return await run_atomic(sources, _do)
