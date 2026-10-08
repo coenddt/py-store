@@ -9,12 +9,13 @@
 """
 
 import re
+from typing import Set
 
 from .exec import _exec
 
 _store = None                 # 装配期由 py_store.__init__ 注入（避免循环导入）
-_trigger_fns = {}
-_fn_refs = set()
+_trigger_fns: dict = {}
+_fn_refs: Set[str] = set()
 
 
 def set_store(s):
