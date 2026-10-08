@@ -68,6 +68,14 @@ def _register_test_schemas():
                  'data': {'_id': '{{now}}', 'kind': 'upd', 'ref': '{{root._id}}',
                           'amount': '{{root.amount}}'}},
             ],
+            'remove': [
+                # 命令式 op:"remove"：删 t_audit 中 ref = 被删文档 _id 的行
+                {'name': 'aud_del', 'into': 'TAudit', 'op': 'remove',
+                 'condition': {'ref': '{{before._id}}'}},
+                # 回调式：before 占位符（被删文档删除前值）
+                {'name': 'del_cb', 'fnRef': 'delRecorder',
+                 'args': {'id': '{{before._id}}', 'amount': '{{before.amount}}'}},
+            ],
         },
     })
     _sc.register({
@@ -79,7 +87,11 @@ def _register_test_schemas():
     _sc.register({
         'name': 'TBoom', 'collection': 'tBoom', 'idPrefix': 'b_', 'timestamps': False,
         'datasource': SRC_A, 'fields': {},
-        'triggers': {'insert': [{'name': 'boom', 'fnRef': 'boom'}]},
+        'triggers': {
+            'insert': [{'name': 'boom', 'fnRef': 'boom'}],
+            # remove 触发回调失败 → 主删除整体回滚
+            'remove': [{'name': 'boomDel', 'fnRef': 'boom'}],
+        },
     })
     _sc.register({
         'name': 'TGhost', 'collection': 'tGhost', 'idPrefix': 'g_', 'timestamps': False,
@@ -113,6 +125,7 @@ def _register_test_schemas():
 # ─── 回调实现注入（启动期一次；运行期计数在用例内自管） ─────────
 
 cb_calls = []
+del_calls = []
 
 
 async def _aud_recorder(args, ctx, host):
@@ -120,11 +133,16 @@ async def _aud_recorder(args, ctx, host):
     await host['store'].insert('TAudit', {'kind': 'cb', 'ref': args['ref'], 'amount': 0})
 
 
+async def _del_recorder(args, ctx, host):
+    del_calls.append(args)
+
+
 async def _boom(args, ctx, host):
     raise RuntimeError('boom-err')
 
 
 store.set_trigger_fn('audRecorder', _aud_recorder)
+store.set_trigger_fn('delRecorder', _del_recorder)
 store.set_trigger_fn('boom', _boom)
 
 
@@ -136,6 +154,7 @@ async def _setup():
     """环境复位（node beforeEach 镜像）：sink / ctx / 档位 / 双源内存库"""
     events.clear()
     cb_calls.clear()
+    del_calls.clear()
     feedback.set_sink(events.append)
     permission.set_context(None)
     store.set_profile('standard')
@@ -346,3 +365,87 @@ def test_placeholder_embed_is_err():
         resolve_trigger_placeholders('a{{now}}b', scope)
     # 引用缺失字段 = 整值替换语义（取值缺失 → None），不抛
     assert resolve_trigger_placeholders('{{root.missing}}', scope) is None
+
+
+# ─── remove 触发链（总纲 A5） ─────────────────────────────────
+
+def test_a5_remove_command_and_callback():
+    """A5 remove 触发链：命令式 op:"remove" + 回调式执行，before = 删除前文档"""
+
+    async def scenario():
+        db_a, _ = await _setup()
+        doc = await store.insert('TOrder', {'amount': 100, 'status': 'new', 'note': ''})
+        # 预置一条审计行（ref = 被删文档 _id）供命令式 remove 圈定删除
+        await db_a.execute(
+            "INSERT INTO t_audit (_id, kind, ref, amount) VALUES ('a_seed', 'seed', ?, 5)",
+            (doc['_id'],))
+        await db_a.commit()
+        ret = await store.remove('TOrder', {'_id': doc['_id']})
+        n_order = await _count(db_a, f"SELECT COUNT(*) FROM t_order WHERE _id = {doc['_id']!r}")
+        n_arch = await _count(
+            db_a, f"SELECT COUNT(*) FROM t_order_deleted WHERE _id = {doc['_id']!r}")
+        n_audit = await _count(db_a, f"SELECT COUNT(*) FROM t_audit WHERE ref = {doc['_id']!r}")
+        await db_a.close()
+        return ret, n_order, n_arch, n_audit, doc
+
+    ret, n_order, n_arch, n_audit, doc = _run(scenario())
+    assert ret['deletedCount'] == 1
+    assert ret['archivedCount'] == 1
+    assert n_order == 0, '主表已删'
+    assert n_arch == 1, '归档表有被删文档'
+    assert n_audit == 0, '命令式 op:"remove" 触发删目标行'
+    assert len(del_calls) == 1, 'remove 回调执行一次'
+    assert del_calls[0]['id'] == doc['_id'], '{{before._id}}'
+    assert del_calls[0]['amount'] == 100, '{{before.amount}} = 删除前值'
+
+
+def test_a5_remove_zero_hit_no_trigger():
+    """A5 remove 0 命中：不触发（与 update 0 行命中语义一致）"""
+
+    async def scenario():
+        db_a, _ = await _setup()
+        ret = await store.remove('TOrder', {'_id': 'no_such_id'})
+        await db_a.close()
+        return ret
+
+    ret = _run(scenario())
+    assert ret['deletedCount'] == 0
+    assert ret['archivedCount'] == 0
+    assert len(del_calls) == 0, '未删到不触发'
+
+
+def test_a5_remove_rollback_callback_failure():
+    """A5 单源回滚：remove 触发回调失败 → 主删除整体回滚"""
+
+    async def scenario():
+        db_a, _ = await _setup()
+        # 直接预置行（TBoom 的 insert 触发器本身抛错，不能走 store.insert）
+        await db_a.execute("INSERT INTO t_boom (_id) VALUES ('b_seed')")
+        await db_a.commit()
+        with pytest.raises(RuntimeError, match='boom-err'):
+            await store.remove('TBoom', {'_id': 'b_seed'})
+        n = await _count(db_a, "SELECT COUNT(*) FROM t_boom WHERE _id = 'b_seed'")
+        await db_a.close()
+        return n
+
+    assert _run(scenario()) == 1, '主删除已回滚'
+
+
+def test_a5_remove_without_triggers_unchanged():
+    """A5 未声明 remove 触发器：删+归档行为与改动前一致（零回归）"""
+
+    async def scenario():
+        db_a, _ = await _setup()
+        doc = await store.insert('TAudit', {'kind': 'plain', 'ref': 'r1', 'amount': 1})
+        ret = await store.remove('TAudit', {'_id': doc['_id']})
+        n_live = await _count(db_a, f"SELECT COUNT(*) FROM t_audit WHERE _id = {doc['_id']!r}")
+        n_arch = await _count(
+            db_a, f"SELECT COUNT(*) FROM t_audit_deleted WHERE _id = {doc['_id']!r}")
+        await db_a.close()
+        return ret, n_live, n_arch
+
+    ret, n_live, n_arch = _run(scenario())
+    assert ret['deletedCount'] == 1
+    assert ret['archivedCount'] == 1
+    assert n_live == 0
+    assert n_arch == 1

@@ -169,12 +169,17 @@ async def update_many(schema_name, condition, data, route_override=None):
 async def remove(schema_name, condition, route_override=None):
     """删除 —— 原表数据先归档到对应 `_deleted` 附表（附 deletedAt），再物理删除原表数据。
     归档命令带 ``upsertById``（幂等），重试不再因 _id 冲突整批失败；单一 SQL 源时
-    归档+删除整体事务化（Mongo / 跨源按顺序执行，非原子边界见 README「事务边界」）"""
+    归档+删除整体事务化（Mongo / 跨源按顺序执行，非原子边界见 README「事务边界」）。
+
+    remove 触发链（A5：未声明触发器时无此路径，行为不变）：before = 归档 findCommand
+    首条（被删文档代表值、全字段）；未删到（docs 空）不触发，与 update 0 行命中语义一致。
+    """
     out = await _plan_with_probe(lambda found, doc: _call(lambda: _core.plan_remove(
         schema_name, condition, _ctx(), found, doc, route_override)))
 
     async def _do_remove():
         archived_count = 0
+        docs = []
         # 关系谓词：先执行 deleteCommand.preCommand 取命中 _id（归档 find 与删除共用同一列表）
         pre = (out.get('deleteCommand') or {}).get('preCommand')
         ids = None
@@ -191,9 +196,15 @@ async def remove(schema_name, condition, route_override=None):
 
         result = await (_fill_pre_ids(out['deleteCommand'], ids)
                         if ids is not None else _exec(out['deleteCommand']))
+        if out.get('triggers') and docs:
+            await run_triggers(out['triggers'], root=None, before=docs[0],
+                               now=_now_for(schema_name), ctx=_ctx(), executed=set())
         return {'deletedCount': result.deleted_count, 'archivedCount': archived_count}
 
     sources = _sources_of(out)
+    # 触发链触及源并入原子性声明（跨源 → non_atomic_write）
+    if out.get('triggers'):
+        declare_trigger_sources(sources, out['triggers'])
     return await run_atomic(sources, _do_remove)
 
 
