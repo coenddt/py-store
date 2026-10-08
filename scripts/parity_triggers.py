@@ -13,10 +13,12 @@
 import json
 import pathlib
 import sys
+from datetime import datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / 'src'))
 
 from py_store.core import native  # noqa: E402
+from py_store.scheduler import cron_matches  # noqa: E402
 
 FIXTURE = (pathlib.Path(__file__).resolve().parent.parent.parent
            / 'rust-store' / 'fixtures' / 'triggers' / 'cases.json')
@@ -41,5 +43,11 @@ for i, c in enumerate(fx['cases']):
         out[f'case{i}.triggers'] = plan.get('triggers')
     else:
         raise ValueError(f"未知 case.fn: {c['fn']}")
+
+# cron 匹配器对拍（A6）：同一组（cron, 时刻分量）两宿主输出必须一致
+for i, c in enumerate(fx.get('cronCases') or ()):
+    a = c['at']
+    out[f'cron{i}'] = cron_matches(
+        c['cron'], datetime(a['y'], a['mo'], a['d'], a['h'], a['mi']))
 
 print(json.dumps(out, sort_keys=True, separators=(',', ':'), ensure_ascii=False))
