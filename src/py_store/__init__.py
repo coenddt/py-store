@@ -65,6 +65,8 @@ from .load import load_defs as load_defs
 from .schema import assert_fns_covered as assert_fns_covered
 from .schema import set_fn as set_fn
 from .schema import text2query
+from .scope import current_scope as current_scope
+from .scope import with_scope as with_scope
 from .sync import sync_schema
 
 

@@ -37,9 +37,23 @@ from contextlib import contextmanager
 
 from .core import core, native
 from .feedback import emit as _emit_feedback
+from .scope import current_scope
 
 # 缓存内置 list 类型（本模块的 list() 函数会遮蔽内置名）
 _LIST_TYPES = (list, tuple)
+
+
+def get_core():
+    """取当前生效的 core 门面（R2 双端宿主作用域）：作用域内回退该作用域的派生视图，否则 base。
+
+    - 未进入作用域（无 ``with_scope``）→ 恒等 base ``core``（零行为变化，fail-open 姿态不变）；
+    - 进入作用域 → 返回 ``current_scope().view``（派生 Registry，策略覆盖只作用于本作用域）；
+    - 视图为只读：写类调用（register/set_xxx）由 core 守卫抛 ``ERR_POLICY_VIEW_READONLY:``。
+
+    禁模块级/跨 await 缓存返回值（03 §7）：每个调用点现场取。
+    """
+    s = current_scope()
+    return s.view if s is not None else core
 
 # Host 侧元数据镜像
 _schemas: dict = {}
