@@ -15,6 +15,13 @@ io 契约：``(load: () -> snapshot, save: (changed: list[str], snapshot) -> Non
   2. core **无** ``replaceOne`` 命令；其驱动语义 = 「按 ``_id`` 命中则覆盖、未命中则插入」，
      即 core ``insertMany(upsertById=true)`` 的单词形态 —— 故 ``replace_one`` 映射为
      后者（对齐 ``nodejs-store/src/local/handle.js``，归档幂等由此承接）。
+  3. **写结果须为 PyMongo 等价对象**：core 回喂 camelCase dict（``{modifiedCount}`` /
+     ``{deletedCount}``），而 py 侧 ``crud/*`` 按 PyMongo 驱动语义用 **snake_case 属性**
+     读取（``result.modified_count`` / ``result.deleted_count``，见
+     ``crud/write.py`` 第 166/202 行）——故 ``update_many`` / ``delete_many`` 的 core
+     结果须塑形为 ``executors.UpdateResult`` / ``executors.DeleteResult``（与 SQL 路径
+     经 ``executors.shape_result`` 回喂同形；JS 侧驱动本就返回 ``{modifiedCount}`` 对象，
+     故 node 手柄无需此步）。
 
 方法集与 ``py_store/executors/mongo.py`` 第 109–161 行的调用点逐一对应
 （**注意 async 形态差异**：``find`` / ``list_indexes`` 同步返回游标，``aggregate``
@@ -25,6 +32,7 @@ io 契约：``(load: () -> snapshot, save: (changed: list[str], snapshot) -> Non
 from __future__ import annotations
 
 from ..core import core as _local_core
+from ..executors import DeleteResult, UpdateResult
 
 
 class _Cursor:
@@ -106,10 +114,14 @@ class LocalCollection:
         })
 
     async def update_many(self, filter, update, **opts):
-        return self._write({'kind': 'updateMany', 'filter': filter, 'update': update})
+        # core 回喂 {modifiedCount} → 塑形为 PyMongo UpdateResult（crud 读 .modified_count）
+        out = self._write({'kind': 'updateMany', 'filter': filter, 'update': update})
+        return UpdateResult(out['modifiedCount'])
 
     async def delete_many(self, filter, **opts):
-        return self._write({'kind': 'deleteMany', 'filter': filter})
+        # core 回喂 {deletedCount} → 塑形为 PyMongo DeleteResult（crud 读 .deleted_count）
+        out = self._write({'kind': 'deleteMany', 'filter': filter})
+        return DeleteResult(out['deletedCount'])
 
 
 class LocalDb:
