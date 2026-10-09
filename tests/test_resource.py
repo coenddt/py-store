@@ -57,11 +57,60 @@ class _FakeStore:
         rid = params['c0']['resourceId']
         return [r for r in self.rows if r['_schema'] == 'ResourceLocation' and r.get('resourceId') == rid]
 
+    async def query_one(self, gql, params):
+        return next((r for r in self.rows
+                     if r['_schema'] == 'Resource' and r.get('_id') == params['c0'].get('_id')), None)
+
     async def remove(self, schema, cond):
         for i in range(len(self.rows) - 1, -1, -1):
             r = self.rows[i]
             hit = (r['resourceId'] == cond['resourceId']) if 'resourceId' in cond else (r.get('_id') == cond.get('_id'))
             if r['_schema'] == schema and hit:
+                del self.rows[i]
+        return {'deletedCount': 1}
+
+
+class _GenericStore:
+    """通用 fake store：按物理字段名匹配（供字段映射用例）。"""
+
+    def __init__(self, meta_missing=False):
+        self.rows = []
+        self.meta_missing = meta_missing
+
+    @staticmethod
+    def _match(r, cond):
+        return all(r.get(k) == v for k, v in cond.items())
+
+    async def exists(self, schema, cond):
+        return any(r['_schema'] == schema and self._match(r, cond) for r in self.rows)
+
+    async def insert(self, schema, data):
+        self.rows.append({'_schema': schema, **data})
+        return data
+
+    async def insert_many(self, schema, docs):
+        for d in docs:
+            self.rows.append({'_schema': schema, **d})
+        return docs
+
+    @staticmethod
+    def _schema_of(gql):
+        return gql.split('(')[0].strip()
+
+    async def query(self, gql, params):
+        schema = self._schema_of(gql)
+        return [r for r in self.rows if r['_schema'] == schema and self._match(r, params['c0'])]
+
+    async def query_one(self, gql, params):
+        if self.meta_missing:
+            return None
+        schema = self._schema_of(gql)
+        return next((r for r in self.rows if r['_schema'] == schema and self._match(r, params['c0'])), None)
+
+    async def remove(self, schema, cond):
+        for i in range(len(self.rows) - 1, -1, -1):
+            r = self.rows[i]
+            if r['_schema'] == schema and self._match(r, cond):
                 del self.rows[i]
         return {'deletedCount': 1}
 
@@ -216,6 +265,92 @@ def test_partial_write_failure_persists_failed_and_feedback():
 
             got = await resource.open(out['resourceId'])
             assert got['backend'] == 'memory'
+        finally:
+            feedback.set_sink(prev)
+
+    _run(scenario())
+
+
+def test_fields_mapping_full_chain():
+    """字段映射：自定义物理字段名全链路（put/open/remove/binding/跳过列）。"""
+    async def scenario():
+        store = _GenericStore()
+        resource.register_provider('memmap', _MemoryProvider)
+        resource.configure({
+            'store': store,
+            'schema': {'resource': 'Asset', 'location': 'AssetLoc', 'binding': 'AssetBind'},
+            'fields': {
+                'resource': {'sha1': 'contentHash', 'fileName': 'name', 'mime': 'contentType',
+                             'size': None, 'kind': None},
+                'location': {'resourceId': 'assetId', 'backend': 'store', 'key': 'objectKey',
+                             'status': None, 'priority': None},
+                'binding': {'resourceId': 'assetId', 'businessTable': 'entity', 'businessId': 'entityId',
+                            'userId': None},
+            },
+            'providers': [{'kind': 'memmap'}],
+        })
+
+        out = await resource.put(bytes=b'data', file_name='n.bin', mime='application/x-bin', kind='img',
+                                 bind={'businessTable': 'T', 'businessId': 7, 'userId': 9})
+
+        res = next(r for r in store.rows if r['_schema'] == 'Asset')
+        assert res == {'_schema': 'Asset', '_id': out['resourceId'], 'contentHash': out['sha1'],
+                       'name': 'n.bin', 'contentType': 'application/x-bin'}
+        loc = next(r for r in store.rows if r['_schema'] == 'AssetLoc')
+        assert loc['assetId'] == out['resourceId']
+        assert loc['store'] == 'memmap'
+        assert out['sha1'] in loc['objectKey']
+        assert 'status' not in loc and 'priority' not in loc          # 跳过列不落库
+        bind = next(r for r in store.rows if r['_schema'] == 'AssetBind')
+        assert bind == {'_schema': 'AssetBind', 'assetId': out['resourceId'], 'entity': 'T', 'entityId': '7'}
+        assert 'userId' not in bind                                    # 可选角色 null → 跳过
+
+        got = await resource.open(out['resourceId'])
+        assert got['bytes'] == b'data'
+        assert got['fileName'] == 'n.bin'
+        assert got['mime'] == 'application/x-bin'
+        assert got['backend'] == 'memmap'
+        assert got['key'] == loc['objectKey']
+
+        await resource.remove(out['resourceId'])
+        assert len([r for r in store.rows if r['_schema'] in ('Asset', 'AssetLoc')]) == 0
+
+    _run(scenario())
+
+
+def test_fields_invalid_raises_no_write():
+    """必填/未知 → configure 抛错且零写库。"""
+    store = _GenericStore()
+    base = {'store': store, 'providers': [{'kind': 'memmap'}]}
+    with pytest.raises(ValueError):
+        resource.configure({**base, 'fields': {'resource': {'sha1': None}}})
+    with pytest.raises(ValueError):
+        resource.configure({**base, 'fields': {'location': {'backend': ''}}})
+    with pytest.raises(ValueError):
+        resource.configure({**base, 'fields': {'binding': {'businessId': 1}}})
+    with pytest.raises(ValueError):
+        resource.configure({**base, 'fields': {'bogus': {}}})
+    with pytest.raises(ValueError):
+        resource.configure({**base, 'fields': {'resource': {'bogus': 'x'}}})
+    assert len(store.rows) == 0
+
+
+def test_fields_meta_missing_feedback():
+    """meta 缺失 → 仍出字节 + resource_meta_missing 反馈。"""
+    async def scenario():
+        store = _GenericStore(meta_missing=True)
+        events = []
+        prev = feedback.get_sink()
+        feedback.set_sink(events.append)
+        try:
+            resource.register_provider('memmiss2', _MemoryProvider)
+            resource.configure({'store': store, 'providers': [{'kind': 'memmiss2'}]})
+            out = await resource.put(bytes=b'z', file_name='z.bin', mime='text/plain')
+            got = await resource.open(out['resourceId'])
+            assert got['bytes'] == b'z'
+            assert got['fileName'] is None                             # meta 缺失 → None（调用方兜底）
+            assert got['mime'] is None
+            assert any(e['code'] == 'resourceMetaMissing' for e in events)
         finally:
             feedback.set_sink(prev)
 
