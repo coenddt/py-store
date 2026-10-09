@@ -37,6 +37,7 @@ from . import (
     permission,
     resource,
     schema,
+    secure,
     workflow,
 )
 from . import (
@@ -365,6 +366,11 @@ class Store:
     set_unconfigured_policy = staticmethod(permission.set_unconfigured_policy)
     # 定义层门禁策略（判决唯一在 core）：closed 时仅 internal/白名单可注册或覆盖
     set_meta_policy = staticmethod(schema.set_meta_policy)
+    # 统一安全模式（fail-secure 一键入口；见 secure.py）：同时翻转上下文强制 +
+    # 未配白名单全拒 + 定义注册门禁；admin_roles 为允许改定义的角色（默认仅 internal）
+    secure_mode = staticmethod(secure.secure_mode)
+    is_secure = staticmethod(secure.is_secure)
+    relax_mode = staticmethod(secure.relax_mode)
     # 查询档位（判决唯一在 core）：standard 默认放开 / text2query 功能收缩
     # 进入档即等效强制 ctx；未知档由 core 抛 ValueError 上抛（禁静默回落默认档）
     set_profile = staticmethod(schema.set_profile)

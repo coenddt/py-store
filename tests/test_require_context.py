@@ -165,3 +165,77 @@ def test_require_context_off_restores_fail_open():
     _sc.set_require_context(True)
     _sc.set_require_context(False)
     assert _run(_crud_mod.query('RcModel{title}')) == []
+
+
+# ── secure_mode 统一安全模式（fail-secure 一键入口；见 secure.py） ──
+
+def test_secure_mode_flips_switches_blocks_ctxless():
+    from py_store import secure
+    _mock()
+    secure.secure_mode(admin_roles=['admin'])
+    try:
+        assert secure.is_secure() is True
+        assert _sc.require_context() is True
+        # 开关1 require_context：无 ctx 读写拒绝
+        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+            _run(_crud_mod.query('RcModel{title}'))
+        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+            _run(_crud_mod.insert('RcModel', {'title': 'x'}))
+        # 开关3 meta closed：无 ctx 注册新定义拒绝
+        with pytest.raises(RuntimeError, match='ERR_PERMISSION'):
+            _sc.register({'name': 'RcTmp', 'collection': 'rc_tmp',
+                          'fields': {}, 'relations': {}})
+    finally:
+        secure.relax_mode()
+
+
+def test_secure_mode_admin_register_unconfigured_schema_denied():
+    from py_store import secure
+    _mock()
+    secure.secure_mode(admin_roles=['admin'])
+    try:
+        # register 的定义门禁只认显式 ctx（不读 ContextVar），须显式传入
+        _sc.register({'name': 'RcSecret', 'collection': 'rc_secret', 'timestamps': False,
+                      'fields': {'title': 'string'}, 'relations': {}},
+                     {'userId': 'admin1', 'roles': ['admin']})
+        # 查询面身份走 ContextVar（register 门禁与读写判决的上下文通道不同）
+        perm.set_context({'userId': 'admin1', 'roles': ['admin']})
+        # 开关2 unconfigured=closed：未配白名单，admin 自己也被拒（判决先于物理执行）。
+        # core 抛 ERR_PERMISSION，经 crud/exec._call 归一为 PermissionError（前缀已剥离）。
+        with pytest.raises(perm.PermissionError, match='无访问权限'):
+            _run(_crud_mod.query('RcSecret{title}'))
+        with pytest.raises(perm.PermissionError, match='无写入权限'):
+            _run(_crud_mod.insert('RcSecret', {'title': 'a'}))
+        # 普通用户同样被拒
+        perm.set_context({'userId': 'u2', 'roles': ['user']})
+        with pytest.raises(perm.PermissionError, match='无访问权限'):
+            _run(_crud_mod.query('RcSecret{title}'))
+    finally:
+        secure.relax_mode()
+        perm.set_context(None)
+
+
+def test_secure_mode_internal_passes():
+    from py_store import secure
+    _mock()
+    secure.secure_mode()
+
+    async def _inner():
+        await _crud_mod.insert('RcModel', {'title': '内部写入'})
+        return await _crud_mod.query('RcModel{title}')
+
+    try:
+        items = _run(perm.run_as_internal(_inner))
+        assert len(items) == 1 and items[0]['title'] == '内部写入'
+    finally:
+        secure.relax_mode()
+
+
+def test_secure_mode_relax_restores_fail_open():
+    from py_store import secure
+    _mock()
+    secure.secure_mode()
+    secure.relax_mode()
+    assert secure.is_secure() is False
+    assert _sc.require_context() is False
+    assert _run(_crud_mod.query('RcModel{title}')) == []
