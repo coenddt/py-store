@@ -18,8 +18,12 @@ from py_store import executors, init, scheduler, store
 from py_store import schema as _sc
 
 SRC = 'sch_a'
-FX = (pathlib.Path(__file__).resolve().parent.parent.parent
-      / 'rust-store' / 'fixtures' / 'triggers' / 'cases.json')
+# 本地开发：rust-store 与 py-store 平级（common-store 布局）；CI：checkout 到 workspace 内
+_here = pathlib.Path(__file__).resolve()
+for _root in (_here.parents[2] / 'rust-store', _here.parents[1] / 'rust-store'):
+    if (_root / 'fixtures' / 'triggers' / 'cases.json').exists():
+        break
+FX = _root / 'fixtures' / 'triggers' / 'cases.json'
 _cron_cases = json.loads(FX.read_text(encoding='utf-8'))['cronCases']
 
 _DDL = """
