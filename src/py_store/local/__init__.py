@@ -23,11 +23,12 @@ v1 保证范围，见执行文档 §8-1）。对齐 ``nodejs-store/src/local/ind
 from __future__ import annotations
 
 import pathlib
+from typing import Any
 
 from .handle import create_db
 from .store import read_snapshot, with_dir_lock, write_collections
 
-LOCAL_KIND = 'local'  # noqa: E221  (与 nodejs-store/src/local/index.js 的 LOCAL_KIND 对齐)
+LOCAL_KIND = 'local'
 
 
 def connect(options: dict | None = None) -> dict:
@@ -54,7 +55,7 @@ def connect(options: dict | None = None) -> dict:
 
     async def open_transaction():
         """事务原语：快照隔离（读内存 ``staged``，commit 才落盘）。"""
-        state = {'staged': read_snapshot(root), 'closed': False}
+        state: dict[str, Any] = {'staged': read_snapshot(root), 'closed': False}
 
         def _tx_load():
             return state['staged']
@@ -101,4 +102,4 @@ def connect(options: dict | None = None) -> dict:
     return desc
 
 
-__all__ = ['connect', 'LOCAL_KIND']
+__all__ = ['LOCAL_KIND', 'connect']

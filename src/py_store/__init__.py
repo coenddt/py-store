@@ -31,7 +31,6 @@ from . import (
     datasource,
     ddl,
     feedback,
-    local,
     metadef,
     naming,
     permission,
@@ -48,6 +47,9 @@ from . import (
 )
 from . import (
     load as load,
+)
+from . import (
+    local as local,
 )
 from .ask import AskExhausted as AskExhausted
 from .ask import AskResult as AskResult

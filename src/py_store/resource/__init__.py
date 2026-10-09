@@ -186,7 +186,7 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None):
                 "hint": "检查该 provider 配置与连通性；其余副本不受影响",
             })
     if not await _call(crud.exists, _cfg["schema"]["resource"], {"_id": resource_id}):
-        row = {"_id": resource_id}
+        row: dict[str, Any] = {"_id": resource_id}
         if f["resource"]["sha1"]:
             row[f["resource"]["sha1"]] = sha1
         if f["resource"]["fileName"]:
@@ -206,7 +206,7 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None):
         if fresh:
             await _call(crud.insert_many, _cfg["schema"]["location"], fresh)
     if bind:
-        b = {}
+        b: dict[str, Any] = {}
         if f["binding"]["resourceId"]:
             b[f["binding"]["resourceId"]] = resource_id
         if f["binding"]["businessTable"]:

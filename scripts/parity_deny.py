@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from py_store import workflow  # noqa: E402
+from py_store import workflow
 
 BAD_DEFN = {
     "name": "parityBad",
@@ -19,5 +19,5 @@ BAD_DEFN = {
 try:
     workflow.register(BAD_DEFN)
     sys.stdout.write("OK\n")          # 不应发生；出现即测试判失败
-except Exception as e:  # noqa: BLE001 对拍用途：输出原样文案
+except Exception as e:
     sys.stdout.write(str(e) + "\n")

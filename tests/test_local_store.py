@@ -176,7 +176,7 @@ def test_handle_explicit_null_three_state():
 
 
 def test_handle_aggregate_lookup():
-    box, load, save = _mem_io({
+    _box, load, save = _mem_io({
         'probeUsers': [{'_id': 'pu1', 'name': 'Ada'}],
         'probePosts': [{'_id': 'pp1', 'title': 'P1', 'userId': 'pu1'}],
     })

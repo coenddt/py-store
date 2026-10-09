@@ -149,7 +149,7 @@ async def _loop():
     while True:
         try:
             await tick_once()
-        except Exception as e:  # noqa: BLE001 —— 单轮失败必须告警且循环续跑（禁静默失守）
+        except Exception as e:
             _emit_feedback({
                 'type': 'schedule_tick_failed',
                 'code': 'scheduleTickFailed',

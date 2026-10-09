@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from py_store import init, local, permission, schema, store  # noqa: E402
-from py_store.local.store import read_snapshot  # noqa: E402
+from py_store import init, local, permission, schema, store
+from py_store.local.store import read_snapshot
 
 FIXTURE_JSON = """
 {
@@ -179,7 +179,7 @@ async def run():
 def main():
     try:
         asyncio.run(run())
-    except Exception as e:  # noqa: BLE001 对拍用途：输出原样文案
+    except Exception as e:
         sys.stdout.write("ERR:" + str(e) + "\n")
         sys.exit(1)
 

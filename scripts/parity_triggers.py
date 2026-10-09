@@ -17,8 +17,8 @@ from datetime import datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / 'src'))
 
-from py_store.core import native  # noqa: E402
-from py_store.scheduler import cron_matches  # noqa: E402
+from py_store.core import native
+from py_store.scheduler import cron_matches
 
 FIXTURE = (pathlib.Path(__file__).resolve().parent.parent.parent
            / 'rust-store' / 'fixtures' / 'triggers' / 'cases.json')
