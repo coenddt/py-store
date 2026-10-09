@@ -118,6 +118,9 @@ async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
     connection = await _datasource.resolve_connection(source, _datasource.is_write_cmd(cmd))
+    if _datasource.is_local(connection):
+        # 本地磁盘源：与 Mongo 同路径（复用 exec_mongo；handle 已绑定事务快照或直连 IO）
+        return _to_logical(await _exec_mongo(connection['handle'], _to_mongo(cmd)), cmd)
     if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
         # Mongo 事务视图：db 按命令 database 解析，session 透传给驱动
         db = _datasource.mongo_db(connection['conn'], source, cmd.get('database'))
