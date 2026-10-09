@@ -23,8 +23,8 @@ from collections.abc import Mapping
 
 from . import executors
 from .feedback import emit as _emit_feedback
-from .schema import core as _core
 from .schema import get as _get_schema
+from .schema import get_core
 
 DEFAULT_SOURCE = 'default'
 
@@ -488,7 +488,7 @@ async def exec_sql(source, connection, cmd):
     塑形为 Mongo 驱动等价返回值（见 ``executors.shape_result``），使上层（crud/*）
     对 Mongo / SQL 两条路径无感。
     """
-    plan = _core.dialect_translate(_kind_of(connection), cmd)
+    plan = get_core().dialect_translate(_kind_of(connection), cmd)
     # Host 兜底：core 标记了无法安全下推的组合（如 $lookup 子 $limit 每父 top-N）时，
     # 绝不执行「缺少该段」的 SQL（会静默返回错误结果），改为显式报错，由调用方降级重查。
     # 先于执行器检查 —— 命令本身不可安全下推时，报下推不支持而非「执行器未接入」。
@@ -542,7 +542,7 @@ async def execute_raw(source, sql, params=None, is_write=None):
         raise RawSqlError(
             f'数据源 {source} 不是 SQL 源（原生 SQL 入口仅支持 mysql/postgres/sqlite）')
     try:
-        compiled = _core.raw_stmt_compile(_kind_of(conn0), sql, params, is_write)
+        compiled = get_core().raw_stmt_compile(_kind_of(conn0), sql, params, is_write)
     except Exception as e:
         raise RawSqlError(str(e)) from e
     conn = await resolve_connection(source, is_write=compiled['isWrite'])

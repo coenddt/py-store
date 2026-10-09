@@ -2,7 +2,7 @@
 
 职责切分（判据唯一在 core）：
   - IO 在本模块：读 store.config.json、递归 walk 定义目录、读 JSON 文件；
-  - 纯判决在 core：``schema.core.plan_load``（db 归属 / 路径→落点 / 主从 / 查重）。
+  - 纯判决在 core：``schema.get_core().plan_load``（db 归属 / 路径→落点 / 主从 / 查重）。
 本模块**不含**任何落点/主从判据（禁双端漂移；总纲 §5 + 06 §4.1）。
 
 对标 nodejs-store/src/load.js（双端同名同义实现）。
@@ -65,7 +65,7 @@ def _walk(dir_path, root, out):
 
 def plan_load(config, files):
     """纯规划（转调 core；判决唯一在 core）"""
-    return schema.core.plan_load(config, files)
+    return schema.get_core().plan_load(config, files)
 
 
 def load_defs(config=None, ctx=None, base_dir=None):

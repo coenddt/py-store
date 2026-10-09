@@ -19,7 +19,12 @@ import contextvars
 import inspect
 from contextlib import contextmanager
 
-from .core import core
+from .schema import get_core
+
+# R2（03 §4.2）：core 引用**调用点现场取** ``schema.get_core()``——作用域内自动走本作用域
+# 派生视图（策略覆盖只作用于本作用域），未进入作用域回退 base。以函数导入方式取 ``get_core``
+# （非 ``import schema``）以规避 ``_model(schema)`` 形参对模块名的遮蔽（node 侧同因改用
+# ``schemaMod``，见 03 步骤 3 偏差留痕）；禁模块级缓存 core 引用。
 
 _ctx: contextvars.ContextVar = contextvars.ContextVar('py_store_ctx', default=None)
 
@@ -87,37 +92,37 @@ def _model(schema):
 
 
 def can_read_schema(schema, ctx):
-    return core.can_read(_model(schema), ctx)
+    return get_core().can_read(_model(schema), ctx)
 
 
 def can_write_schema(schema, ctx):
-    return core.can_write(_model(schema), ctx)
+    return get_core().can_write(_model(schema), ctx)
 
 
 def should_inject_owner_condition(schema, ctx):
-    return core.should_inject_owner(_model(schema), ctx)
+    return get_core().should_inject_owner(_model(schema), ctx)
 
 
 def merge_owner_condition(schema, ctx, condition):
-    out = core.merge_owner_condition(_model(schema), ctx, condition)
+    out = get_core().merge_owner_condition(_model(schema), ctx, condition)
     # core 在「不注入」时返回 null（无法区分原条件为 null）→ 原样返回入参条件
     return condition if out is None else out
 
 
 def get_readable_fields(schema, ctx):
-    return core.readable_fields(_model(schema), ctx)
+    return get_core().readable_fields(_model(schema), ctx)
 
 
 def get_readable_relations(schema, ctx):
-    return core.readable_relations(_model(schema), ctx)
+    return get_core().readable_relations(_model(schema), ctx)
 
 
 def get_writable_fields(schema, ctx):
-    return core.writable_fields(_model(schema), ctx)
+    return get_core().writable_fields(_model(schema), ctx)
 
 
 def filter_writable_data(schema, ctx, data):
-    return core.filter_writable_data(_model(schema), ctx, data)
+    return get_core().filter_writable_data(_model(schema), ctx, data)
 
 
 # ─── RBAC 动态策略（core 判决；本模块零判决，仅透传） ─────────
@@ -125,32 +130,32 @@ def filter_writable_data(schema, ctx, data):
 
 def set_rbac(policy):
     """注入/清除 RBAC 策略。dict = 注入（解析失败 core 抛错）；None = 清除关闭"""
-    return core.set_rbac(policy)
+    return get_core().set_rbac(policy)
 
 
 def rbac_enabled():
     """RBAC 策略是否已注入"""
-    return core.rbac_enabled()
+    return get_core().rbac_enabled()
 
 
 def rbac_can(model, action, ctx=None):
     """RBAC 动作判决：action ∈ {read, insert, update, remove}；RBAC 不介入 → True"""
-    return core.rbac_can(_model(model), action, ctx)
+    return get_core().rbac_can(_model(model), action, ctx)
 
 
 def rbac_readable_fields(model, ctx=None):
     """RBAC 叠加后的可读字段集（静态 ∩ readFields）；无 ctx → None 不裁剪"""
-    return core.rbac_readable_fields(_model(model), ctx)
+    return get_core().rbac_readable_fields(_model(model), ctx)
 
 
 def rbac_writable_fields(model, ctx=None):
     """RBAC 叠加后的可写字段集（静态 ∩ writeFields）；无 ctx → None 不裁剪"""
-    return core.rbac_writable_fields(_model(model), ctx)
+    return get_core().rbac_writable_fields(_model(model), ctx)
 
 
 def rbac_row_condition(model, action, ctx=None):
     """RBAC 行级条件（ownerOnly/condition 的 OR 合并体）；action ∈ {read, update, remove}"""
-    return core.rbac_row_condition(_model(model), action, ctx)
+    return get_core().rbac_row_condition(_model(model), action, ctx)
 
 
 def set_exempt_roles(roles):
@@ -159,17 +164,17 @@ def set_exempt_roles(roles):
     判决唯一在 core：本层仅透传配置。默认空——无豁免（清单化语义，
     super_admin/admin 不再默认放行，迁移见迁移指南）。
     """
-    return core.set_exempt_roles(roles)
+    return get_core().set_exempt_roles(roles)
 
 
 def set_deny_write_roles(roles):
     """拒写角色清单（命中者一切写路径拒绝，读不受影响）。默认空——无拒写。"""
-    return core.set_deny_write_roles(roles)
+    return get_core().set_deny_write_roles(roles)
 
 
 def set_unconfigured_policy(policy):
     """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）。"""
-    return core.set_unconfigured_policy(policy)
+    return get_core().set_unconfigured_policy(policy)
 
 
 # ─── 自定义错误 ──────────────────────────────────────────────

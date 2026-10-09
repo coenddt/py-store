@@ -23,7 +23,7 @@ from .crud.exec import _call, _sources_of, run_atomic
 from .crud.id import _new_id_pool
 from .feedback import emit as _emit_feedback
 from .permission import get_context
-from .schema import core as _core
+from .schema import get_core
 from .schema import has as _schema_has
 from .schema import register as _schema_register
 from .schema import require_context as _schema_require_context
@@ -293,7 +293,7 @@ def validate_planable(defn):
     """注册期「只校验不绑参」可规划性校验 → 错误列表（空 = 通过）。纯内存、无 IO、无参数值绑定。
 
     ① 结构性可规划：对每个 query 步骤的 gql 调 core 门面
-       ``_core.build_pipeline(gql, {}, None)``（params 传 {} = 不绑参；ctx 传 None）；
+       ``get_core().build_pipeline(gql, {}, None)``（params 传 {} = 不绑参；ctx 传 None）；
        不可规划 → core 抛异常，此处汇聚为注册期错误。
     ② 参数键完整：返回体 ``ast`` 暴露 ``params``（槽位→@key，含嵌套关系）；
        gql 引用的每个 ``@key`` 须在 ``step['params']`` 顶层存在。
@@ -314,7 +314,7 @@ def validate_planable(defn):
             continue
         where = f'steps[{i}]'
         try:
-            built = _core.build_pipeline(gql, {}, None)
+            built = get_core().build_pipeline(gql, {}, None)
         except Exception as e:  # 透传 core 文案，与 node 逐字节对齐
             errors.append(f'{where}: gql 不可规划: {e}')
             continue
@@ -362,14 +362,14 @@ def register(defn, ctx=None):
     """注册工作流定义（注册即静态校验，白名单外显式 Err；name 全局唯一）。
 
     ``ctx``：可选定义层门禁上下文（``{'internal': True}`` / ``{'roles': [...]}``）。
-    判决唯一在 core（``_core.can_register``，与 ``schema.register`` 同一 MetaPolicy）；
+    判决唯一在 core（``get_core().can_register``，与 ``schema.register`` 同一 MetaPolicy）；
     默认 Open → 全放行。Closed 且 ctx 不过 → 抛 ``ERR_PERMISSION:``（定义不写入）。
 
     同名同形重复注册幂等通过（对齐 core schema.register 的复跑语义——场景 harness
     每后端复跑同一批用例时必须可重入）；同名异形显式 Err（禁止静默覆盖已注册定义）。
     """
     # 定义层门禁：判决先于静态校验（拒绝即返回，零副作用；与 schema.register 同序）
-    if not _core.can_register(ctx):
+    if not get_core().can_register(ctx):
         name = defn.get('name') if isinstance(defn, dict) else ''
         raise WorkflowError(f'ERR_PERMISSION: 无权注册或覆盖工作流定义 {name or ""}')
     errors = validate_defn(defn)
@@ -545,7 +545,7 @@ def _prescan_sources(defn, route_override, now, ctx):
             continue
         try:
             pool = _new_id_pool(step['model'], step['data'])
-            plan = _call(lambda s=step, p=pool: _core.plan_mutation(
+            plan = _call(lambda s=step, p=pool: get_core().plan_mutation(
                 s['model'], s['data'], now, p, ctx, route_override))
             sources |= _sources_of(plan)
         except Exception as e:  # 预扫失败降级裸跑（显式声明，禁静默）

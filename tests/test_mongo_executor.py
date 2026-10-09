@@ -19,7 +19,7 @@ from py_store import schema as _sc
 from py_store.executors.mongo import _explicit_null, exec_mongo
 
 # 注意：`py_store.crud` 把 `mutation` 函数重导出为同名属性，`from ... import mutation`
-# 拿到的是函数而非模块 —— 需用 importlib 取真实子模块才能 monkeypatch 内部 `_core`。
+# 拿到的是函数而非模块 —— 需用 importlib 取真实子模块才能 monkeypatch 内部 `get_core`。
 _mut = import_module('py_store.crud.mutation')
 
 
@@ -116,7 +116,7 @@ def test_mutation_emits_mutation_degraded(monkeypatch):
                 }],
             }
 
-    monkeypatch.setattr(_mut, '_core', _FakeCore)
+    monkeypatch.setattr(_mut, 'get_core', lambda: _FakeCore)
 
     events = []
     feedback.set_sink(events.append)

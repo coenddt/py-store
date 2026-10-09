@@ -1,8 +1,8 @@
 """Mutation / Upsert / 原生聚合 —— 规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
 
 from ..feedback import emit as _emit_feedback
-from ..schema import core as _core
 from ..schema import get as _get_schema
+from ..schema import get_core
 from .exec import (
     _call,
     _ctx,
@@ -17,7 +17,7 @@ from .id import _generate_id, _new_id_pool
 
 async def _mutation_one(schema_name, data, now, route_override=None):
     """mutation 单条：规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
-    plan = _call(lambda: _core.plan_mutation(
+    plan = _call(lambda: get_core().plan_mutation(
         schema_name, data, now, _new_id_pool(schema_name, data), _ctx(), route_override))
 
     # §11.4 静默点收口：规划期降级（如关系不可读被跳过）走统一反馈通道，禁止静默失守
@@ -36,7 +36,7 @@ async def _mutation_one(schema_name, data, now, route_override=None):
 
         if not root_result:
             return None
-        return _call(lambda: _core.apply_write_defaults(schema_name, root_result))
+        return _call(lambda: get_core().apply_write_defaults(schema_name, root_result))
 
     # 单一 SQL 源 → 步骤序列整体事务化（同连接同事务，任一步失败整体回滚）；
     # Mongo 源 / 跨源步骤按原样顺序执行（非原子边界见 README「事务边界」）
@@ -75,8 +75,8 @@ async def upsert(schema_name, condition, data, options=None, route_override=None
     与 mutation 不同，upsert 需要调用方显式提供 match 条件，不处理父子关系。
     """
     s = _get_schema(schema_name)
-    plan = _call(lambda: _core.plan_upsert(
+    plan = _call(lambda: get_core().plan_upsert(
         schema_name, condition, data, options, _now_for(schema_name),
         _generate_id(s) if s['idPrefix'] else '', _ctx(), route_override))
     result = await _exec(plan['command'])
-    return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
+    return _call(lambda: get_core().apply_write_defaults(schema_name, result)) if result else None

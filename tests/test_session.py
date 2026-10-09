@@ -346,7 +346,7 @@ def test_update_probe_and_write_same_tx(monkeypatch):
     datasource.set_connections({'sess_probe': desc})
 
     # 借用真实 core 产出规范命令，再以规划桩注入「首次 needsProbe → 重入 command」
-    plan = write_mod._core.plan_update(
+    plan = write_mod.get_core().plan_update(
         'SessProbe', {'_id': 'p1'}, {'v': 'b'}, None, 0,
         {'internal': True}, None, None, None)
     write_cmd = plan['command']
@@ -370,7 +370,8 @@ def test_update_probe_and_write_same_tx(monkeypatch):
         def apply_write_defaults(_name, result):
             return result
 
-    monkeypatch.setattr(write_mod, '_core', _ProbeStub())
+    stub = _ProbeStub()
+    monkeypatch.setattr(write_mod, 'get_core', lambda: stub)
 
     async def scenario():
         return await store.update('SessProbe', {'_id': 'p1'}, {'v': 'b'})

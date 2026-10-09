@@ -72,7 +72,7 @@ from .sync import sync_schema
 
 def _build_pipeline(gql, params=None):
     """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
-    return schema.core.build_pipeline(
+    return schema.get_core().build_pipeline(
         gql, params if params is not None else {}, permission.get_context())
 
 

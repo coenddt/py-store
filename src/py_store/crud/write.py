@@ -1,7 +1,7 @@
 """写路径 —— 单条/批量插入、更新、删除归档、存在性与计数"""
 
-from ..schema import core as _core
 from ..schema import get as _get_schema
+from ..schema import get_core
 from .exec import (
     _call,
     _ctx,
@@ -28,7 +28,7 @@ async def insert(schema_name, data, route_override=None):
     """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``）"""
     s = _get_schema(schema_name)
     now = _now_for(schema_name)
-    plan = _call(lambda: _core.plan_insert(
+    plan = _call(lambda: get_core().plan_insert(
         schema_name, data, now, _generate_id(s) if s['idPrefix'] else '', _ctx(),
         route_override))
 
@@ -68,7 +68,7 @@ async def insert_many(schema_name, docs, route_override=None):
         raise ValueError(
             'AUTOINCREMENT_NOT_SUPPORTED: insert_many 不支持 autoincrement schema'
             '（批量自增值回读不可靠）；请逐条 insert 或显式提供 _id')
-    plan = _call(lambda: _core.plan_insert_many(
+    plan = _call(lambda: get_core().plan_insert_many(
         schema_name,
         docs,
         _now_for(schema_name),
@@ -94,7 +94,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
     """
     now = _now_for(schema_name)
     ctx = _ctx()
-    first = _call(lambda: _core.plan_update(
+    first = _call(lambda: get_core().plan_update(
         schema_name, condition, data, options, now, ctx, None, None, route_override))
     sources = _sources_of(first)
 
@@ -103,7 +103,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
         before = None
         if out.get('needsProbe'):
             before = await _exec(out['needsProbe'])          # 探针文档 = before（含 onFields 投影）
-            out = _call(lambda: _core.plan_update(
+            out = _call(lambda: get_core().plan_update(
                 schema_name, condition, data, options, now, ctx,
                 before is not None, before, route_override))
         # 触发链触及源并入原子性声明（update 的 triggers 二次规划才产出；跨源 → non_atomic_write）
@@ -114,7 +114,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
         if out.get('triggers') and result:
             await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
                                executed=set())
-        return _call(lambda: _core.apply_write_defaults(schema_name, result)) if result else None
+        return _call(lambda: get_core().apply_write_defaults(schema_name, result)) if result else None
 
     return await run_atomic(sources, _do)
 
@@ -160,7 +160,7 @@ def _fill_pre_ids(command, ids):
 
 async def update_many(schema_name, condition, data, route_override=None):
     """批量更新（支持原生操作符）"""
-    out = _call(lambda: _core.plan_update_many(
+    out = _call(lambda: get_core().plan_update_many(
         schema_name, condition, data, _now_for(schema_name), _ctx(), route_override))
     result = await _exec_with_pre(out['command'])
     return {'modifiedCount': result.modified_count}
@@ -174,7 +174,7 @@ async def remove(schema_name, condition, route_override=None):
     remove 触发链（A5：未声明触发器时无此路径，行为不变）：before = 归档 findCommand
     首条（被删文档代表值、全字段）；未删到（docs 空）不触发，与 update 0 行命中语义一致。
     """
-    out = await _plan_with_probe(lambda found, doc: _call(lambda: _core.plan_remove(
+    out = await _plan_with_probe(lambda found, doc: _call(lambda: get_core().plan_remove(
         schema_name, condition, _ctx(), found, doc, route_override)))
 
     async def _do_remove():
@@ -189,7 +189,7 @@ async def remove(schema_name, condition, route_override=None):
             find_cmd = out['findCommand']
             docs = await (_fill_pre_ids(find_cmd, ids) if ids is not None else _exec(find_cmd))
             if docs:
-                arch = _call(lambda: _core.plan_archive_docs(
+                arch = _call(lambda: get_core().plan_archive_docs(
                     schema_name, docs, _now_for(schema_name), route_override))
                 await _exec(arch['command'])
                 archived_count = len(docs)
@@ -210,12 +210,12 @@ async def remove(schema_name, condition, route_override=None):
 
 async def exists(schema_name, condition, route_override=None):
     """判断是否存在"""
-    cmd = _call(lambda: _core.plan_exists(schema_name, condition, route_override))
+    cmd = _call(lambda: get_core().plan_exists(schema_name, condition, route_override))
     doc = await _exec(cmd)
     return doc is not None
 
 
 async def count(schema_name, filter=None, route_override=None):
     """统计符合条件的文档数量"""
-    cmd = _call(lambda: _core.plan_count(schema_name, filter, _ctx(), route_override))
+    cmd = _call(lambda: get_core().plan_count(schema_name, filter, _ctx(), route_override))
     return await _exec(cmd)

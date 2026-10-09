@@ -434,9 +434,9 @@ def test_exec_sql_unsupported_raises_and_emits():
         def dialect_translate(self, kind, cmd):
             return {'unsupported': [{'code': 'lookupTopN'}], 'warnings': ['w1']}
 
-    old_core, old_sink = ds._core, feedback._sink
+    old_core, old_sink = ds.get_core, feedback._sink
     events = []
-    ds._core = _FakeCore()
+    ds.get_core = _FakeCore
     feedback.set_sink(events.append)
     try:
         _run(ds.exec_sql('mysql_a', {'kind': 'mysql', 'exec': None},
@@ -446,6 +446,6 @@ def test_exec_sql_unsupported_raises_and_emits():
     else:
         raise AssertionError('应抛出 PushdownUnsupportedError')
     finally:
-        ds._core = old_core
+        ds.get_core = old_core
         feedback.set_sink(old_sink)
     assert events and events[0]['type'] == 'sql_pushdown_unsupported'

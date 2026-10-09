@@ -4,12 +4,12 @@
 
     用户问题 → ① describe_for_ai(ctx) 权限过滤摘要
              → ② LLM（注入式客户端）翻译为 {"gql","params"}
-             → ③ with text2query(): 规划期校验（core 判决：语法/档位/权限/硬限）
+             → ③ text2query 档位视图内规划期校验（core 判决：语法/档位/权限/硬限）
              → ④ crud.query 执行（只读）
              → ⑤ 失败结构化回喂 LLM 重试（≤ max_retries 次），耗尽抛 AskExhausted
 
 护栏面（D5，服务端硬编码，LLM 零可触）：
-  - 档位 = text2query：本模块硬编码 ``with text2query():`` 包裹全部执行；
+  - 档位 = text2query：本模块硬编码以作用域档位视图（with_scope + with_policy）包裹全部执行；
   - 用户上下文 = ctx：服务端注入参数，经 ``permission.scoped_context`` 进执行面，
     绝不进入任何 LLM 消息；core 档位门禁强制无 ctx 即拒（fail-secure，A4）；
   - route_override = None：硬编码（CWE-639；Host 兜底 ``_guard_route_override`` 双保险）；
@@ -21,8 +21,10 @@ LLM 输出永远当不可信输入：唯一产出形状 ``{"gql","params"}`` 单
 不可能变成不受控命令。一切失败结构化显式暴露（no-error-masking：是错就是错，
 禁降级、禁返回空结果——「问数失败」就是失败，交上层裁决，D4）。
 
-并发限制（如实声明）：``text2query`` 档位（core 单例）与反馈 sink 为进程级全局，
-同一进程内并发调用 ``ask()`` 会互相串扰，宿主需串行化（或每任务独享进程/事件循环）。
+并发隔离（R2）：``text2query`` 档位与反馈 sink 不再全局切换，改由 ``with_scope`` 承载
+「一请求一档位视图 / 一 sink」（派生视图见 rust-store 02，作用域形态见 03 §4.4）；
+同一进程内并发调用 ``ask()`` 各自独立、互不串扰——「宿主须串行化 / 每任务独享进程」
+的要求随之解除（fail-open 姿态与 core 判决语义均不变）。
 """
 
 from __future__ import annotations
@@ -32,9 +34,8 @@ import json
 from dataclasses import dataclass, field
 
 from . import crud, feedback, permission, schema
-from .core import core
 from .llm import get_llm as _get_llm
-from .schema import text2query
+from .scope import with_scope
 
 __all__ = ['AskExhausted', 'AskResult', 'ask', 'describe_for_ai']
 
@@ -128,16 +129,16 @@ def describe_for_ai(ctx=None) -> list[dict]:
         if ctx is None:
             summaries.append({'name': name, 'fields': sorted(mirror['fields'])})
             continue
-        if not core.can_read(name, ctx):
+        if not permission.can_read_schema(name, ctx):
             continue
-        readable = set(core.readable_fields(name, ctx))
+        readable = set(permission.get_readable_fields(name, ctx))
         fields = {fname: _field_type(fdef)
                   for fname, fdef in mirror['fields'].items() if fname in readable}
         for fname in sorted(readable - set(mirror['fields'])):
             # core 自动补的时间戳字段（createdAt/updatedAt）不在 Host 镜像——类型显式留白
             fields[fname] = None
         relations = {}
-        readable_rels = set(core.readable_relations(name, ctx))
+        readable_rels = set(permission.get_readable_relations(name, ctx))
         for rname, rdef in mirror['relations'].items():
             if rname in readable_rels:
                 relations[rname] = {'model': rdef.get('model'), 'type': rdef.get('type')}
@@ -239,6 +240,45 @@ def _error_from_exception(e, round_events):
     return {'code': 'planError', 'message': str(e)}
 
 
+async def _ask_body(*, client, messages, attempts, events, round_events, max_retries):
+    """ask 执行主体（作用域内运行：档位视图 / 反馈 sink / 用户 ctx 均已就位）。
+
+    R2 起本函数（及整个执行面）**不得**出现 ``set_profile`` / ``set_sink`` / ``set_meta``
+    全局切换——档位与 sink 由 ``with_scope`` 承载（03 §4.4，grep 核销为零）。
+    """
+    for _ in range(1 + max_retries):
+        round_events.clear()
+        # LLM 客户端异常（llmNetworkError/llmHttpError/llmEmptyContent）原样穿透
+        raw = await client(messages)
+        attempt = {'llm_raw': raw}
+        try:
+            gql, params = _parse_llm_output(raw)
+        except _BadLlmOutput as e:
+            attempt['error'] = e.detail
+            attempts.append(attempt)
+            messages.append({'role': 'assistant', 'content': raw})
+            messages.append({'role': 'user', 'content': json.dumps(
+                {'error': e.detail}, ensure_ascii=False)})
+            continue
+        attempt['gql'] = gql
+        attempt['params'] = params
+        try:
+            # route_override 硬编码 None（受信参数，禁 AI 侧指定，D5/CWE-639）
+            data = await crud.query(gql, params, None)
+        except Exception as e:
+            attempt['error'] = _error_from_exception(e, round_events)
+            attempts.append(attempt)
+            messages.append({'role': 'assistant', 'content': raw})
+            messages.append({'role': 'user', 'content': json.dumps(
+                {'error': attempt['error']}, ensure_ascii=False)})
+            continue
+        attempt['rows'] = len(data)
+        attempts.append(attempt)
+        return AskResult(data=data, attempts=attempts, events=events)
+    # 循环走完（重试耗尽）→ None，由入口抛 AskExhausted
+    return None
+
+
 async def ask(question: str, *, llm, ctx: dict, max_retries: int = 3,
               knowledge: str | None = None) -> AskResult:
     """AI 问数唯一入口（L1 只读）：自然语言 → LLM 翻译 → 受控沙箱执行 → 结构化回喂。
@@ -284,39 +324,16 @@ async def ask(question: str, *, llm, ctx: dict, max_retries: int = 3,
         events.append(event)
         round_events.append(event)
 
-    prev_sink = feedback.get_sink()
-    feedback.set_sink(_collect)
-    try:
-        with text2query(), permission.scoped_context(ctx):
-            for _ in range(1 + max_retries):
-                round_events.clear()
-                # LLM 客户端异常（llmNetworkError/llmHttpError/llmEmptyContent）原样穿透
-                raw = await client(messages)
-                attempt = {'llm_raw': raw}
-                try:
-                    gql, params = _parse_llm_output(raw)
-                except _BadLlmOutput as e:
-                    attempt['error'] = e.detail
-                    attempts.append(attempt)
-                    messages.append({'role': 'assistant', 'content': raw})
-                    messages.append({'role': 'user', 'content': json.dumps(
-                        {'error': e.detail}, ensure_ascii=False)})
-                    continue
-                attempt['gql'] = gql
-                attempt['params'] = params
-                try:
-                    # route_override 硬编码 None（受信参数，禁 AI 侧指定，D5/CWE-639）
-                    data = await crud.query(gql, params, None)
-                except Exception as e:
-                    attempt['error'] = _error_from_exception(e, round_events)
-                    attempts.append(attempt)
-                    messages.append({'role': 'assistant', 'content': raw})
-                    messages.append({'role': 'user', 'content': json.dumps(
-                        {'error': attempt['error']}, ensure_ascii=False)})
-                    continue
-                attempt['rows'] = len(data)
-                attempts.append(attempt)
-                return AskResult(data=data, attempts=attempts, events=events)
-    finally:
-        feedback.set_sink(prev_sink)
+    # R2（03 §4.4）：一次性派生 text2query 档位视图，档位与反馈 sink 随作用域承载——
+    # 不再全局 set_profile / set_sink，「进入即改进程档位 + 退出恢复」的串扰根源随之消除。
+    view = schema.get_core().with_policy({'profile': 'text2query'})
+    # sink：本作用域 emit 的事件只进本次 events（feedback.emit 优先取 current_scope().sink）；
+    # meta（ns 标签）不在此伪造——ask 无 tenant/env 入参，沿用进程级 feedback.set_meta 注入值。
+    # ctx 经 permission.scoped_context 注入执行面（core 档位门禁强制 ctx，fail-secure，A4）
+    with with_scope(view, sink=_collect), permission.scoped_context(ctx):
+        result = await _ask_body(
+            client=client, messages=messages, attempts=attempts,
+            events=events, round_events=round_events, max_retries=max_retries)
+    if result is not None:
+        return result
     raise AskExhausted(attempts, events)

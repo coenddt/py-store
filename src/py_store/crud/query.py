@@ -5,8 +5,7 @@ import asyncio
 import inspect
 
 from ..feedback import emit as _emit_feedback
-from ..schema import core as _core
-from ..schema import get_async_fn, get_profile
+from ..schema import get_async_fn, get_core, get_profile
 from .exec import (
     _PROFILE_HINT,
     ProfileViolation,
@@ -50,7 +49,7 @@ async def _run_query_plan(plan):
             return []
         cmd2 = resolve_placeholders(plan['commands'][1], ids=ids)
         items = await _exec(cmd2)
-        return _core.restore_sort_order(items, ids, plan.get('sort'))['items']
+        return get_core().restore_sort_order(items, ids, plan.get('sort'))['items']
     return await _exec(plan['commands'][0])
 
 
@@ -59,7 +58,7 @@ async def _finalize(plan, items):
     post = plan.get('postprocess')
     if not post:
         return items
-    prepared = _core.prepare_query(post, items, _ctx())
+    prepared = get_core().prepare_query(post, items, _ctx())
     for ref in prepared['fnRefs']:
         fn = get_async_fn(ref)
         if not fn:
@@ -67,7 +66,7 @@ async def _finalize(plan, items):
         out = fn(prepared['items'], _ctx())
         if inspect.isawaitable(out):
             await out
-    return _core.strip_query(post, prepared['items'])['items']
+    return get_core().strip_query(post, prepared['items'])['items']
 
 
 async def query(gql, params=None, route_override=None):
@@ -82,7 +81,7 @@ async def query(gql, params=None, route_override=None):
     注意：``route_override`` 为**受信服务端参数**，禁止透传用户输入（否则可被用于跨源路由，CWE-639）。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: _core.plan_query(
+    plan = _call(lambda: get_core().plan_query(
         gql, params if params is not None else {}, _ctx(), route_override))
     return await _finalize(plan, await _run_query_plan(plan))
 
@@ -94,7 +93,7 @@ async def query_one(gql, params=None, route_override=None):
     大集合不再全量取回后取首条（对齐 PyMongo ``find_one`` 的 limit-1 语义）。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: _core.plan_query_one(
+    plan = _call(lambda: get_core().plan_query_one(
         gql, params if params is not None else {}, _ctx(), route_override))
     items = await _finalize(plan, await _run_query_plan(plan))
     return items[0] if items else None
@@ -113,7 +112,7 @@ async def _run_federated_unit(unit):
             return []
         cmd2 = resolve_placeholders(commands[1], ids=ids)
         items = await _exec_on(unit['source'], cmd2)
-        return _core.restore_sort_order(items, ids, unit.get('sort'))['items']
+        return get_core().restore_sort_order(items, ids, unit.get('sort'))['items']
     return await _exec_on(unit['source'], commands[0])
 
 
@@ -128,7 +127,7 @@ async def query_federated(gql, params=None):
     每源取数上限 ``MAX_FEDERATION_ROWS`` 由 core 强制（超限即报错，拒绝静默全表拉取）；
     无法下推的分页/排序进 ``plan['degraded']`` 并告警，不阻断查询。
     """
-    plan = _call(lambda: _core.plan_federated(
+    plan = _call(lambda: get_core().plan_federated(
         gql, params if params is not None else {}, _ctx()))
 
     for d in plan.get('degraded') or []:
@@ -138,7 +137,7 @@ async def query_federated(gql, params=None):
     results = await asyncio.gather(
         *(_run_federated_unit(u) for u in plan.get('sources') or []))
 
-    merged = _call(lambda: _core.merge_federated(plan, results))
+    merged = _call(lambda: get_core().merge_federated(plan, results))
     return await _finalize(plan, merged)
 
 
@@ -152,7 +151,7 @@ async def query_with_count(gql, params=None, route_override=None):
     pageSize 上限 5000，防止拖库。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: _core.plan_query_with_count(
+    plan = _call(lambda: get_core().plan_query_with_count(
         gql, params if params is not None else {}, _ctx(), None, route_override))
     items = await _finalize(plan, await _run_query_plan(plan))
     total = await _exec(plan['countCommand'])

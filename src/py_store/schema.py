@@ -37,7 +37,7 @@ from contextlib import contextmanager
 
 from .core import core, native
 from .feedback import emit as _emit_feedback
-from .scope import current_scope
+from .scope import current_scope, with_scope
 
 # 缓存内置 list 类型（本模块的 list() 函数会遮蔽内置名）
 _LIST_TYPES = (list, tuple)
@@ -139,7 +139,7 @@ def register(defn, ctx=None):
     落点经 ``_loc_of`` 显式注入（与 nodejs-store store.register 同构）：01 起 core 不再
     解析定义内 ``datasource``/``database``/``schema``，须经 Location 传入否则 source 恒 default。
     """
-    core.register_batch(
+    get_core().register_batch(
         [{'defn': _to_core_defn(defn), 'location': _loc_of(defn)}],
         ctx,
     )
@@ -155,7 +155,7 @@ def _mirror(defn):
         # 注2：仅「可调用」才走内嵌绑定；纯 JSON `"fn": true`（bool）不在此绑定，
         #      由 assert_fns_covered 从 L2 实现池解析绑定（否则会绑定出坏回调）。
         if callable(val.get('fn')):
-            core.set_fn(core_key, val['fn'])
+            get_core().set_fn(core_key, val['fn'])
         if callable(val.get('asyncFn')):
             _async_fns[core_key] = val['asyncFn']
         # 镜像保留声明元数据（callable 白名单外天然剔除）：
@@ -216,7 +216,7 @@ def register_batch(items, ctx=None):
     对**主定义**做 Host 元数据镜像（从定义 ``replica: true`` 是链路声明，非独立结构，不入镜像）。
     落点**不进 defn**（定义文件零落点）。
     """
-    core.register_batch(
+    get_core().register_batch(
         [{'defn': _to_core_defn(it['defn']), 'location': it['location']} for it in items],
         ctx,
     )
@@ -236,7 +236,7 @@ def get(name):
 
 def has(name):
     """检查 schema 是否已注册（core 侧判定，含归档表）"""
-    return core.has(name)
+    return get_core().has(name)
 
 
 def clear_schemas():
@@ -246,7 +246,7 @@ def clear_schemas():
     只清 schema 集合，**不动** ``require_context`` / ``profile`` 等配置开关
     （各清各的，与 ``clear_fns`` 对称）。
     """
-    core.clear_schemas()
+    get_core().clear_schemas()
     _schemas.clear()
     _async_fns.clear()
     _dup_signatures.clear()
@@ -264,7 +264,7 @@ def list():
     去重是纵深防御的第二层：一旦检出重复即说明上游（register/core）失守，
     去重同时 emit 告警（同签名只告警一次），禁静默。
     """
-    names = core.list()
+    names = get_core().list()
     seen = set()
     out = []
     for name in names:
@@ -296,22 +296,22 @@ def set_require_context(require=True):
     内部调用（索引创建、归档回填、后台任务等）须在 ``run_as_internal`` 中执行，
     或显式传 ``{'internal': True}`` 上下文。
     """
-    core.set_require_context(bool(require))
+    get_core().set_require_context(bool(require))
 
 
 def set_exempt_roles(roles):
     """豁免角色清单（命中者在一切判决环节直接放行）。默认空——无豁免（清单化语义）"""
-    core.set_exempt_roles(roles)
+    get_core().set_exempt_roles(roles)
 
 
 def set_deny_write_roles(roles):
     """拒写角色清单（命中者一切写路径拒绝，读不受影响）。默认空——无拒写"""
-    core.set_deny_write_roles(roles)
+    get_core().set_deny_write_roles(roles)
 
 
 def set_unconfigured_policy(policy):
     """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）"""
-    core.set_unconfigured_policy(policy)
+    get_core().set_unconfigured_policy(policy)
 
 
 def set_meta_policy(closed, roles):
@@ -319,12 +319,12 @@ def set_meta_policy(closed, roles):
 
     判决唯一在 core；默认 Open（`register` 无 ctx 亦放行，保既有兼容）。
     """
-    core.set_meta_policy(bool(closed), roles)
+    get_core().set_meta_policy(bool(closed), roles)
 
 
 def require_context():
     """「上下文强制」开关当前值"""
-    return core.require_context()
+    return get_core().require_context()
 
 
 def set_profile(profile):
@@ -332,28 +332,30 @@ def set_profile(profile):
     'text2query'（功能收缩 + 硬限制）
 
     判决唯一在 core；未知档位由 core 抛 ValueError 上抛（禁静默回落到默认档）。
+    作用域内作用于本作用域视图（视图只读：写类调用由 core 守卫拦 ERR_POLICY_VIEW_READONLY）。
     """
-    core.set_profile(profile)
+    get_core().set_profile(profile)
 
 
 def get_profile():
-    """当前档位字符串（'standard' / 'text2query'）"""
-    return core.profile()
+    """当前档位字符串（'standard' / 'text2query'）；作用域内取本作用域视图档位"""
+    return get_core().profile()
 
 
 @contextmanager
 def text2query():
-    """以 text2query 档执行（功能收缩 + 硬限制），退出恢复原档位。
+    """以 text2query 档位视图执行（功能收缩 + 硬限制），退出即回退 base 档位。
 
-    AI 问数链路入口；与 ``permission.scoped_roles`` 同构（token-set/reset，嵌套安全）。
+    R2（03 §3.2/§4.1）：档位随**作用域视图**隔离——入口一次性派生 text2query 档位视图，
+    交由 ``with_scope`` 承载，退出作用域即回退；不再全局 ``set_profile`` 再恢复，
+    故并发 / 嵌套调用各自回到自己进入前的档位，进程级改档的串扰根源随之消除。
+    档位判决仍在 core（``with_policy`` 入参走 01 §4.3 JSON 契约）。
+    与 ``permission.scoped_roles`` 同构（ContextVar token-set/reset，嵌套安全）。
     进入档位即等效强制携带用户上下文（core `ensure_profile_ctx`，见执行文档 §4.2）。
     """
-    prev = get_profile()
-    set_profile('text2query')
-    try:
+    view = get_core().with_policy({'profile': 'text2query'})
+    with with_scope(view):
         yield
-    finally:
-        set_profile(prev)
 
 
 def get_async_fn(fn_ref):
@@ -389,7 +391,7 @@ def _bind_one(schema_name, key, comp):
         return False
     core_key = _core_fn_key(key, comp)
     if comp.get('fn'):
-        core.set_fn(core_key, impl)
+        get_core().set_fn(core_key, impl)
     if comp.get('asyncFn'):
         _async_fns[core_key] = impl
     return True
