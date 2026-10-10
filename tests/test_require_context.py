@@ -123,13 +123,13 @@ def test_require_context_on_blocks_without_ctx():
     _mock([{'_id': '1', 'title': 'a'}])
     _sc.set_require_context(True)
     try:
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.query('RcModel{title}'))
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.insert('RcModel', {'title': 'x'}))
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.update('RcModel', {'_id': '1'}, {'title': 'y'}))
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.remove('RcModel', {'_id': '1'}))
     finally:
         _sc.set_require_context(False)
@@ -177,9 +177,9 @@ def test_secure_mode_flips_switches_blocks_ctxless():
         assert secure.is_secure() is True
         assert _sc.require_context() is True
         # 开关1 require_context：无 ctx 读写拒绝
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.query('RcModel{title}'))
-        with pytest.raises(RuntimeError, match='ERR_NO_CONTEXT'):
+        with pytest.raises(perm.NoContextError):
             _run(_crud_mod.insert('RcModel', {'title': 'x'}))
         # 开关3 meta closed：无 ctx 注册新定义拒绝
         with pytest.raises(RuntimeError, match='ERR_PERMISSION'):

@@ -123,9 +123,9 @@ async def check_require_context(h, expect):
     try:
         await h.store.query(gql)
     except Exception as e:  # noqa: BLE001
-        if 'ERR_NO_CONTEXT' in str(e):
-            return True, '开启强制后无 ctx 被拒（ERR_NO_CONTEXT）'
-        return False, f'开启强制后抛的非 ERR_NO_CONTEXT 错误: {e}'
+        if isinstance(e, h.store.NoContextError):
+            return True, '开启强制后无 ctx 被拒（NoContextError）'
+        return False, f'开启强制后抛的非 NoContextError 错误: {e}'
     return False, '开启 require_context 后无 ctx 竟放行（fail-secure 失效）'
 
 

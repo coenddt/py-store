@@ -184,3 +184,18 @@ class PermissionError(Exception):
     def __init__(self, message, status=403):
         super().__init__(message)
         self.status = status
+
+
+class NoContextError(Exception):
+    """上下文缺失错误（fail-secure：require_context 开启 / secure_mode 下未注入 ctx）
+
+    与 PermissionError 同属权限上下文类（403）：core 抛 ``ERR_NO_CONTEXT:`` 稳定前缀
+    （见 core ``command/mod.rs``），由 ``crud.exec._call`` 归一为本类型（前缀已剥离）。
+    ``code`` 与 core machine code 对齐（``no_context``），供皮按枚举判定（禁按文案匹配）。
+    对齐 nodejs-store ``NoContextError``。
+    """
+
+    def __init__(self, message, status=403):
+        super().__init__(message)
+        self.code = 'no_context'
+        self.status = status

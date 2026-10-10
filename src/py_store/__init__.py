@@ -350,6 +350,8 @@ class Store:
     run_as_internal = staticmethod(permission.run_as_internal)
     # 自定义权限错误（实例可被 store.PermissionError 捕获）
     PermissionError = permission.PermissionError
+    # 上下文缺失错误（实例可被 store.NoContextError 捕获；fail-secure 下未注入 ctx）
+    NoContextError = permission.NoContextError
     # 原生 SQL 入口错误（实例可被 store.RawSqlError 捕获）
     RawSqlError = datasource.RawSqlError
     # 原生 Mongo 命令入口错误（实例可被 store.NativeCommandError 捕获）

@@ -19,7 +19,7 @@ from .. import datasource as _datasource
 from ..executors.mongo import exec_mongo as _exec_mongo
 from ..feedback import emit as _emit_feedback
 from ..naming import _to_logical, _to_mongo
-from ..permission import PermissionError, get_context
+from ..permission import NoContextError, PermissionError, get_context
 from ..schema import get as _schema_get
 
 _PHASE1_IDS = re.compile(r'^\{\{phase1\.ids\}\}$')
@@ -34,6 +34,11 @@ _PERM_PREFIX = 'ERR_PERMISSION:'
 # （见 core `command/mod.rs::ERR_TEXT2QUERY`），同上按前缀映射。命中即 emit
 # 反馈事件 `profile_blocked`（自动反馈原则：允许拦截，禁止静默）。
 _PROFILE_PREFIX = 'ERR_TEXT2QUERY:'
+
+# 上下文缺失识别：core fail-secure（require_context / secure_mode）下无 ctx 时统一携带
+# `ERR_NO_CONTEXT:` 稳定前缀（见 core `command/mod.rs`），同上按前缀映射。命中即抛
+# `NoContextError`（与 PermissionError 同档 403；前缀剥离）。
+_NO_CONTEXT_PREFIX = 'ERR_NO_CONTEXT:'
 
 # 从 core 文案 `... [$feature]（功能收缩）` 中提取门禁项名；无 `[..]` 时留白（None），
 # 不伪造 feature —— 缺值必须显式暴露（禁静默兜底）。
@@ -85,6 +90,7 @@ def _call(fn):
     """绑定层调用包装：
 
       - 权限类错误（``ERR_PERMISSION:`` 前缀）→ ``PermissionError``
+      - 上下文缺失（``ERR_NO_CONTEXT:`` 前缀）→ ``NoContextError``（同档 403）
       - 档位类错误（``ERR_TEXT2QUERY:`` 前缀）→ emit ``profile_blocked`` 反馈 + ``ProfileViolation``
 
     按前缀映射而非具体文案（core 文案可自由调整，映射不随文案漂移而静默失效）。
@@ -96,6 +102,8 @@ def _call(fn):
         msg = str(e)
         if msg.startswith(_PERM_PREFIX):
             raise PermissionError(msg[len(_PERM_PREFIX):]) from e
+        if msg.startswith(_NO_CONTEXT_PREFIX):
+            raise NoContextError(msg[len(_NO_CONTEXT_PREFIX):]) from e
         if msg.startswith(_PROFILE_PREFIX):
             detail = msg[len(_PROFILE_PREFIX):]
             m = _FEATURE_RE.search(detail)
