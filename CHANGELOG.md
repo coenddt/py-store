@@ -1,5 +1,41 @@
 # Changelog
 
+## 4.4.3 (2026-10-10)
+
+### Added / Fixed（NoContext 错误档）
+
+- **`NoContextError` 归一**：core fail-secure（`require_context` / `secure_mode`）下无 ctx 时统一携带
+  `ERR_NO_CONTEXT:` 稳定前缀，宿主按前缀映射为 `NoContextError`（与 `PermissionError` 同档 403，
+  前缀已剥离），导出 `store.NoContextError`；`code` 与 core machine code 对齐（`no_context`），
+  供协议皮按枚举判定（禁按文案匹配）。
+
+## 4.4.2 (2026-10-10)
+
+### Fixed（CI release-pypi 门禁）
+
+- **checkout 兄弟仓 `rust-store`**：改为 workspace 内检出，修复 `test_scheduler` fixture 路径
+  （checkout 禁逃逸 workspace；R2 遗留）。
+
+## 4.4.1 (2026-10-10)
+
+### Fixed（release-pypi 门禁）
+
+- **lint / 类型门禁**：修复 ruff 17 错与 mypy 3 错，通过 `release-pypi` 的 ruff + mypy + pytest 门禁。
+
+## 4.4.0 (2026-10-10)
+
+### Added（本地磁盘数据源 local + R2 全局单值状态 + 触发器补齐）
+
+- **本地磁盘数据源 `local`**：新增零外部服务、零原生 DB 引擎的本地后端（`py_store/local/`：文件 IO
+  `store.py`、PyMongo 兼容手柄 `handle.py`、门面 `__init__.py`），datasource 接线 + 命令路由
+  `_exec_on` 接 local 分支 + 索引告警 + 模块导出 + 端到端用例；`update_many` / `delete_many` 结果
+  塑形为 PyMongo 等价对象，规划输出与 nodejs-store 对拍逐字节一致。
+- **R2 进程级全局单值状态**：作用域原语与派生视图入口，py 宿主同构（收口 + 四件套改造 + 隔离用例），
+  双端作用域对拍。
+- **资源表字段映射**：宿主 py 字段映射 + 测试。
+- **schema 触发器补齐**：`remove` 事件触发链 + 宿主定时任务插件（cron）。
+- **依赖**：`rust-store-py` 依赖下限抬升至 `>=4.3.0`（local / cron 随引擎 4.3.0 启用）。
+
 ## 4.3.0 (2026-10-08)
 
 ### Added（触发器）
@@ -19,6 +55,27 @@
   `remove` 事件与命令式步骤 `op: "upsert"` 注册期 `Err`。
 - **对拍**：`scripts/parity_triggers.py` 读 `rust-store/fixtures/triggers/cases.json` 产出规划输出，
   与 nodejs-store 对拍输出逐字节一致。
+
+## 4.2.1 (2026-10-08)
+
+### Fixed（资源读取不存在错误类型化）
+
+- **`ERR_RESOURCE_NOT_FOUND` 前缀**：py 端 resource open 遇零副本行改抛 `ERR_RESOURCE_NOT_FOUND`
+  前缀错误（原静默返回空），宿主归一为类型化错误。
+- **版本声明点对齐**：修复 `CITATION.cff` 版本漂移。
+
+## 4.2.0 (2026-10-05)
+
+### Added（资源插件扩展 OSS / MinIO）
+
+- **资源插件扩展**：py 门面支持 OSS / MinIO provider + 单测；CI 安装 resource 额外依赖。
+
+## 4.1.0 (2026-10-05)
+
+### Added（资源数据驱动）
+
+- **资源数据驱动**：py 资源 provider 层、资源能力门面与门面接线、资源能力单测、资源真库 e2e 对拍、
+  A5/A6 副本失败反馈单测。
 
 ## 4.0.0 (2026-10-04)
 

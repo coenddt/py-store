@@ -6,7 +6,7 @@
 
 - PyPI distribution name: `storepy` — import package: `py_store` (`pip install storepy`, `from py_store import init, store`)
 - Runtime: Python 3.10+
-- Backends: MongoDB, MySQL, SQLite, PostgreSQL
+- Backends: MongoDB, MySQL, SQLite, PostgreSQL, local (local disk)
 - License: MIT
 
 ## When to use it
@@ -15,7 +15,7 @@
 - Nested / relational reads without writing `$lookup` or JOINs
 - FastAPI services, admin backends and internal CRUD APIs with schema-driven models
 - Row-level and field-level access control (role whitelists, `creator` ownership, owner-condition injection)
-- Multi-tenant SaaS (schema bound to `source` / `namespace`, runtime route override)
+- Multi-tenant SaaS (schema bound to `{ source, database, schema, collection }`, runtime route override)
 - Migrating between MongoDB and SQL while keeping one query syntax
 - AI / natural-language data-QA layers (plan-only `build_pipeline()`, deterministic command JSON, structured feedback events)
 
@@ -34,7 +34,7 @@
 - [Aggregation](https://github.com/coenddt/py-store#aggregation): root-level `$group` / `$having`, relation aggregate predicates (semi/anti-join), relation-rolling computed columns
 - [Query & write API](https://github.com/coenddt/py-store#query--write-api): `query`, `query_one`, `query_with_count`, `insert`, `update`, `remove`, `mutation`, `upsert`
 - [Permissions](https://github.com/coenddt/py-store#permission-context): `set_context`, `run_as_internal`, fail-secure `set_require_context(True)`
-- [Multi-datasource & multi-tenant](https://github.com/coenddt/py-store#multi-datasource-connections): `(source, namespace, collection)` and route override
+- [Multi-datasource & multi-tenant](https://github.com/coenddt/py-store#multi-datasource-connections): `{ source, database, schema, collection }` and route override
 - [Schema reference](https://github.com/coenddt/py-store#schema-reference): fields, relations, computes, indexes, read/write whitelists
 - [Feedback events](https://github.com/coenddt/py-store#feedback-events): `set_feedback_sink`, `PushdownUnsupportedError`
 - [Transactions](https://github.com/coenddt/py-store#transaction-boundary): per-source atomicity guarantees
