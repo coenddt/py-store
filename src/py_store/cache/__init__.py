@@ -3,9 +3,12 @@
 本轮只落**注记位**：不实现任何实际缓存。无 provider（默认）恒返回 'BYPASS'
 （响应未经过缓存）——注记必须为真，禁把无缓存谎报为 HIT/MISS。
 provider 由接入方在实现缓存时经 set_cache_status 注入，签名 (ctx) -> 'HIT'|'MISS'|'BYPASS'。
+
+（04 包化说明：本文件由 ``py_store/cache.py`` 提升为包 ``py_store/cache/`` 的 ``__init__``，
+以容纳 ``redis_io.py`` / ``provider.py``；对外 API 与行为不变，仅相对导入层级由 ``.`` 改为 ``..``。）
 """
 
-from .feedback import emit
+from ..feedback import emit
 
 _VALUES = ('HIT', 'MISS', 'BYPASS')
 _provider = None
