@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from .http import create_http_adapter as create_http_adapter
 from .http import HttpAdapterError as HttpAdapterError
+from .http import create_http_adapter as create_http_adapter
 
 __all__ = ['HttpAdapterError', 'create_http_adapter', 'pull_into']
 

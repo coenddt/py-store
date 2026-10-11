@@ -40,4 +40,4 @@ def current_selection() -> Any:
     return _selection_var.get()
 
 
-__all__ = ['run_with_selection', 'current_selection']
+__all__ = ['current_selection', 'run_with_selection']

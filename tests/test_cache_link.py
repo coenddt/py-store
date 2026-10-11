@@ -147,7 +147,7 @@ def test_a8_e2e_real_plan_primary_first_miss():
     plan = core.plan_federated(gql, {}, None, ds)
     assert plan.get('links') and plan['links'].get('ClUser'), 'plan 应含 ClUser 链路'
     assert plan['links']['ClUser'][0]['role'] == 'primary', 'primary（rank 最优）为选中首项'
-    assert any(l['role'] == 'cache' for l in plan['links']['ClUser']), '仍含 cache 候选（未选中）'
+    assert any(cand['role'] == 'cache' for cand in plan['links']['ClUser']), '仍含 cache 候选（未选中）'
 
     cache.set_cache_status(create_link_cache_provider())
     try:

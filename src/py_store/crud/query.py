@@ -4,9 +4,9 @@
 import asyncio
 import inspect
 
+from ..cache.context import run_with_selection
 from ..feedback import emit as _emit_feedback
 from ..schema import get_async_fn, get_core, get_profile
-from ..cache.context import run_with_selection
 from .exec import (
     _PROFILE_HINT,
     ProfileViolation,
