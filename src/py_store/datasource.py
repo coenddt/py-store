@@ -47,6 +47,9 @@ SQL_KINDS = frozenset({'mysql', 'postgres', 'sqlite'})
 # 本地磁盘数据源类型标记（连接描述符与事务视图均携带该 kind；见 py_store/local）
 LOCAL_KIND = 'local'
 
+# 进程内内存数据源类型标记（与 local 同族：同为嵌入式载体）
+MEMORY_KIND = 'memory'
+
 _MISSING = object()
 # Mongo 事务能力缓存：client -> True/False（探测失败不写缓存，下次重探）
 _mongo_tx_cap: 'weakref.WeakKeyDictionary[object, bool]' = weakref.WeakKeyDictionary()
@@ -109,9 +112,9 @@ def _normalize(connections):
     """归一化连接映射：单个 Mongo db 实例 / MongoClient / 裸 local 描述符 → ``{default: 连接}``"""
     if connections is None:
         return {}
-    # 裸 local 描述符本身是 Mapping（kind/dir/handle…）——须先于 Mapping 分支归一，
+    # 裸嵌入式描述符本身是 Mapping（kind/dir/handle…）——须先于 Mapping 分支归一，
     # 否则其键会被误当数据源名（对齐 nodejs-store/src/datasource.js#_normalize）
-    if is_local(connections):
+    if is_embedded(connections):
         return {DEFAULT_SOURCE: connections}
     if isinstance(connections, Mapping):
         return dict(connections)
@@ -145,9 +148,9 @@ def mongo_db(connection, source, database):
       - db 实例（非 SQL 描述符的驱动实例，含鸭子类型 db）：database 必须为 None，
         非 None 显式报错；
       - MongoClient：database 必须非 None，返回 ``client.get_database(database)``；
-      - 非 Mongo（SQL / 本地磁盘描述符 Mapping）返回 None，由调用方走 SQL / local 路径。
+      - 非 Mongo（SQL / 嵌入式描述符 Mapping）返回 None，由调用方走 SQL / embedded 路径。
     """
-    if is_sql(connection) or is_local(connection):
+    if is_sql(connection) or is_embedded(connection):
         return None
     if _is_mongo_client(connection):
         if not database:
@@ -253,6 +256,19 @@ def is_local(connection):
     必须是 ``dict`` / ``Mapping``（``_kind_of`` 按 Mapping 取 ``kind``，见执行文档 §8-1）。
     """
     return _kind_of(connection) == LOCAL_KIND
+
+
+def is_memory(connection):
+    """内存数据源判别：``kind == 'memory'``（描述符与事务视图都携带 ``handle``）"""
+    return _kind_of(connection) == MEMORY_KIND
+
+
+def is_embedded(connection):
+    """嵌入式载体判别（local ∪ memory）：无外部驱动、可整量求值的载体族。
+
+    单点泛化：此后新增同族载体只改这一处（消除硬编码二元判别）。
+    """
+    return is_local(connection) or is_memory(connection)
 
 
 def connection_for(source):
@@ -385,7 +401,7 @@ async def run_in_transaction(source, fn):
     """事务作用域：在单个源上以「同连接 + 同事务」执行 fn 内的全部命令
 
       - 会话内调用：并入会话（事务边界由会话统一管理），不另开事务；
-      - 本地磁盘源（``kind='local'``）：快照隔离包事务（``open_transaction``）；
+      - 嵌入式载体（local / memory）：快照隔离包事务（``open_transaction``）；
         无 ``with_transaction`` 原语 → 声明 ``transaction_not_atomic`` 后按原样执行；
         同源嵌套无保存点 → 走既有 ``nested_savepoint_unsupported`` 降级声明；
       - SQL 源且执行器实现 with_transaction：包事务；同源嵌套开 SAVEPOINT sp_<n>；
@@ -403,17 +419,17 @@ async def run_in_transaction(source, fn):
     conn = get_connection(source)
     parent = _tx_override.get() or {}
 
-    if is_local(conn):
-        # ── 本地磁盘分支（事务作用域）──
+    if is_embedded(conn):
+        # ── 嵌入式载体分支（local / memory；事务作用域）──
         if not callable(conn.get('with_transaction')):
             # 降级不静默：与 store.session 的 session_not_atomic 对称，显式声明本事务作用域未生效
             _warn_transaction_not_atomic(source, conn.get('kind'))
             return await fn()
         if source in parent:
-            # 同源嵌套：local 快照无保存点原语 → 走降级声明（_nested_savepoint_scope 内判定）
+            # 同源嵌套：嵌入式快照无保存点原语 → 走降级声明（_nested_savepoint_scope 内判定）
             return await _nested_savepoint_scope(source, parent[source], fn)
         tx = await conn['open_transaction']()
-        view = {'kind': LOCAL_KIND, 'conn': conn, 'session': tx['session'],
+        view = {'kind': conn.get('kind'), 'conn': conn, 'session': tx['session'],
                 'tx': tx, 'handle': tx['handle']}
         token = _tx_override.set({**parent, source: view})
         try:
@@ -574,8 +590,8 @@ async def execute_native(source, collection, pipeline, options=None):
       - 返回 ``{'rows': list}``。
     """
     conn = await resolve_connection(source, is_write=False)
-    if is_local(conn):
-        # 本地磁盘源（描述符或事务视图）：db = handle；session 已绑定在 handle 上，不另传
+    if is_embedded(conn):
+        # 嵌入式载体（local / memory；描述符或事务视图）：db = handle；session 已绑定在 handle 上，不另传
         db = conn['handle']
         session = None
     elif isinstance(conn, Mapping) and conn.get('kind') == 'mongo':
@@ -706,7 +722,7 @@ class Session:
     async def _open_view(self, source):
         """解析并缓存该源的事务视图；返回 ``{'kind','exec','tx'}`` /
         ``{'kind':'mongo','conn','session','tx'}`` /
-        ``{'kind':'local','conn','session','tx','handle'}`` / None（直通）"""
+        ``{'kind':'local'|'memory','conn','session','tx','handle'}`` / None（直通）"""
         override = _tx_override.get()
         if override and source in override:
             ov = override[source]
@@ -714,13 +730,13 @@ class Session:
                 # 外层事务（run_in_transaction / 外层会话）已绑定该源 → 复用，不新开事务、不告警
                 return ov
         connection = get_connection(source)
-        if is_local(connection):
-            # 本地磁盘源：快照隔离开事务；无原语 → 声明未原子并直通
+        if is_embedded(connection):
+            # 嵌入式载体（local / memory）：快照隔离开事务；无原语 → 声明未原子并直通
             if callable(connection.get('open_transaction')):
                 tx = await connection['open_transaction']()
                 self._txs[source] = tx
                 self._opened.append(source)
-                return {'kind': LOCAL_KIND, 'conn': connection, 'session': tx['session'],
+                return {'kind': connection.get('kind'), 'conn': connection, 'session': tx['session'],
                         'tx': tx, 'handle': tx['handle']}
             self._warn_not_atomic(source, connection.get('kind'))
             return None  # 直通：_exec_on 收到原始描述符（同样带 handle）

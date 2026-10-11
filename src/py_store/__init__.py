@@ -407,15 +407,16 @@ async def _create_indexes_if_needed():
         # 其余配置错误（database 形态不匹配等）按 fail-fast 由 db_of_schema 上抛
         if not datasource.has_connection(datasource.source_of_schema(name)):
             continue
-        # local 源 v1 无索引（仅顺序扫描）：声明 indexes 即告警（禁静默忽略），直接跳过建索引
-        if datasource.is_local(datasource.get_connection(datasource.source_of_schema(name))):
+        # 嵌入式载体（local / memory）v1 无索引（仅顺序扫描）：声明 indexes 即告警（禁静默忽略），直接跳过建索引
+        conn = datasource.get_connection(datasource.source_of_schema(name))
+        if datasource.is_embedded(conn):
             if s.get('indexes'):
                 feedback.emit({
                     'type': 'local_indexes_ignored',
                     'code': 'localIndexesIgnored',
-                    'layer': 'local',
-                    'message': f'schema {name} 声明了 indexes，但 local 数据源 v1 不建索引（仅顺序扫描）',
-                    'hint': 'local 源请勿声明 indexes；需要索引请改用 sqlite/mongo 等后端',
+                    'layer': conn.get('kind'),
+                    'message': f'schema {name} 声明了 indexes，但 {conn.get("kind")} 数据源 v1 不建索引（仅顺序扫描）',
+                    'hint': f'{conn.get("kind")} 源请勿声明 indexes；需要索引请改用 sqlite/mongo 等后端',
                     'schema': name,
                 })
             continue
