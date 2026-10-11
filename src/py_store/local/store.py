@@ -1,6 +1,7 @@
 """本地磁盘数据源的文件 IO（唯一落盘边界）
 
-布局：``<dir>/<物理集合名>.json``，内容为该集合的**文档数组**。
+布局：``<dir>/<database>/<物理集合名>.json``（``database`` 为空时回落旧布局
+``<dir>/<物理集合名>.json``），内容为该集合的**文档数组**。
 
   - 读：整个目录快照 ``{"<集合名>": [文档…]}``（目录不存在 → ``{}``）。
     非数组 / 非法 JSON 文件一律**抛错**（禁静默当空集合，见执行文档 §7）。
@@ -28,12 +29,30 @@ def _lock_for(root) -> threading.Lock:
         return _LOCKS.setdefault(key, threading.Lock())
 
 
-def read_snapshot(root) -> dict:
+def _dir_for(root, database=None):
+    """唯一路径拼装点（红线）：``database`` 非空 ⇒ ``<root>/<database>``；为空 ⇒ ``root`` 本体。
+
+    非法 ``database``（含 ``/``、``\\``、``..``，防目录穿越）⇒ 抛 ``ValueError``。
+    """
+    if database is None or database == '':
+        return os.fspath(root)
+    if (
+        not isinstance(database, str)
+        or '/' in database
+        or '\\' in database
+        or '..' in database
+    ):
+        raise ValueError(f'ERR:LOCAL database 非法: {database}')
+    return os.path.join(os.fspath(root), database)
+
+
+def read_snapshot(root, database=None) -> dict:
     """读取整个目录快照 ``{集合名: [文档…]}``。
 
+    ``database`` 空 ⇒ 旧布局（``<root>`` 本体）；非空 ⇒ ``<root>/<database>``。
     目录不存在 → ``{}``；非数组 JSON / 非法 JSON 一律抛错（禁静默当空集合）。
     """
-    root = os.fspath(root)
+    root = _dir_for(root, database)
     if not os.path.isdir(root):
         return {}
     out = {}
@@ -52,9 +71,12 @@ def read_snapshot(root) -> dict:
     return out
 
 
-def write_collections(root, changed, collections) -> None:
-    """只回写 ``changed`` 内的集合；临时文件 + ``os.replace`` 原子替换。"""
-    root = os.fspath(root)
+def write_collections(root, changed, collections, database=None) -> None:
+    """只回写 ``changed`` 内的集合；临时文件 + ``os.replace`` 原子替换。
+
+    ``database`` 空 ⇒ 旧布局（``<root>`` 本体）；非空 ⇒ ``<root>/<database>``（先校验，非法 ⇒ 抛错）。
+    """
+    root = _dir_for(root, database)
     names = list(changed)
     if not names:
         return

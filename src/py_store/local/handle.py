@@ -1,6 +1,6 @@
 """本地磁盘数据源 —— PyMongo ``Database`` 兼容手柄（Host 侧的「驱动替身」）
 
-``create_db(load, save)`` 产出一个 **PyMongo Database 兼容**的 db（``db[name]`` →
+``create_db(load, save, database=None)`` 产出一个 **PyMongo Database 兼容**的 db（``db[name]`` →
 集合对象），使 local 源可**复用** ``py_store/executors/mongo.py#exec_mongo`` ——
 命令求值一律下沉 ``core.local_eval``，本模块只做手柄适配与 IO 编排
 （禁在宿主编写 filter / 管道 / 算子）。
@@ -127,13 +127,19 @@ class LocalCollection:
 class LocalDb:
     """PyMongo ``Database`` 兼容（仅需 ``__getitem__`` 取集合）"""
 
-    def __init__(self, load, save):
+    def __init__(self, load, save, database=None):
         self._load = load
         self._save = save
+        self.database = database  # 仅作 IO 寻址标识；读写经 load/save 闭包定位分区，不进入 core 命令
 
     def __getitem__(self, name):
         return LocalCollection(self._load, self._save, name)
 
 
-def create_db(load, save) -> LocalDb:
-    return LocalDb(load, save)
+def create_db(load, save, database=None) -> LocalDb:
+    """构造 PyMongo 兼容手柄。
+
+    :param database: 仅作 IO 寻址标识（手柄读写经 ``load``/``save`` 闭包定位分区），
+        不进入发往 core 的命令（对齐 ``nodejs-store/src/local/handle.js``）。
+    """
+    return LocalDb(load, save, database)
