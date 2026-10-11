@@ -81,4 +81,6 @@ def load_defs(config=None, ctx=None, base_dir=None):
     files = collect_files(roots)
     items = plan_load(cfg, files)
     schema.register_batch(items, ctx)
+    # 链路声明装配：宿主只转交 cfg（读/解析/排序/判据单点在 core）；Err 原样上抛（fail-fast）
+    schema.get_core().apply_link_decls(cfg)
     return items

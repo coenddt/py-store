@@ -49,13 +49,14 @@ def test_a2_directory_is_location_mongo_l1_pg_l2_l3_flattened():
     ]
     items = load.plan_load(CFG, files)
 
-    assert loc_of(items, 'Order') == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None}
+    # 02 起 Location 五元组：role/priority 未声明 ⇒ None（绑定 location_to_value 透出）
+    assert loc_of(items, 'Order') == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None, 'role': None, 'priority': None}
     # Mongo 不读 L2：inventory 目录被打平，归属仍是 sales_db
-    assert loc_of(items, 'Item') == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None}
+    assert loc_of(items, 'Item') == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None, 'role': None, 'priority': None}
     # PG 读 L2：app = schema
-    assert loc_of(items, 'Customer') == {'source': 'pgMain', 'database': 'analytics_db', 'schema': 'app'}
+    assert loc_of(items, 'Customer') == {'source': 'pgMain', 'database': 'analytics_db', 'schema': 'app', 'role': None, 'priority': None}
     # PG L3 自由目录打平：schema 仍是 app
-    assert loc_of(items, 'Monthly') == {'source': 'pgMain', 'database': 'analytics_db', 'schema': 'app'}
+    assert loc_of(items, 'Monthly') == {'source': 'pgMain', 'database': 'analytics_db', 'schema': 'app', 'role': None, 'priority': None}
 
 
 def test_a1_duplicate_primary_raises():
@@ -123,7 +124,7 @@ def test_load_defs_real_dir_io_and_register_batch():
 
         items = load.load_defs(os.path.join(root, 'store.config.json'))
         assert len(items) == 1
-        assert items[0]['location'] == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None}
+        assert items[0]['location'] == {'source': 'mongoMain', 'database': 'sales_db', 'schema': None, 'role': None, 'priority': None}
         assert schema.has('Order') is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
