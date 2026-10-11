@@ -6,6 +6,7 @@ import inspect
 
 from ..feedback import emit as _emit_feedback
 from ..schema import get_async_fn, get_core, get_profile
+from ..cache.context import run_with_selection
 from .exec import (
     _PROFILE_HINT,
     ProfileViolation,
@@ -83,7 +84,12 @@ async def query(gql, params=None, route_override=None):
     _guard_route_override(route_override)
     plan = _call(lambda: get_core().plan_query(
         gql, params if params is not None else {}, _ctx(), route_override))
-    return await _finalize(plan, await _run_query_plan(plan))
+
+    async def _selected():
+        return await _finalize(plan, await _run_query_plan(plan))
+
+    # 请求级记录本次选中链路（04 §4.4：只读透传 plan.links，不改 plan 语义）
+    return await run_with_selection(plan.get('links'), _selected)
 
 
 async def query_one(gql, params=None, route_override=None):
@@ -134,11 +140,14 @@ async def query_federated(gql, params=None):
         # 降级事件走统一反馈通道（无 sink 时打 stderr，允许拦截，禁止静默失守）
         _emit_feedback(dict(d or {}, type='federation_degraded'))
 
-    results = await asyncio.gather(
-        *(_run_federated_unit(u) for u in plan.get('sources') or []))
+    async def _selected():
+        results = await asyncio.gather(
+            *(_run_federated_unit(u) for u in plan.get('sources') or []))
+        merged = _call(lambda: get_core().merge_federated(plan, results))
+        return await _finalize(plan, merged)
 
-    merged = _call(lambda: get_core().merge_federated(plan, results))
-    return await _finalize(plan, merged)
+    # 请求级记录本次选中链路（04 §4.4：只读透传 plan.links，不改 plan 语义）
+    return await run_with_selection(plan.get('links'), _selected)
 
 
 async def query_with_count(gql, params=None, route_override=None):
