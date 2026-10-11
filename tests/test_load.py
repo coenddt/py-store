@@ -128,3 +128,35 @@ def test_load_defs_real_dir_io_and_register_batch():
         assert schema.has('Order') is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_io_error_and_edge_branches(tmp_path):
+    """宿主薄 IO 层的错误/边界分支（read_config / collect_files / load_defs）"""
+    # read_config：dict 直传（base 缺省取 cwd）
+    cfg, base = load.read_config(CFG)
+    assert cfg is CFG and base
+    # 非 str/dict ⇒ TypeError
+    with pytest.raises(TypeError, match='ERR:LOAD config'):
+        load.read_config(123)
+    # 读坏 store.config.json ⇒ RuntimeError
+    bad_cfg = tmp_path / 'store.config.json'
+    bad_cfg.write_text('{ not json', encoding='utf-8')
+    with pytest.raises(RuntimeError, match='ERR:LOAD 读取'):
+        load.read_config(str(bad_cfg))
+    # 定义根不存在 ⇒ RuntimeError
+    with pytest.raises(RuntimeError, match='ERR:LOAD 定义根不存在'):
+        load.collect_files([str(tmp_path / 'nope')])
+    # `_` 前缀文件/目录被跳过
+    root = tmp_path / 'schema'
+    (root / 'sub').mkdir(parents=True)
+    (root / '_ignore.json').write_text('{}', encoding='utf-8')
+    (root / 'sub' / '_also_ignore.json').write_text('{}', encoding='utf-8')
+    (root / 'ok.json').write_text('{"name": "Ok"}', encoding='utf-8')
+    assert [x['rel'] for x in load.collect_files([str(root)])] == ['ok.json']
+    # 定义 JSON 解析失败 ⇒ RuntimeError
+    (root / 'broken.json').write_text('{ bad', encoding='utf-8')
+    with pytest.raises(RuntimeError, match='ERR:LOAD 解析定义失败'):
+        load.collect_files([str(root)])
+    # load_defs 缺 config ⇒ RuntimeError
+    with pytest.raises(RuntimeError, match='ERR:LOAD load_defs 缺 config'):
+        load.load_defs(None)

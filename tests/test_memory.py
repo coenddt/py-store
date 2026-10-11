@@ -64,6 +64,62 @@ def test_memory_a1_real_crud():
         _ds.set_connections({})
 
 
+# ─── 事务：快照隔离（对齐 local 载体 test_facade_open_transaction_snapshot） ───
+
+def test_memory_open_transaction_snapshot():
+    # 预置「同前缀但跨库分区」键（'txdb/nested/deep'）：验证 io.load 分区守卫（不串源）
+    part: dict = {'txdb/nested/deep': [{'_id': 'x'}]}
+    conn = connect({'database': 'txdb', 'store': part})
+
+    async def _main():
+        # commit：tx 内写先入内存快照，commit 才整体写回分区
+        tx = await conn['open_transaction']()
+        assert tx['session']['snapshot']() == {}, '跨库分区（nested/deep）不属 txdb 库'
+        await tx['handle']['users'].insert_one({'_id': 'u1'})
+        assert len(tx['session']['snapshot']()['users']) == 1, 'tx 内快照含新写'
+        assert 'txdb/users' not in part, 'commit 前分区不可见（快照隔离）'
+        await tx['commit']()
+        await tx['release']()
+        assert len(part['txdb/users']) == 1, 'commit 后写回分区'
+
+        # 幂等守卫：重复 commit 不重复写回
+        guard = await conn['open_transaction']()
+        await guard['commit']()
+        await guard['commit']()
+        await guard['release']()
+
+        # rollback：丢弃快照
+        tx2 = await conn['open_transaction']()
+        await tx2['handle']['users'].insert_one({'_id': 'u2'})
+        await tx2['rollback']()
+        await tx2['release']()
+        assert len(part['txdb/users']) == 1, 'rollback 丢弃快照'
+
+        # with_transaction 便捷包装（成功路径自动 commit）
+        async def _body(_s, t):
+            await t['handle']['users'].insert_one({'_id': 'u3'})
+            return 'ok'
+
+        out = await conn['with_transaction'](_body)
+        assert out == 'ok'
+        assert len(part['txdb/users']) == 2, 'with_transaction 提交生效'
+
+        # with_transaction 异常路径：body 抛错 → rollback 后原样上抛（不写回）
+        async def _boom(_s, t):
+            await t['handle']['users'].insert_one({'_id': 'u5'})
+            raise ValueError('boom')
+
+        try:
+            await conn['with_transaction'](_boom)
+            raise AssertionError('应原样上抛 body 异常')
+        except ValueError as e:
+            assert str(e) == 'boom'
+        assert all(d['_id'] != 'u5' for d in part['txdb/users']), '异常路径回滚（u5 未写回）'
+        return out
+
+    assert _run(_main()) == 'ok'
+
+
 # ─── A3：database 维键空间隔离 ──────────────────────────────
 
 def test_memory_a3_same_collection_distinct_database():
