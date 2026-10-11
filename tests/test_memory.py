@@ -1,0 +1,90 @@
+"""进程内内存数据源（memory）py 宿主单测 —— A1 / A3
+
+镜像 ``nodejs-store/tests/memory-store.test.js``；覆盖执行文档 01 §5 步骤 10：
+  - A1 ``connect({'database': …})['kind'] == 'memory'``、``handle_for`` 可调用，并经**真实 CRUD**
+       （``init`` + ``store.insert`` / ``store.query``）证明该 kind 端到端可用；
+  - A3 同一载体两个不同 ``database``、同名 ``collection`` **互不可见**（消除静默串源）。
+
+运行：PYTHONPATH=src LOCAL_CORE=1 python -m pytest tests/test_memory.py -q
+"""
+
+import asyncio
+
+from py_store import datasource as _ds
+from py_store import init, store
+from py_store import schema as _sc
+from py_store.memory import MEMORY_KIND, connect
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _register_test_schemas():
+    """conftest 模块夹具重放（清场后恢复本模块 schema）"""
+    _sc.register({
+        'name': 'MemA1User', 'collection': 'mem_a1_users', 'idPrefix': 'ma1_', 'timestamps': False,
+        'fields': {'name': {'type': 'string'}}, 'relations': {},
+    })
+    _sc.register({
+        'name': 'MemA3A', 'collection': 'mem_a3_items', 'idPrefix': 'a3a_', 'timestamps': False,
+        'database': 'db_a', 'fields': {'name': {'type': 'string'}}, 'relations': {},
+    })
+    _sc.register({
+        'name': 'MemA3B', 'collection': 'mem_a3_items', 'idPrefix': 'a3b_', 'timestamps': False,
+        'database': 'db_b', 'fields': {'name': {'type': 'string'}}, 'relations': {},
+    })
+
+
+# ─── A1：memory kind 可用（描述符 + 真实 CRUD） ───────────────
+
+def test_memory_a1_descriptor():
+    conn = connect({'database': 'sales_db'})
+    assert MEMORY_KIND == 'memory'
+    assert conn['kind'] == 'memory'
+    assert conn['database'] == 'sales_db'
+    assert callable(conn['handle_for'])
+    assert callable(conn['open_transaction'])
+    assert callable(conn['with_transaction'])
+
+
+def test_memory_a1_real_crud():
+    try:
+        _run(init(connect({'store': {}})))
+
+        async def _main():
+            u = await store.insert('MemA1User', {'name': 'Ada'})
+            assert str(u['_id']).startswith('ma1_'), '应生成 idPrefix 前缀 _id'
+            rows = await store.query('MemA1User{ _id name }')
+            assert rows == [{'_id': u['_id'], 'name': 'Ada'}]
+            assert await store.count('MemA1User', {}) == 1
+
+        _run(_main())
+    finally:
+        _ds.set_connections({})
+
+
+# ─── A3：database 维键空间隔离 ──────────────────────────────
+
+def test_memory_a3_same_collection_distinct_database():
+    try:
+        # 注入独立分区 dict，隔离进程内默认分区
+        _run(init(connect({'store': {}})))
+
+        async def _main():
+            await store.insert('MemA3A', {'name': 'fromA'})
+            await store.insert('MemA3B', {'name': 'fromB'})
+
+            a = await store.query('MemA3A{ _id name }')
+            b = await store.query('MemA3B{ _id name }')
+
+            assert len(a) == 1, 'db_a 分区只含自身文档'
+            assert len(b) == 1, 'db_b 分区只含自身文档'
+            assert a[0]['name'] == 'fromA'
+            assert b[0]['name'] == 'fromB'
+            # 同名 collection、不同 database 互不串源
+            assert a != b
+
+        _run(_main())
+    finally:
+        _ds.set_connections({})
