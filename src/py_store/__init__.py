@@ -152,6 +152,13 @@ class Store:
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
 
+    def base_view(self):
+        """base Registry 引用（恒 base，无视作用域）：协议皮经宿主门面派生视图的唯一合法起点。
+
+        （``base_view().with_policy(overrides)`` → with_scope；皮侧禁自持 Registry——R2-04 §4.1/§7）
+        """
+        return schema.get_base()
+
     # ── 事务 + 原生 SQL（复用 datasource.run_in_transaction；见 README「事务边界」）──
     async def transaction(self, source: str, fn) -> Any:
         """事务作用域：单 SQL 源「同连接 + 同事务」执行 fn（复用 run_in_transaction）

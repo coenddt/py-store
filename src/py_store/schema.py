@@ -55,6 +55,15 @@ def get_core():
     s = current_scope()
     return s.view if s is not None else core
 
+
+def get_base():
+    """取 base core 门面（恒 base，无视作用域）：协议皮派生视图的唯一合法起点。
+
+    （R2-04 §4.1 ``store.base_view()``；皮侧禁自持 Registry——§7）
+    与 :func:`get_core` 的区别：get_core 作用域内返回派生视图，get_base 恒返回 base。
+    """
+    return core
+
 # Host 侧元数据镜像
 _schemas: dict = {}
 
