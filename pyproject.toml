@@ -22,7 +22,7 @@ keywords = [
   "ai-agent", "llm-tool", "query-validation", "natural-language-query",
 ]
 authors = [
-    { name = "leo", email = "coen_ddt@qq.com" },
+    { name = "丁滔", email = "coen_ddt@qq.com" },
 ]
 dependencies = [
   "pymongo>=4.9",
