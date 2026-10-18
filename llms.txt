@@ -36,6 +36,7 @@
 - [Permissions](https://github.com/coenddt/py-store#permission-context): `set_context`, `run_as_internal`, fail-secure `set_require_context(True)`
 - [Multi-datasource & multi-tenant](https://github.com/coenddt/py-store#multi-datasource-connections): `{ source, database, schema, collection }` and route override
 - [Schema reference](https://github.com/coenddt/py-store#schema-reference): fields, relations, computes, indexes, read/write whitelists
+- [Vector search](https://github.com/coenddt/py-store#vector-search): `vector` fields, `$near`, `_score`, `capabilities()`, `reindex_vectors`
 - [Feedback events](https://github.com/coenddt/py-store#feedback-events): `set_feedback_sink`, `PushdownUnsupportedError`
 - [Transactions](https://github.com/coenddt/py-store#transaction-boundary): per-source atomicity guarantees
 
