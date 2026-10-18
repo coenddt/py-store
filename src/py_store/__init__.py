@@ -27,9 +27,12 @@ from pymongo.errors import PyMongoError
 from . import (
     ask,
     cache,
+    capabilities,
+    capabilities as capabilities_probe,
     crud,
     datasource,
     ddl,
+    degraded,
     feedback,
     metadef,
     naming,
@@ -307,6 +310,18 @@ class Store:
     def cache_status(self, ctx: dict | None = None) -> str:
         """当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一）"""
         return cache.cache_status(permission.get_context() if ctx is None else ctx)
+
+    # ── 向量能力与降级状态（见 capabilities.py / degraded.py）──
+    async def capabilities(self, source: str | None = None) -> dict[str, Any]:
+        """按 source 探测向量能力（异步：PG 需查 pg_extension）"""
+        return await capabilities_probe.capabilities(source)
+
+    def degraded_status(self) -> dict[str, Any]:
+        """当前请求的降级状态（无请求容器 → degraded:False）"""
+        return degraded.status()
+
+    # ── 降级容器（协议皮中间件建/销毁；见 degraded.py）──
+    degraded = degraded
 
     # ── Atlas 向量索引（启动/运维调用；不参与请求路径）──
     async def ensure_vector_indexes(self, opts=None):

@@ -237,6 +237,10 @@ def _kind_of(connection):
     return None
 
 
+# 公开别名：capabilities 探测用（不改私有实现，避免与既有调用点分叉）
+kind_of = _kind_of
+
+
 def is_sql(connection):
     """判定连接是否为 SQL 数据源描述符
 
