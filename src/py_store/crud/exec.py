@@ -172,6 +172,18 @@ async def _exec_on(source, cmd):
         # 按命令的 database 取该库分区手柄；缺省回落描述符自身 handle（向后兼容）
         db = (connection['handle_for'](cmd.get('database'))
               if callable(connection.get('handle_for')) else connection['handle'])
+        # 嵌入式载体无原生近似索引：向量查询恒为应用层精确检索，须显式声明降级
+        # （06 §4.6 C10；native 是静态能力，不因此改变）
+        kind = _datasource.kind_of(connection)
+        if _vector_scan.can_scan(cmd, kind):
+            spec = cmd['pipeline'][0]['$vectorSearch']
+            _degraded.vector_degraded(
+                backend=kind,
+                field=spec.get('path'),
+                metric=spec.get('metric'),
+                message=_vector_scan.DEGRADED_MESSAGES[kind],
+                hint=_vector_scan.DEGRADED_HINT,
+            )
         return _to_logical(await _exec_mongo(db, _to_mongo(cmd)), cmd)
     if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
         # Mongo 事务视图：db 按命令 database 解析，session 透传给驱动

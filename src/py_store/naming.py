@@ -23,9 +23,10 @@ _MONGO = 'mongodb'
 
 
 def is_reserved(name):
-    """保留物理名（I3）：``_id``、``__``/``^__`` 前缀内部合成名不翻译"""
+    """保留物理名（I3）：``_id``、``_score``（向量检索评分列）、``__``/``^__`` 前缀内部合成名不翻译"""
     return isinstance(name, str) and (
-        name == '_id' or name.startswith('__') or name.startswith('^__'))
+        name == '_id' or name == '_score'
+        or name.startswith('__') or name.startswith('^__'))
 
 
 def physical(logical):
