@@ -17,6 +17,7 @@ DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回
 """
 
 import json as _json
+from typing import TypeGuard
 
 from .core import native as _native
 from .feedback import emit as _emit_feedback
@@ -52,7 +53,7 @@ def _js(v):
     return _json.dumps(v, ensure_ascii=False)
 
 
-def _is_positive_int(v):
+def _is_positive_int(v) -> TypeGuard[int | float]:
     """等价 JS Number.isInteger(v) && v > 0（bool 不算整数）"""
     if isinstance(v, bool):
         return False

@@ -27,8 +27,6 @@ from pymongo.errors import PyMongoError
 from . import (
     ask,
     cache,
-    capabilities,
-    capabilities as capabilities_probe,
     crud,
     datasource,
     ddl,
@@ -42,6 +40,12 @@ from . import (
     secure,
     vector_index,
     workflow,
+)
+from . import (
+    capabilities as capabilities,
+)
+from . import (
+    capabilities as capabilities_probe,
 )
 from . import (
     executors as executors,

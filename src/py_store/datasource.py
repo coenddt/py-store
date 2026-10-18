@@ -21,9 +21,7 @@ import contextvars
 import weakref
 from collections.abc import Mapping
 
-from . import executors
-from . import degraded
-from . import vector_scan
+from . import degraded, executors, vector_scan
 from .feedback import emit as _emit_feedback
 from .schema import get as _get_schema
 from .schema import get_core

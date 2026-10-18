@@ -37,7 +37,7 @@ async def _pgvector_ready(source: str) -> bool:
             False,
         )
         return bool(out.get('rows'))
-    except Exception as e:  # noqa: BLE001 — 探测失败必须留痕，禁静默改判
+    except Exception as e:  # 探测失败必须留痕，禁静默改判
         feedback.emit({
             'type': 'capability_probe_failed',
             'code': 'capabilityProbeFailed',

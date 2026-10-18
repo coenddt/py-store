@@ -16,7 +16,14 @@ import aiosqlite
 import pytest
 
 from py_store import (
-    datasource, ddl, executors, naming, permission, schema, store, vector_scan,
+    datasource,
+    ddl,
+    executors,
+    naming,
+    permission,
+    schema,
+    store,
+    vector_scan,
 )
 from py_store.crud.exec import _exec_on
 

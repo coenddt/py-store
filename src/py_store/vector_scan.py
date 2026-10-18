@@ -13,7 +13,7 @@ PostgreSQL 无过滤走原生 SQL，local / memory 由 core 直接求值，均�
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 
 MAX_VECTOR_SCAN_ROWS = 100_000
 
@@ -38,7 +38,9 @@ def _registry(core=None):
     """取可用的 ``Registry`` 实例（``local_eval`` 是实例方法，非模块级导出）"""
     if core is not None and callable(getattr(core, 'local_eval', None)):
         return core
-    from .core import core as _default_core  # 延迟导入：避免与 datasource / crud 形成导入环
+    from .core import (
+        core as _default_core,  # 延迟导入：避免与 datasource / crud 形成导入环
+    )
 
     return _default_core
 
@@ -175,6 +177,8 @@ class VectorScanOverflow(RuntimeError):
     """候选行数超上限（稳定 ``code`` 供调用方识别；禁止静默截断）"""
 
     code = 'vectorScanOverflow'
+    candidate_rows: int
+    max_rows: int
 
 
 def strip_vector_meta(cmd):
@@ -186,7 +190,7 @@ def strip_vector_meta(cmd):
         if not isinstance(stage, Mapping):
             continue
         spec = stage.get('$vectorSearch')
-        if isinstance(spec, Mapping):
+        if isinstance(spec, MutableMapping):
             spec.pop('metric', None)
     return cmd
 

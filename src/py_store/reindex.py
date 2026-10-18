@@ -5,8 +5,8 @@
 """
 
 import hashlib
-import time
 import inspect
+import time
 
 from . import feedback
 from . import schema as schema_mod

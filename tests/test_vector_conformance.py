@@ -16,8 +16,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from py_store import datasource, ddl, degraded, init, permission, store
-from py_store import executors
+from py_store import datasource, ddl, degraded, executors, init, permission, store
 from py_store import schema as _sc
 from py_store.local import connect as connect_local
 from py_store.memory import connect as connect_memory
@@ -132,7 +131,7 @@ async def _connections(tag, tmp_path):
         client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=1200)
         try:
             await client.admin.command({'ping': 1})
-        except Exception as e:  # noqa: BLE001 - 实例不可达即 skip
+        except Exception as e:  # 实例不可达即 skip
             await client.close()
             return None, f'MongoDB 不可达（{MONGO_URI}）: {e}', None
         return {'vc_mongodb': client.get_default_database()}, None, client
@@ -154,7 +153,7 @@ async def _connections(tag, tmp_path):
                 async with conn.cursor() as cur:
                     await cur.execute('SELECT 1')
                     await cur.fetchall()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return None, f'MySQL 不可达（{MYSQL_URI}）: {e}', None
         sql = ddl.generate('mysql', [_schema_name('mysql')])
         async with pool.acquire() as conn:
@@ -173,7 +172,7 @@ async def _connections(tag, tmp_path):
             sql = ddl.generate('postgres', [_schema_name('postgres')])
             for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
                 await pool.execute(stmt)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return None, f'PostgreSQL 不可达 / 无 pgvector（{PG_URI}）: {e}', None
         return {'vc_postgres': executors.create_connection('postgres', pool)}, None, pool
     raise AssertionError(tag)
@@ -238,7 +237,7 @@ def _assert_ranked(rows, c):
 
 
 async def _assert_case_error(name, c, keywords):
-    with pytest.raises(Exception) as ei:  # noqa: PT011 - 契约错误类型由 core 决定
+    with pytest.raises(Exception) as ei:  # 契约错误类型由 core 决定
         await _query_near(name, c)
     msg = str(ei.value).lower()
     assert any(k.lower() in msg for k in keywords), f"{c['id']} 错误文案：{ei.value}"
