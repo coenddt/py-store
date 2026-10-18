@@ -37,6 +37,7 @@ from . import (
     resource,
     schema,
     secure,
+    vector_index,
     workflow,
 )
 from . import (
@@ -306,6 +307,11 @@ class Store:
     def cache_status(self, ctx: dict | None = None) -> str:
         """当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一）"""
         return cache.cache_status(permission.get_context() if ctx is None else ctx)
+
+    # ── Atlas 向量索引（启动/运维调用；不参与请求路径）──
+    async def ensure_vector_indexes(self, opts=None):
+        """幂等创建 schema 中声明 options.indexName 的 Atlas 向量索引"""
+        return await vector_index.ensure_vector_indexes(self, opts or {})
 
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
     def register_workflow(self, defn: dict, ctx: dict | None = None) -> dict:
