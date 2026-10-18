@@ -1,8 +1,9 @@
 """向量检索降级扫描（03 执行文档 §4.7，对齐 ``nodejs-store/src/vector-scan.js``）
 
 把 ``$vectorSearch`` 从聚合管道剥离 → 先取候选行 → 交 core ``local_eval`` 精确打分。
-适用于不支持 ``$vectorSearch`` 阶段的后端（MySQL / SQLite / 非 Atlas 的自建 Mongo）；
-PostgreSQL 走原生 SQL，local / memory 由 core 直接求值，均不进入本模块。
+适用于不支持 ``$vectorSearch`` 阶段的后端（MySQL / SQLite / 非 Atlas 的自建 Mongo），
+以及 PostgreSQL 带 filter（近似索引退化为后过滤）的场景；
+PostgreSQL 无过滤走原生 SQL，local / memory 由 core 直接求值，均不进入本模块。
 
 硬约束：
   - 候选行必须含向量字段（候选管道只保留 ``$match``，不投影 → 全字段天然含 path）；
@@ -15,6 +16,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 MAX_VECTOR_SCAN_ROWS = 100_000
+
+#: 向量降级统一 hint（05 §4.9，node/py 逐字一致）
+DEGRADED_HINT = '需要原生 TopK 与更低延迟请改用 postgres(pgvector) 或 MongoDB Atlas（索引声明 options.indexName）'
+
+#: 各后端向量降级文案（05 §4.9，逐字）
+DEGRADED_MESSAGES = {
+    'mysql': '数据源 mysql 无原生向量索引，本次按应用层精确检索（结果已按 _score 降序）',
+    'sqlite': '数据源 sqlite 无原生向量索引（vec0 未启用），本次按应用层精确检索（结果已按 _score 降序）',
+    'mongodb': '数据源 mongodb 未声明 Atlas Search 索引，本次按应用层精确检索（结果已按 _score 降序）',
+    'postgres': '数据源 postgres 的 pgvector 近似索引为后过滤，本次降级为精确检索以保证 ACL 与 TopK 正确',
+}
 
 _SCORE_META = {'$meta': 'vectorSearchScore'}
 
@@ -39,15 +51,27 @@ def is_vector_command(cmd):
     return isinstance(first, Mapping) and bool(first.get('$vectorSearch'))
 
 
+def has_filter(cmd):
+    """``$vectorSearch.filter`` 是否有实际条件（缺省 / 空对象视为无过滤）"""
+    if not is_vector_command(cmd):
+        return False
+    spec = cmd['pipeline'][0]['$vectorSearch']
+    flt = spec.get('filter') if isinstance(spec, Mapping) else None
+    return isinstance(flt, Mapping) and bool(flt)
+
+
 def can_scan(cmd, backend):
     """该命令能否在本后端走降级扫描。
 
     backend 为连接 kind（mysql / postgres / sqlite）或 ``'mongo'``；
-    postgres 由方言翻译为原生 SQL（pgvector），不降级。
+    postgres 无过滤时由方言翻译为原生 SQL（pgvector TopK），带过滤时近似索引退化为
+    后过滤（ACL / TopK 不成立）→ 本后端回退应用层精确扫描（运行期降级，不改静态 native）。
     """
-    if backend == 'postgres':
+    if not is_vector_command(cmd):
         return False
-    return is_vector_command(cmd)
+    if backend == 'postgres':
+        return has_filter(cmd)
+    return True
 
 
 def _is_score_stage(stage):

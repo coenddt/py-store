@@ -16,6 +16,7 @@ import time
 from collections.abc import Mapping
 
 from .. import datasource as _datasource
+from .. import degraded as _degraded
 from .. import vector_scan as _vector_scan
 from ..executors.mongo import exec_mongo as _exec_mongo
 from ..feedback import emit as _emit_feedback
@@ -142,6 +143,14 @@ async def _exec_mongo_vector(db, cmd, session=None):
     except Exception as e:
         if not _vector_scan.can_scan(cmd, 'mongo') or not _vector_scan.is_unsupported_stage_error(e):
             raise
+        spec = cmd['pipeline'][0]['$vectorSearch']
+        _degraded.vector_degraded(
+            backend='mongodb',
+            field=spec.get('path'),
+            metric=spec.get('metric'),
+            message=_vector_scan.DEGRADED_MESSAGES['mongodb'],
+            hint=_vector_scan.DEGRADED_HINT,
+        )
         return await _vector_scan.scan(
             cmd,
             exec=lambda candidate: _exec_mongo_candidate(db, candidate, session),

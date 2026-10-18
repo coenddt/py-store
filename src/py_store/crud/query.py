@@ -6,6 +6,7 @@ import inspect
 
 from ..cache.context import run_with_selection
 from ..feedback import emit as _emit_feedback
+from .. import degraded
 from ..schema import get_async_fn, get_core, get_profile
 from .exec import (
     _PROFILE_HINT,
@@ -84,6 +85,7 @@ async def query(gql, params=None, route_override=None):
     _guard_route_override(route_override)
     plan = _call(lambda: get_core().plan_query(
         gql, params if params is not None else {}, _ctx(), route_override))
+    degraded.emit_plan(plan, 'plan_degraded')
 
     async def _selected():
         return await _finalize(plan, await _run_query_plan(plan))
@@ -101,6 +103,7 @@ async def query_one(gql, params=None, route_override=None):
     _guard_route_override(route_override)
     plan = _call(lambda: get_core().plan_query_one(
         gql, params if params is not None else {}, _ctx(), route_override))
+    degraded.emit_plan(plan, 'plan_degraded')
     items = await _finalize(plan, await _run_query_plan(plan))
     return items[0] if items else None
 
@@ -136,9 +139,8 @@ async def query_federated(gql, params=None):
     plan = _call(lambda: get_core().plan_federated(
         gql, params if params is not None else {}, _ctx()))
 
-    for d in plan.get('degraded') or []:
-        # 降级事件走统一反馈通道（无 sink 时打 stderr，允许拦截，禁止静默失守）
-        _emit_feedback(dict(d or {}, type='federation_degraded'))
+    # 降级事件走请求容器 + 统一反馈通道（core 事件通常不带 type，兜底 federation_degraded）
+    degraded.emit_plan(plan, 'federation_degraded')
 
     async def _selected():
         results = await asyncio.gather(
@@ -162,6 +164,7 @@ async def query_with_count(gql, params=None, route_override=None):
     _guard_route_override(route_override)
     plan = _call(lambda: get_core().plan_query_with_count(
         gql, params if params is not None else {}, _ctx(), None, route_override))
+    degraded.emit_plan(plan, 'plan_degraded')
     items = await _finalize(plan, await _run_query_plan(plan))
     total = await _exec(plan['countCommand'])
     return {

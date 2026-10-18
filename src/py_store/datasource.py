@@ -22,6 +22,7 @@ import weakref
 from collections.abc import Mapping
 
 from . import executors
+from . import degraded
 from . import vector_scan
 from .feedback import emit as _emit_feedback
 from .schema import get as _get_schema
@@ -509,10 +510,21 @@ async def exec_sql(source, connection, cmd):
     塑形为 Mongo 驱动等价返回值（见 ``executors.shape_result``），使上层（crud/*）
     对 Mongo / SQL 两条路径无感。
 
-    向量检索降级（03 §4.7）：MySQL / SQLite 不支持 ``$vectorSearch`` →
-    取候选 + core 精确打分；PostgreSQL 由方言翻译为 pgvector SQL，不经此处降级。
+    向量检索降级（03 §4.7 / 05 §4.9）：MySQL / SQLite 不支持 ``$vectorSearch`` →
+    取候选 + core 精确打分；PostgreSQL 无过滤由方言翻译为 pgvector SQL，带过滤时
+    近似索引退化为后过滤（ACL / TopK 不成立），同样回退应用层精确扫描 ——
+    均为运行期降级，不改变静态 native 判定。
     """
-    if vector_scan.can_scan(cmd, _kind_of(connection)):
+    kind = _kind_of(connection)
+    if vector_scan.can_scan(cmd, kind):
+        spec = cmd['pipeline'][0]['$vectorSearch']
+        degraded.vector_degraded(
+            backend=kind,
+            field=spec.get('path'),
+            metric=spec.get('metric'),
+            message=vector_scan.DEGRADED_MESSAGES[kind],
+            hint=vector_scan.DEGRADED_HINT,
+        )
         return await vector_scan.scan(
             cmd, exec=lambda candidate: _exec_sql_direct(source, connection, candidate))
 
