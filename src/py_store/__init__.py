@@ -55,6 +55,7 @@ from . import (
 from . import (
     local as local,
 )
+from . import reindex as reindex_mod
 from .ask import AskExhausted as AskExhausted
 from .ask import AskResult as AskResult
 from .crud import triggers as triggers
@@ -327,6 +328,18 @@ class Store:
     async def ensure_vector_indexes(self, opts=None):
         """幂等创建 schema 中声明 options.indexName 的 Atlas 向量索引"""
         return await vector_index.ensure_vector_indexes(self, opts or {})
+
+    # ── 向量回填（VR-10；见 reindex.py）──
+    async def reindex_vectors(self, schema_name: str, **opts) -> dict[str, Any]:
+        """向量回填：按 source_hash 只重算变化项"""
+        return await reindex_mod.reindex_vectors(self, schema_name, **opts)
+
+    def register_vector_reindex(self, cfg: dict) -> str:
+        """注入 trigger 回调 ``<Schema>.vectorReindex``，返回 fnRef
+
+        （须在 ``assert_trigger_fns_covered`` 之前调用）
+        """
+        return reindex_mod.register_vector_reindex(cfg)
 
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
     def register_workflow(self, defn: dict, ctx: dict | None = None) -> dict:
