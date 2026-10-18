@@ -6,6 +6,7 @@ name: ci
 #   3. pytest + 覆盖率门禁（语句 ≥90%；分支口径单独出具）
 #
 # 真实三库由 services 起容器，库名/账号与测试默认 URI 对齐（e2e/e2e123，库 mongo_store_e2e）；
+# test_vector_conformance 另用 mongo_store_e2e_real（由 Prepare 步骤创建，pg 侧含 pgvector 扩展）；
 # e2e 表名带随机 token 后缀，多实例互不干扰。
 # core 走 PyPI 发布的 rust-store-py（随 `pip install -e .[dev,...]` 安装），无需 LOCAL_CORE。
 on:
@@ -36,8 +37,10 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=12
+      # pgvector 官方镜像（postgres 超集）：postgres:16 无 vector 扩展，
+      # 向量一致性套件建表 DDL 会报 type "vector" does not exist → 整套静默 skip
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: e2e
           POSTGRES_PASSWORD: e2e123
@@ -73,6 +76,17 @@ jobs:
             sleep 2
           done
           echo "mongo PRIMARY 未就绪" && exit 1
+      # test_vector_conformance 三库默认连 mongo_store_e2e_real（与 real_backends 的
+      # mongo_store_e2e 区分）；pgvector 按库启用，建 vector 列/索引前必须先在该库
+      # CREATE EXTENSION，否则建表 DDL 报 type "vector" does not exist → 整套静默 skip
+      - name: Prepare MySQL / PostgreSQL databases
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE IF NOT EXISTS mongo_store_e2e_real;
+            GRANT ALL ON mongo_store_e2e_real.* TO 'e2e'@'%';
+            FLUSH PRIVILEGES;"
+          PGPASSWORD=e2e123 psql -h 127.0.0.1 -U e2e -d postgres -c 'CREATE DATABASE mongo_store_e2e_real'
+          PGPASSWORD=e2e123 psql -h 127.0.0.1 -U e2e -d mongo_store_e2e_real -c 'CREATE EXTENSION IF NOT EXISTS vector'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
