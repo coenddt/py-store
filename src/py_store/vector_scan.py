@@ -196,12 +196,14 @@ def strip_vector_meta(cmd):
 
 
 def is_unsupported_stage_error(err):
-    """Mongo 驱动是否因「不认识 ``$vectorSearch`` 阶段」而报错。
-    只认该形态（code 40324 或 Unrecognized pipeline stage），其余错误原样上抛。
+    """Mongo 是否因「自建 mongod 执行不了 ``$vectorSearch``」而报错。
+    只认两种形态，其余错误原样上抛：code 40324（不认识该阶段）与
+    code 6047401（mongod 7+ 认识该阶段但仅 Atlas 允许执行）——
+    两者对「降级到本地精确扫描」语义等价。
     """
     if err is None:
         return False
-    if getattr(err, 'code', None) == 40324:
+    if getattr(err, 'code', None) in (40324, 6047401):
         return True
     msg = str(err)
     return 'unrecognized pipeline stage' in msg.lower() and '$vectorSearch' in msg

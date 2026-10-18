@@ -225,6 +225,14 @@ async def _run(tag, tmp_path, body):
             await store.insert(name, dict(doc))
         await body(name)
     finally:
+        # 持久后端（mongodb/mysql/postgres）跨用例共享库，seed 前不清理会 E11000；
+        # 逐条按 _id 自清理，memory/local/sqlite 每用例独立实例删零行无副作用。
+        # 清理失败静默（不得替换 body 的原始失败），漏删会由下一用例 E11000 直接暴露
+        for doc in CONFORMANCE['docs']:
+            try:
+                await store.remove(name, {'_id': doc['_id']})
+            except Exception:
+                pass
         await _close(tag, driver)
 
 
