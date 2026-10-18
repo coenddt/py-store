@@ -48,6 +48,8 @@ from py_store import init, store
 - [Transactions](#transaction-boundary)
 - [Triggers](#triggers)
 - [Transactional capabilities](#transactional-capabilities)
+- [Scenario examples](#scenario-examples)
+- [Performance](#performance)
 - [FAQ](#faq)
 - [Related projects](#related-projects)
 - [Framework usage contract](#framework-usage-contract)
@@ -757,6 +759,661 @@ run = await workflow.run('placeOrder', {'productId': 'p1', 'warehouse': 'w1', 'q
 | Workflow defn persistence / hot reload | Depends on schema versioning (next on the roadmap) | defn stays code-side JSON + register, like schemas today |
 | Timers / event triggers | Scheduling is a resident-IO concern, orthogonal to pure orchestration | call `run` from the application layer |
 | Placeholders inside gql / array-index paths | Injection surface / per-row iteration semantics | params binding / host-code orchestration |
+
+## Scenario examples
+
+The reference sections above describe each capability on its own. The examples below put the same
+library to work in a concrete business situation — each is copy-runnable against the backends
+listed in [Supported backends](#supported-backends).
+
+### 1. Define a schema as plain Python and query it right away
+
+**Scenario.** You are adding a `Post` model to a small service and do not want to hand-write DDL,
+an ODM class, or a repository layer. The model is data, not code.
+
+```python
+from pymongo import AsyncMongoClient
+from py_store import init, store
+
+await init(AsyncMongoClient("mongodb://localhost:27017")["mydb"])
+
+store.register({
+    "name": "Post",
+    "collection": "posts",
+    "idPrefix": "PT",
+    "fields": {
+        "title":  {"type": "string", "default": ""},
+        "status": {"type": "string", "default": "draft"},
+        "tags":   {"type": "array",  "default": []},
+    },
+})
+
+await store.insert("Post", {"title": "Hello"})
+items = await store.query(
+    "Post($condition:@c0,$sort:@s1,$limit:@l) { title, status }",
+    {"c0": {"status": "draft"}, "s1": {"createdAt": -1}, "l": 20},
+)
+```
+
+**Result.** `items` is `[{"_id": "PT…", "title": "Hello", "status": "draft"}]` — you never wrote
+`status`; it is filled by the field `default` on read.
+
+**Why it wins.** The model is a plain dict, so there is no class hierarchy, no metaclass and no
+import-time registration dance — `register()` plus `init()` and the model exists. String `_id`s are
+generated for you (`idPrefix` + base36 timestamp + random), and because the very same dict is a valid
+schema for the Node.js host ([`nodejs-store`](https://github.com/coenddt/nodejs-store)), a schema
+written here is not locked to Python.
+
+### 2. One schema, swap the backend without touching business code
+
+**Scenario.** You develop against a local SQLite file and deploy on PostgreSQL. You do not want two
+query dialects or a rewrite at deploy time.
+
+```python
+import aiosqlite
+from py_store import executors, init, store
+
+# local dev: a SQLite file
+db = await aiosqlite.connect("dev.db")
+await init({"default": executors.create_connection("sqlite", db)})
+```
+
+```python
+import asyncpg
+from py_store import executors, init, store
+
+# production: a PostgreSQL pool
+pool = await asyncpg.create_pool(dsn="postgres://user:pass@host:5432/db")
+await init({"default": executors.create_connection("postgres", pool)})
+```
+
+The business code that follows is identical in both environments:
+
+```python
+items = await store.query(
+    "Post($condition:@c0) { title, status }",
+    {"c0": {"status": "draft"}},
+)
+```
+
+**Result.** Both environments return the same document shape; only the two datasource lines differ.
+
+**Why it wins.** GQL is compiled per backend by the shared Rust core — native aggregation on MongoDB,
+parameterized SQL on SQLite/PostgreSQL/MySQL. Your business code holds no SQL string and no dialect
+branch, so "change the database" is a change to the connection, not to the query. The `local` disk
+datasource (see [example 7](#7-local-disk-datasource-for-tests-and-offline-caches)) slots in the same
+way with `local.connect(...)`.
+
+### 3. Fetch a course with its lessons, category and reviews in one query (no N+1)
+
+**Scenario.** A course detail page needs the course, its category, its lesson list and its reviews.
+The classic bug is N+1: one query for the course, then one more per relation.
+
+```python
+course = await store.query_one(
+    "Course($condition:@c0){ _id, title, "
+    "  category { _id, name }, "
+    "  lessons { _id, title, seq }, "
+    "  reviews { _id, score } }",
+    {"c0": {"_id": "c1"}},
+)
+```
+
+**Result.** One document with the relations merged in:
+
+```python
+{"_id": "c1", "title": "Python入门",
+ "category": {"_id": "cat2", "name": "后端"},
+ "lessons": [{"_id": "l1", "title": "安装", "seq": 1}, {"_id": "l2", "title": "入门", "seq": 2}],
+ "reviews": [{"_id": "r1", "score": 5}, {"_id": "r2", "score": 4}]}
+```
+
+`one` relations merge into the parent document, `many` relations become lists (`[]` when empty, and a
+missing `one` is `None`).
+
+**Why it wins.** Relations are declared once in the schema, so the selection set alone tells the engine
+to resolve them: MongoDB compiles to `$lookup`, SQL to `JOIN`, in a single query per backend. There is
+no ORM `selectinload` / `prefetch_related` to remember and no `$lookup` to hand-write, and a missing
+relation is `None`/`[]` rather than a crash. Child lists can even be sorted and paginated per parent:
+`lessons($sort:@s0,$limit:@l0){ _id, title }`.
+
+### 4. Row-level data access for an org / multi-tenant model
+
+**Scenario.** Online study notes: a student must only read and write their own notes, an audit log is
+admin-only, and a `secret` course field is admin-only. You want this enforced in the data layer, not
+re-implemented in every handler.
+
+```python
+store.register({
+    "name": "StudyNote", "collection": "study_notes",
+    "read": ["creator", "admin"], "write": ["creator", "admin"],
+    "fields": {"_id": {"type": "string"}, "title": {"type": "string"},
+               "createdBy": {"type": "string"}},
+    "relations": {},
+})
+```
+
+```python
+# set once per request, in the router / dependency layer
+store.set_context({"userId": "u1", "roles": ["student"]})
+
+# only u1's notes come back — the owner condition is injected automatically
+mine = await store.query("StudyNote($condition:@c0){ _id, title }", {"c0": {"title": "笔记A"}})
+```
+
+**Result.** `mine == [{"_id": "n1", "title": "笔记A"}]`. Another user's note is never returned, and
+asking for it explicitly returns `[]` — the owner condition is ANDed with your condition, never
+replaces it.
+
+**Why it wins.** `creator` is a pseudo-role resolved from `doc.createdBy == ctx.userId`, so ownership
+is a data fact rather than a per-handler check — schemas that grant it get owner conditions and
+ownership checks injected on the read *and* write paths (including `count`/`exists`). Field-level
+whitelists work the same way: a `student` requesting a field marked `read: ["admin"]` simply does not
+get the field, while an explicitly requested, unreadable **relation** raises `store.PermissionError`
+(`status = 403`) instead of a silent `False`. Privileged roles (`super_admin`/`admin`/`internal`) pass
+everything; `guest` can never write.
+
+### 5. Computed columns reused at zero cost on the Python side
+
+**Scenario.** A course list shows `revenue = price * enrolledCount` and `lessonCount = number of
+lessons`. You want both computed at read time, with no denormalized columns to keep in sync.
+
+```python
+store.register({
+    "name": "Course", "collection": "courses",
+    "fields": {"_id": {"type": "string"}, "price": {"type": "float"},
+               "enrolledCount": {"type": "int"}},
+    "relations": {
+        "lessons": {"model": "Lesson", "type": "many",
+                    "localField": "_id", "foreignField": "courseId"},
+    },
+    "computes": {
+        # sync compute over a single document
+        "revenue": {"type": "float", "depends": ["price", "enrolledCount"],
+                    "fn": lambda d: (d.get("price") or 0) * (d.get("enrolledCount") or 0)},
+        # relation aggregate: count of the related lessons
+        "lessonCount": {"type": "int", "agg": {"$count": "lessons"}},
+        # async compute over the whole result page (async def fn(items, ctx) -> None)
+        "displayName": {"type": "string", "depends": ["name"], "asyncFn": my_display_name},
+    },
+})
+```
+
+```python
+rows = await store.query(
+    "Course($condition:@c0){ _id, price, revenue, lessonCount }",
+    {"c0": {"_id": "c2"}},
+)
+```
+
+**Result.** `rows == [{"_id": "c2", "price": 100.5, "revenue": 301.5, "lessonCount": 2}]`. You never
+requested `enrolledCount`, yet `revenue` is correct — `depends` pulled the input in — and it does not
+leak into the output.
+
+**Why it wins.** Dependency fields are auto-injected for the computation and auto-removed from the
+projection, so the wire shows exactly what you asked for. A `fn` is one callback over a row; an
+`asyncFn` is one batched pass over the whole result (`async def fn(items, ctx)`); an `agg` reuses the
+same relation-aggregate machinery as query filters, so "count of lessons" needs no hand-written join.
+Reuse across schemas is name-based: give the column an explicit `"fnRef": "common.moneyLabel"` and both
+Python's `common_money_label` and Node's `commonMoneyLabel` bind to the same logical column (binding is
+by canonical name; a `fnRef` with no implementation aborts startup with `ERR_FN_MISSING`).
+
+### 6. Aggregation that replaces a hand-rolled SQL report
+
+**Scenario.** A dashboard needs "courses grouped by status, with a count and a price sum, keeping only
+groups that have more than one course". Instead of one SQL query per metric, ask once.
+
+```python
+rows = await store.query(
+    "Course($condition:@c0,$group:@g0,$having:@h0,$sort:@s0,$limit:@l0){ status, n, total }",
+    {
+        "c0": {"status": {"$ne": "deleted"}},
+        "g0": {"by": ["status"], "agg": {"n": {"$count": "*"}, "total": {"$sum": "price"}}},
+        "h0": {"n": {"$gt": 1}},
+        "s0": {"total": -1},
+        "l0": 20,
+    },
+)
+```
+
+**Result.** `[{"status": "published", "n": 5, "total": 1000000000000110.8}]` — a
+`GROUP BY status ... HAVING count(*) > 1`, ordered by the summed price.
+
+**Why it wins.** `$group` / `$having` are part of GQL, so the same call runs native aggregation on
+MongoDB and a parameterized `GROUP BY ... HAVING` on SQL — no separate reporting SQL, no dialect
+branches. The execution order is fixed and documented (`WHERE → GROUP BY → HAVING → sort → skip/limit`),
+the operator whitelist is `$count` / `$sum` / `$avg` / `$min` / `$max`, and omitting `by` (or passing
+`[]`) yields a single whole-table row. Parents can also be filtered by a child aggregate without
+fan-out — `{"orders": {"$count": {"$gt": 3}}}` becomes `EXISTS` / `NOT EXISTS` on SQL and never
+duplicates the parent row.
+
+### 7. Local disk datasource for tests and offline caches
+
+**Scenario.** You want the same data-layer code in CI or a sandbox with no database to install, and a
+durable cache that survives a restart — with zero services.
+
+```python
+from py_store import init, local, store
+
+await init({"default": local.connect({"dir": "./data/store"})})
+
+store.register({"name": "User", "collection": "users",
+               "fields": {"_id": {"type": "string"}, "name": {"type": "string"}},
+               "relations": {}})
+await store.insert("User", {"name": "Ada"})
+rows = await store.query("User{ _id, name }")
+```
+
+**Result.** `rows == [{"_id": "…", "name": "Ada"}]`, and `./data/store/users.json` now holds a JSON
+array of the documents.
+
+**Why it wins.** `local.connect({"dir": …})` returns an ordinary connection descriptor, so it drops
+into the same `init()` and every GQL/CRUD call works unchanged — no SQL engine, no driver (the `local`
+source is evaluated by the core's local evaluator with MongoDB-matching semantics). Writes go through a
+`.tmp` file plus an atomic rename, and `store.transaction` / `store.session` get snapshot isolation
+that is atomic by construction. The guardrails are explicit rather than silent: a hard cap of 100,000
+documents per collection, no indexes (declaring `schema.indexes` emits a `local_indexes_ignored`
+feedback event), and single-process only.
+
+### 8. Workflow orchestration: chain multi-step business actions
+
+**Scenario.** "Place an order" is: read the stock, fail if it is missing, fail if it is insufficient,
+then decrement. You want the steps and their guards expressed as data, executed fail-fast, and
+auditable afterwards.
+
+```python
+from py_store import workflow
+
+workflow.register({
+    "name": "placeOrder",
+    "run": ["admin", "ops"],
+    "steps": [
+        {"op": "query", "as": "inv",
+         "gql": "Inventory($condition:@c0){_id, stock}",
+         "params": {"c0": {"productId": "{{input.productId}}", "warehouse": "{{input.warehouse}}"}}},
+        {"op": "fail", "when": {"exists": "{{inv._id}}", "is": None}, "message": "库存记录不存在"},
+        {"op": "fail", "when": {"lt": "{{inv.stock}}", "than": "{{input.qty}}"}, "message": "库存不足"},
+        {"op": "mutation", "model": "Inventory",
+         "data": {"_id": "{{inv._id}}", "stock": "{{dec:{{inv.stock}},{{input.qty}}}}"}},
+    ],
+})
+
+run = await workflow.run("placeOrder", {"productId": "p1", "warehouse": "w1", "qty": 30})
+```
+
+**Result.** `run["status"]` is one of `succeeded | failed | rejected | drySucceeded | dryFailed`;
+business failures do not raise — the reason is in `run["error"]` (null on success). The run is
+persisted to the built-in `__workflowRun` schema, so it is queryable with plain GQL.
+
+**Why it wins.** The definition is pure JSON isomorphic to a schema defn and is validated statically at
+`register()`: an unknown step type, a backward placeholder reference, a `when` with a missing operand,
+or a `gql` with an embedded placeholder all fail at registration (`WORKFLOW_UNSUPPORTED`) rather than at
+run time. Steps are a whitelist (`query` / `mutation` / `fail`), placeholders are `{{input.x}}`,
+`{{step.field}}` and `{{dec:a,b}}`, and every step runs under the caller's permission context — there is
+no super-identity. A single-source run is atomic end-to-end; a `fail` guard records the run as `failed`
+with its `stepIndex`, never silently skipped. `workflow.run(name, input, dry_run=True)` executes the
+reads for real and marks writes as `wouldRun`.
+
+### 9. Fail-secure mode: one switch closes every open fallback
+
+**Scenario.** You are going to production and cannot rely on "the caller always remembered to set the
+context". You want the safe default to be the enforced default.
+
+```python
+from py_store import secure
+
+# once, at startup
+secure.secure_mode(admin_roles=["admin"])
+```
+
+**Result.** With no context set, every query/write now raises `ERR_NO_CONTEXT` instead of passing
+(fail-open → fail-secure). Background jobs must opt in explicitly:
+
+```python
+await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))   # still passes
+```
+
+Unconfigured schemas are denied to *everyone* (admin included) until a whitelist is declared, and
+registering a new definition without a context is refused. `secure.relax_mode()` restores the
+permissive defaults; `secure.is_secure()` reports the current state.
+
+**Why it wins.** `secure_mode()` flips three previously-independent switches together (require-context,
+unconfigured-roles-closed, meta-policy-closed), so you cannot turn on one and forget the other two.
+`run_as_internal` is *semantically distinct* from a missing context, which is exactly what lets system
+jobs keep working while forgotten contexts fail closed — the two cases that "no context" used to
+conflate. Degraded paths stay loud, too: a `set_feedback_sink` still receives structured events instead
+of a failure going quiet.
+
+### 10. Multi-datasource: MySQL + Mongo behind one store, one federated GQL
+
+**Scenario.** Your users live in MongoDB, your orders live in MySQL, and a profile page needs both.
+You do not want two clients, two query languages and a hand-written join in the middle.
+
+```python
+import asyncmy
+from pymongo import AsyncMongoClient
+from py_store import executors, init, store
+
+await init({
+    "mongo_main": AsyncMongoClient("mongodb://mongo-host:27017")["shop"],
+    "mysql_main": executors.create_connection(
+        "mysql", await asyncmy.create_pool(host="mysql-host", user="app",
+                                           password="…", db="shop", autocommit=True)),
+})
+
+# each def pins its home source; the relation is cross-source
+store.register({
+    "name": "User", "collection": "users", "datasource": "mongo_main",
+    "fields": {"_id": {"type": "string"}, "name": {"type": "string"}},
+    "relations": {
+        "orders": {"model": "Order", "type": "many",
+                   "localField": "_id", "foreignField": "userId"}},
+})
+store.register({
+    "name": "Order", "collection": "orders", "datasource": "mysql_main",
+    "fields": {"_id": {"type": "string"}, "userId": {"type": "string"},
+               "code": {"type": "string"}, "amount": {"type": "float"}},
+    "relations": {},
+})
+
+rows = await store.query_federated(
+    "User($condition:@c0){ _id, name, orders { code, amount } }",
+    {"c0": {"name": "ada"}},
+)
+```
+
+**Result.** Each user comes back with its MySQL orders nested in the same document — the store
+fetches per source, joins in memory, and rehydrates the tree:
+
+```python
+[{"_id": "u1", "name": "ada", "orders": [{"code": "A1", "amount": 30.0}, ...]}]
+```
+
+**Why it wins.** A schema is located by `(source, database, collection)` and each def carries its
+`datasource`, so one registry covers every backend. SQL cross-database / PG-schema joins are pushed
+down natively (`"db_a"."t" JOIN "db_b"."t"`); Mongo cross-source relations run through the federated
+path (`query_federated`) — and when a segment cannot be pushed down you get a structured
+`federation_degraded` event, not a silent slowdown. This exact topology (Mongo users → MySQL orders,
+plus a PG side) is what the repo's own four-database stress test runs 8 concurrent workers against
+(see [Performance](#performance)).
+
+### 11. Transaction + raw SQL: a transfer that cannot half-land
+
+**Scenario.** Money moves between two accounts: lock the source row, check the balance, debit one
+side, credit the other, and append an audit ledger row. Any failure must roll back everything.
+
+```python
+async def transfer(amount, from_id, to_id):
+    rows = await store.execute_raw(
+        "pg_main", "SELECT balance FROM accounts WHERE _id = $1 FOR UPDATE", [from_id])
+    if rows["rows"][0]["balance"] < amount:
+        raise ValueError("insufficient funds")        # rolls the whole scope back
+
+    await store.execute_raw(
+        "pg_main", "UPDATE accounts SET balance = balance - $1 WHERE _id = $2",
+        [amount, from_id], is_write=True)
+    await store.execute_raw(
+        "pg_main", "UPDATE accounts SET balance = balance + $1 WHERE _id = $2",
+        [amount, to_id], is_write=True)
+    await store.insert("Ledger", {"fromId": from_id, "toId": to_id, "amount": amount})
+    #  ↑ a plain CRUD call — it lands on the same transaction connection
+
+await store.transaction("pg_main", lambda: transfer(30, "acc_a", "acc_b"))
+```
+
+**Result.** All four statements commit together or not at all. `execute_raw` returns
+`{"rows", "affectedRows"}` (rows for reads, the affected count for writes), and
+`store.transaction(source, fn)` reuses one connection for everything inside `fn` — raw SQL and
+CRUD alike.
+
+**Why it wins.** Raw SQL is compiled by the core's `raw_stmt_compile` (named `:name` params or
+positional `?`/`$1`), so escaping and dialect details stay out of your code while the escape hatch
+stays fully native (`FOR UPDATE` included). Mongo sources are probed at runtime (replica set /
+sharded) and wrapped in a session transaction; standalone Mongo or an executor without transaction
+primitives runs `fn` as-is and emits `mongo_transaction_unsupported` / `transaction_not_atomic` —
+degradation is announced, never silently pretended. Nested same-source scopes become savepoints: an
+inner failure rolls back only that scope.
+
+### 12. Session (Unit of Work): many writes, one commit, fail closed across sources
+
+**Scenario.** "Create an order" touches three tables: insert the order, decrement stock, append an
+audit row. You want all of it to behave as one unit of work without hand-managing a connection.
+
+```python
+async with store.session() as s:
+    order = await s.insert("Order", {"userId": "u1", "amount": 30})
+    await s.update("Inventory", {"_id": "sku1"}, {"$inc": {"stock": -1}})
+    await s.insert("AuditLog", {"kind": "order", "ref": order["_id"]})
+# exits → one commit; any exception → one rollback
+```
+
+**Result.** Every command on the same SQL source lands on one transaction connection; the session
+commits once on exit and rolls back as one unit on any exception. A session with no commands never
+checks out a connection (lazy start).
+
+**Why it wins.** Sessions nest with savepoints (`SAVEPOINT sp_<n>`), so an inner failure rolls back
+only the inner scope while the outer continues. The dangerous case is handled fail-closed: a session
+writing to ≥2 datasources rolls everything back and raises `NonAtomicWriteError` — there is no
+distributed transaction to silently half-commit. Executors without the primitives emit
+`session_not_atomic` instead of pretending.
+
+### 13. DDL generation: schema in, CREATE TABLE text out
+
+**Scenario.** Your models are registered in code and the DBA (or Alembic) now needs the physical
+tables. You want a migration starting point without a second source of truth.
+
+```python
+sql = store.generate_ddl("postgres")                           # every registered model
+sql = store.generate_ddl("sqlite", ["Order", "OrderDeleted"])  # just these two
+```
+
+**Result.** Plain `CREATE TABLE` text — never executed, never written to the database — generated
+from the registered defs:
+
+```sql
+CREATE TABLE "bench_orders" (
+  "_id" TEXT PRIMARY KEY,
+  "user_id" TEXT,
+  "amount" REAL,
+  "qty" INTEGER,
+  "status" TEXT,
+  "__present" TEXT
+);
+```
+
+**Why it wins.** `generate_ddl(backend, names)` is the inverse of `sync_schema()` (which only
+*reads*). Freeform field names are translated per backend (`userId` → `user_id` on SQL, `userId` on
+Mongo), every table gets the `__present` sentinel column, and the `<Model>Deleted` archive table is
+generated exactly once alongside its model. No `CREATE INDEX` is emitted (SQL backends keep indexes
+as metadata), and edge cases fail loudly (`ddlPresentOverflow`) rather than silently.
+
+### 14. Triggers: a declarative audit trail inside the same transaction
+
+**Scenario.** Every insert, balance-changing update and delete on `Order` must leave an audit row —
+and if the audit write fails, the business write must not land either.
+
+```python
+DEFS = [{
+    "name": "Order", "collection": "orders", "idPrefix": "OD",
+    "fields": {"_id": {"type": "string"}, "amount": {"type": "float"},
+               "status": {"type": "string"}},
+    "triggers": {
+        "insert": [{"name": "aud_ins", "into": "AuditLog", "op": "insert",
+                    "data": {"_id": "{{now}}", "kind": "ins",
+                             "ref": "{{root._id}}", "amount": "{{root.amount}}"}}],
+        "update": [{"name": "aud_upd", "onFields": ["amount"], "into": "AuditLog",
+                    "op": "insert",
+                    "data": {"_id": "{{now}}", "kind": "upd",
+                             "ref": "{{root._id}}", "amount": "{{root.amount}}"}}],
+        "remove": [{"name": "aud_del", "fnRef": "auditRemove",
+                    "args": {"id": "{{before._id}}"}}],
+    },
+}, {
+    "name": "AuditLog", "collection": "audit_logs", "idPrefix": "AL",
+    "fields": {"_id": {"type": "string"}, "kind": {"type": "string"},
+               "ref": {"type": "string"}, "amount": {"type": "float"}},
+}]
+
+for d in DEFS:
+    store.register(d)
+
+async def audit_remove(args, ctx, host):
+    await host["store"].insert("AuditLog", {"kind": "del", "ref": args["id"]})
+
+store.set_trigger_fn("auditRemove", audit_remove)
+store.assert_trigger_fns_covered(DEFS)   # startup: a declared fnRef without an impl ⇒ ERR_TRIGGER_FN_MISSING
+```
+
+**Result.** A write event is expanded by the Rust core at plan time into an ordered trigger chain
+that the host runs inside the same atomic envelope as the source write: `insert` and
+`update(amount)` leave command-written audit rows; removing an order runs the `auditRemove` callback
+with the pre-delete document (`{{before._id}}`).
+
+**Why it wins.** The chain is data, declared on the schema. `update` events fire only when the
+watched fields actually changed (structural deep compare — an unchanged value never fires);
+`{{root.*}}` / `{{before.*}}` / `{{now}}` are whole-value substitutions (embedding one inside a
+string raises `ERR_TRIGGER_PLACEHOLDER`); duplicates `(step.name, _id)` run once; callbacks receive
+`(args, ctx, {"store": store})` and any `store.*` inside them hits the same transaction connection.
+A failing callback or command step rolls the whole write back — and there is no cascading: a trigger
+write never fires further triggers.
+
+### 15. Soft delete archive: remove() that keeps the audit trail
+
+**Scenario.** Compliance wants deletes to keep an audit trail: the row disappears from every list,
+but the archive stays queryable — including *when* it was deleted.
+
+```python
+r = await store.remove("Order", {"_id": "o1"})
+# r == {"deletedCount": 1, "archivedCount": 1}
+
+archived = await store.query("OrderDeleted{ _id, amount, deletedAt }")
+```
+
+**Result.** The document is copied into the auto-derived `OrderDeleted` archive (with `deletedAt`),
+then deleted from `orders`. The archive is a normal registered def — plain GQL works on it, and it
+shows up in `generate_ddl()` exactly once.
+
+**Why it wins.** Every registered model gets its `<Model>Deleted` archive collection/table for free,
+derived by the Rust core at registration. Archive writes are upsert-by-`_id`, so re-creating the
+same `_id` never collides and a retry after partial failure idempotently re-archives. An
+empty-condition `remove` is rejected outright — a full-table delete cannot be triggered by
+forgetting a filter.
+
+### 16. FastAPI: per-request permission context in one dependency
+
+**Scenario.** An internal admin API: paginated list, create, soft-delete. Permissions must be
+enforced at the data layer for every endpoint, not re-written per route.
+
+```python
+from fastapi import Depends, FastAPI, Request
+from py_store import init, store
+
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup():
+    await init({"default": mongo_db})
+    store.register({
+        "name": "Article", "collection": "articles", "idPrefix": "AR",
+        "fields": {"_id": {"type": "string"}, "title": {"type": "string", "default": ""},
+                   "body": {"type": "string", "default": ""},
+                   "status": {"type": "string", "default": "draft"},
+                   "authorId": {"type": "string", "default": ""}},
+        "read": ["editor", "viewer", "creator"],
+        "write": ["editor", "creator"],
+    })
+
+async def current_user(request: Request) -> dict:
+    user = {"userId": request.headers["x-user-id"],
+            "roles": request.headers.getlist("x-role")}
+    store.set_context(user)          # one dependency, whole request covered
+    return user
+
+@app.get("/articles")
+async def list_articles(page: int = 0, page_size: int = 50,
+                        user: dict = Depends(current_user)):
+    return await store.query_with_count(
+        "Article($sort:@s1){ _id, title, status }",
+        {"s1": {"createdAt": -1}, "page": page, "pageSize": page_size})
+    # → {"items", "total", "hasMore", "page", "pageSize"}   (pageSize capped at 5000)
+
+@app.delete("/articles/{article_id}")
+async def delete_article(article_id: str, user: dict = Depends(current_user)):
+    return await store.remove("Article", {"_id": article_id})   # archives first
+```
+
+**Result.** Role checks (schema/field whitelists, `creator` ownership) run on every store call with
+no per-route code; `delete` leaves an auditable archive row.
+
+**Why it wins.** The permission context lives in a `ContextVar`, so setting it in an `async`
+dependency covers the whole request path (a sync dependency running in a thread pool would not).
+A missing context is fail-open by default for backward compatibility; flip
+`store.set_require_context(True)` at startup and forgotten contexts raise `ERR_NO_CONTEXT` instead
+of passing. Empty-condition writes (`update_many` / `remove` with `{}`) are rejected outright, so a
+missing filter can never become a full-table write. The full walkthrough lives in
+[doc/use-cases/04-fastapi-admin-backend.md](doc/use-cases/04-fastapi-admin-backend.md).
+
+## Performance
+
+Numbers below come from two sources: a micro-benchmark run on the machine writing this README
+(SQLite, no services needed — the query/write patterns are copy-runnable) and the repo's own
+four-database stress test.
+
+### Micro-benchmark (SQLite, measured locally)
+
+Measured **2026-10-15**, Python 3.14.4, Windows amd64, file-backed SQLite via `aiosqlite`, py-store
+on the Rust core (`rust-store-py`). Each figure is the median of 4 runs after discarding one warm-up
+run. Seed data: 200 users; the order table grows to 30,000 rows across the write benchmarks.
+
+| Operation | Data volume | Median | Throughput / comparison |
+|---|---|---|---|
+| `insert_many` (10 batches × 1,000) | 10,000 rows | 392 ms | **≈ 25,500 rows/s** |
+| single `insert` in a loop | 1,000 rows | 3,439 ms | ≈ 290 rows/s → batching is ≈ 88× faster |
+| GQL tree query — 1 call, relations nested | 100 users + 15,000 child rows | 517 ms | 1 call |
+| hand-written N+1 — same data | 100 users + 15,000 child rows | 718 ms | 101 calls → **1.4× slower** |
+| `$group` pushed down to SQL | 10,000 rows | 15 ms | 1 call |
+| fetch-all + Python-side groupby | 10,000 rows | 600 ms | **41× slower** |
+| computed column (read-time `fn`) | 2,000 rows | 29 ms | ≈ equal to a manual loop (29 ms) |
+
+How to read this:
+
+- **Aggregation is the big win.** `$group` compiles to a `GROUP BY` executed *inside* SQLite; the
+  manual alternative pays to move all 10,000 rows over the driver and re-aggregate them in Python.
+- **The tree query wins on call count, not just latency.** One round trip versus 101. Against a
+  local SQLite file each extra call is cheap, so the wall-clock gap is 1.4×; over a network to
+  MySQL/PostgreSQL/MongoDB each of those 101 calls costs an RTT and the gap widens accordingly.
+- **Batching is the biggest single lever.** The same rows written as one `insert_many` per 1,000 are
+  ~88× faster than 1,000 single inserts — each single insert pays planning plus its own commit.
+- **Computed columns are honest, not magic.** The `fn` runs per row on the Python side, so it
+  matches a hand-written loop while removing the bookkeeping you would otherwise maintain by hand
+  (dependency injection, projection cleanup).
+
+### Four-database stress test (recorded in this repo)
+
+`stress/stress.py` (in this repo) drives MongoDB + MySQL + PostgreSQL + SQLite simultaneously —
+8 workers × 200 rounds × 5 ops each (a 3-source federated query, a SQLite write, a PostgreSQL
+count, a Mongo query, a MySQL `$inc` update). The recorded run in
+[doc/2026-09-12-压测报告.md](doc/2026-09-12-压测报告.md) reports: **8,000 operations, 0 errors,
+824 QPS**, federated-query p50 **19.3 ms** / p95 24.2 ms. (To be verified: not re-run on the machine
+writing this README — it needs running MySQL/PG/Mongo services; treat these as the repo's recorded
+figures, reproducible with the command in that report.)
+
+### Where the time goes (design notes)
+
+- **The Rust core does the planning.** GQL parsing, permission checks, computed-column planning,
+  command planning and SQL dialect translation all run in Rust (`rust-store-py` via PyO3); the
+  Python host crosses the FFI once per command and then does driver IO — one boundary crossing per
+  command, not per row.
+- **Pushdown over shipping data.** `JOIN` / `$lookup`, `GROUP BY` / `HAVING`, `EXISTS` /
+  `NOT EXISTS` semi/anti-joins, and per-parent child sorting/paging are compiled into one statement
+  per backend — the work happens where the data lives.
+- **Read-time rehydration.** Flat JOIN rows are reassembled into nested documents once per result
+  set; a missing `one` relation becomes `None`, an empty `many` becomes `[]` — no extra queries.
+- **Known ceilings.** Python-side work is real: `fn` computed columns run per row, `asyncFn` per
+  page, and cross-source Mongo federation joins in Python memory. The `local` disk source caps at
+  100,000 documents per collection and keeps no indexes. None of these numbers are claims about
+  your hardware — rerun the micro-benchmark (it needs nothing but `aiosqlite`) before treating them
+  as a budget.
 
 ## FAQ
 

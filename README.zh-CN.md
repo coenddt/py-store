@@ -47,6 +47,8 @@ from py_store import init, store
 - [事务边界](#事务边界)
 - [触发器](#触发器)
 - [事务型能力](#事务型能力)
+- [场景事例](#场景事例)
+- [性能](#性能)
 - [常见问题](#常见问题)
 - [相关项目](#相关项目)
 - [框架使用契约](#框架使用契约)
@@ -743,6 +745,507 @@ run = await workflow.run('placeOrder', {'productId': 'p1', 'warehouse': 'w1', 'q
 | 工作流定义存库 / 热更 | 依赖 schema 版本化先行（路线图下一步） | defn 暂与 schema 同模式：代码内 JSON + register |
 | 定时触发 / 事件触发 | 触发器是常驻 IO 职责，属调度层，与「纯编排」正交 | 应用层自行调用 `run` |
 | gql 内嵌占位符 / 数组下标路径 | 注入面 / 数组逐行处理语义 | params 绑定 / 宿主代码编排 |
+
+## 场景事例
+
+上文参考章节逐项介绍了各能力的定义。下面用同一个库在具体业务情境中做实事 —— 每个示例都可直接复制运行，后端取自[支持的后端](#支持的后端)。
+
+### 1. 用纯 Python 定义 schema 并立即查询
+
+**业务背景。** 你要给一个小服务加一个 `Post` 模型，不想手写 DDL、ODM 类或仓储层。模型本身是数据，不是代码。
+
+```python
+from pymongo import AsyncMongoClient
+from py_store import init, store
+
+await init(AsyncMongoClient("mongodb://localhost:27017")["mydb"])
+
+store.register({
+    "name": "Post",
+    "collection": "posts",
+    "idPrefix": "PT",
+    "fields": {
+        "title":  {"type": "string", "default": ""},
+        "status": {"type": "string", "default": "draft"},
+        "tags":   {"type": "array",  "default": []},
+    },
+})
+
+await store.insert("Post", {"title": "Hello"})
+items = await store.query(
+    "Post($condition:@c0,$sort:@s1,$limit:@l) { title, status }",
+    {"c0": {"status": "draft"}, "s1": {"createdAt": -1}, "l": 20},
+)
+```
+
+**结果。** `items` 为 `[{"_id": "PT…", "title": "Hello", "status": "draft"}]` —— `status` 你从未写入，是读取时由字段 `default` 填充的。
+
+**优势所在。** 模型就是一个普通 dict，没有类继承、没有元类、没有导入期注册仪式 —— `register()` 加上 `init()` 模型就存在了。字符串 `_id` 由框架生成（`idPrefix` + base36 时间戳 + 随机），而且这份 dict 对 Node.js 宿主（[`nodejs-store`](https://github.com/coenddt/nodejs-store)）同样是合法 schema，所以在这里写的 schema 不会被锁死在 Python。
+
+### 2. 一份 schema，换后端不改业务代码
+
+**业务背景。** 你在本地 SQLite 文件上开发，线上是 PostgreSQL。你不想要两套查询方言，也不想上线时重写。
+
+```python
+import aiosqlite
+from py_store import executors, init, store
+
+# 本地开发：SQLite 文件
+db = await aiosqlite.connect("dev.db")
+await init({"default": executors.create_connection("sqlite", db)})
+```
+
+```python
+import asyncpg
+from py_store import executors, init, store
+
+# 生产环境：PostgreSQL 连接池
+pool = await asyncpg.create_pool(dsn="postgres://user:pass@host:5432/db")
+await init({"default": executors.create_connection("postgres", pool)})
+```
+
+两种环境下，后续业务代码完全相同：
+
+```python
+items = await store.query(
+    "Post($condition:@c0) { title, status }",
+    {"c0": {"status": "draft"}},
+)
+```
+
+**结果。** 两种环境返回相同结构的文档；差异仅在那两行数据源。
+
+**优势所在。** GQL 由共享的 Rust core 按后端编译 —— MongoDB 走原生聚合，SQLite/PostgreSQL/MySQL 走参数化 SQL。业务代码里既没有 SQL 字符串也没有方言分支，因此「换数据库」改的是连接、不是查询。`local` 本地磁盘数据源（见[示例 7](#7-测试与离线缓存用的本地磁盘数据源)）以 `local.connect(...)` 同样接入。
+
+### 3. 一次查询取回课程及其课时、分类、评价（避免 N+1）
+
+**业务背景。** 课程详情页需要课程、它的分类、课时列表与评价。经典缺陷是 N+1：一次查课程，再为每个关系各查一次。
+
+```python
+course = await store.query_one(
+    "Course($condition:@c0){ _id, title, "
+    "  category { _id, name }, "
+    "  lessons { _id, title, seq }, "
+    "  reviews { _id, score } }",
+    {"c0": {"_id": "c1"}},
+)
+```
+
+**结果。** 一个文档，关系已挂载：
+
+```python
+{"_id": "c1", "title": "Python入门",
+ "category": {"_id": "cat2", "name": "后端"},
+ "lessons": [{"_id": "l1", "title": "安装", "seq": 1}, {"_id": "l2", "title": "入门", "seq": 2}],
+ "reviews": [{"_id": "r1", "score": 5}, {"_id": "r2", "score": 4}]}
+```
+
+`one` 关系合并进父文档，`many` 关系成为列表（空时 `[]`，缺失的 `one` 为 `None`）。
+
+**优势所在。** 关系在 schema 里声明一次，选择集本身就足以让引擎解析它们：MongoDB 编译为 `$lookup`，SQL 编译为 `JOIN`，每个后端只有一次查询。没有 ORM 的 `selectinload` / `prefetch_related` 需要记，也没有 `$lookup` 需要手写，缺失关系是 `None`/`[]` 而非崩溃。子列表还能按父级排序分页：`lessons($sort:@s0,$limit:@l0){ _id, title }`。
+
+### 4. 组织 / 多租户模型的行级数据权限
+
+**业务背景。** 在线学习笔记：学生只能读写自己的笔记，审计日志仅管理员可见，课程的 `secret` 字段仅管理员可读。你希望这在数据层强制，而不是在每个 handler 里重写一遍。
+
+```python
+store.register({
+    "name": "StudyNote", "collection": "study_notes",
+    "read": ["creator", "admin"], "write": ["creator", "admin"],
+    "fields": {"_id": {"type": "string"}, "title": {"type": "string"},
+               "createdBy": {"type": "string"}},
+    "relations": {},
+})
+```
+
+```python
+# 按请求设置一次，在路由 / 依赖层
+store.set_context({"userId": "u1", "roles": ["student"]})
+
+# 只返回 u1 的笔记 —— 属主条件自动注入
+mine = await store.query("StudyNote($condition:@c0){ _id, title }", {"c0": {"title": "笔记A"}})
+```
+
+**结果。** `mine == [{"_id": "n1", "title": "笔记A"}]`。他人的笔记永远不会返回，显式去查也返回 `[]` —— 属主条件与你的条件做 AND，绝不会替换它。
+
+**优势所在。** `creator` 是由 `doc.createdBy == ctx.userId` 判定的伪角色，因此归属是数据事实而非逐 handler 的检查 —— 授予该角色的 schema 会在读 *和* 写路径（含 `count`/`exists`）自动注入属主条件与归属校验。字段级白名单同理：`student` 请求标记为 `read: ["admin"]` 的字段时拿不到该字段，而显式请求一个不可读的**关系**会抛 `store.PermissionError`（`status = 403`），而非静默返回 `False`。特权角色（`super_admin`/`admin`/`internal`）一律放行；`guest` 永远不能写。
+
+### 5. 计算列在 Python 侧零成本复用
+
+**业务背景。** 课程列表要展示 `revenue = price * enrolledCount` 与 `lessonCount = 课时数`。你希望两者都在读取时算出，不维护任何冗余列。
+
+```python
+store.register({
+    "name": "Course", "collection": "courses",
+    "fields": {"_id": {"type": "string"}, "price": {"type": "float"},
+               "enrolledCount": {"type": "int"}},
+    "relations": {
+        "lessons": {"model": "Lesson", "type": "many",
+                    "localField": "_id", "foreignField": "courseId"},
+    },
+    "computes": {
+        # 同步计算列：对单个文档
+        "revenue": {"type": "float", "depends": ["price", "enrolledCount"],
+                    "fn": lambda d: (d.get("price") or 0) * (d.get("enrolledCount") or 0)},
+        # 关系聚合计算列：相关课时数
+        "lessonCount": {"type": "int", "agg": {"$count": "lessons"}},
+        # 异步计算列：对整个结果页 (async def fn(items, ctx) -> None)
+        "displayName": {"type": "string", "depends": ["name"], "asyncFn": my_display_name},
+    },
+})
+```
+
+```python
+rows = await store.query(
+    "Course($condition:@c0){ _id, price, revenue, lessonCount }",
+    {"c0": {"_id": "c2"}},
+)
+```
+
+**结果。** `rows == [{"_id": "c2", "price": 100.5, "revenue": 301.5, "lessonCount": 2}]`。你没有请求 `enrolledCount`，`revenue` 却算对了 —— `depends` 把它拉了进来 —— 且它不会泄漏到输出中。
+
+**优势所在。** 依赖字段为计算自动注入、并从投影中自动移除，因此线上返回的正是你所请求的。`fn` 是对一行的一个回调；`asyncFn` 是对整个结果的一次批量处理（`async def fn(items, ctx)`）；`agg` 复用与查询过滤相同的关系聚合机制，所以「课时数」无需手写 join。跨 schema 复用以名字为准：给该列显式写 `"fnRef": "common.moneyLabel"`，Python 的 `common_money_label` 与 Node 的 `commonMoneyLabel` 就绑定到同一个逻辑列（按规范化名绑定；`fnRef` 无实现会以 `ERR_FN_MISSING` 让服务启动失败）。
+
+### 6. 用聚合替代手写 SQL 报表
+
+**业务背景。** 看板需要「按状态分组的课程，带数量与价格合计，只保留课程数大于 1 的分组」。与其每个指标一条 SQL，不如一次问清。
+
+```python
+rows = await store.query(
+    "Course($condition:@c0,$group:@g0,$having:@h0,$sort:@s0,$limit:@l0){ status, n, total }",
+    {
+        "c0": {"status": {"$ne": "deleted"}},
+        "g0": {"by": ["status"], "agg": {"n": {"$count": "*"}, "total": {"$sum": "price"}}},
+        "h0": {"n": {"$gt": 1}},
+        "s0": {"total": -1},
+        "l0": 20,
+    },
+)
+```
+
+**结果。** `[{"status": "published", "n": 5, "total": 1000000000000110.8}]` —— 即 `GROUP BY status ... HAVING count(*) > 1`，按价格合计排序。
+
+**优势所在。** `$group` / `$having` 是 GQL 的一部分，所以同一调用在 MongoDB 上跑原生聚合、在 SQL 上跑参数化 `GROUP BY ... HAVING` —— 没有单独的报表 SQL，没有方言分支。执行顺序固定且有文档（`WHERE → GROUP BY → HAVING → sort → skip/limit`），算子白名单是 `$count` / `$sum` / `$avg` / `$min` / `$max`，省略 `by`（或传 `[]`）得到全表单行。父级也可用子级聚合过滤而不产生扇出 —— `{"orders": {"$count": {"$gt": 3}}}` 在 SQL 上变为 `EXISTS` / `NOT EXISTS`，绝不重复父行。
+
+### 7. 测试与离线缓存用的本地磁盘数据源
+
+**业务背景。** 你希望同一份数据层代码能在无需安装数据库的 CI 或沙箱里运行，并有一个重启后仍在的持久缓存 —— 零外部服务。
+
+```python
+from py_store import init, local, store
+
+await init({"default": local.connect({"dir": "./data/store"})})
+
+store.register({"name": "User", "collection": "users",
+               "fields": {"_id": {"type": "string"}, "name": {"type": "string"}},
+               "relations": {}})
+await store.insert("User", {"name": "Ada"})
+rows = await store.query("User{ _id, name }")
+```
+
+**结果。** `rows == [{"_id": "…", "name": "Ada"}]`，且 `./data/store/users.json` 现在是一个文档的 JSON 数组。
+
+**优势所在。** `local.connect({"dir": …})` 返回的是普通连接描述符，因此直接塞进同一个 `init()`，所有 GQL/CRUD 调用照常工作 —— 无需 SQL 引擎、无需驱动（`local` 源由 core 的 local 求值器直接求值，语义与 MongoDB 一致）。写入走 `.tmp` 临时文件加原子 rename，`store.transaction` / `store.session` 得到快照隔离、构造上即原子。护栏是显式而非静默的：每集合 100,000 文档硬上限、无索引（声明 `schema.indexes` 会发出 `local_indexes_ignored` 反馈事件）、仅支持单进程。
+
+### 8. 工作流编排：串联多步业务动作
+
+**业务背景。** 「下单」是：读库存、库存记录不存在则失败、库存不足则失败、然后扣减。你希望把这些步骤及其守卫表达为数据，fail-fast 执行，事后可审计。
+
+```python
+from py_store import workflow
+
+workflow.register({
+    "name": "placeOrder",
+    "run": ["admin", "ops"],
+    "steps": [
+        {"op": "query", "as": "inv",
+         "gql": "Inventory($condition:@c0){_id, stock}",
+         "params": {"c0": {"productId": "{{input.productId}}", "warehouse": "{{input.warehouse}}"}}},
+        {"op": "fail", "when": {"exists": "{{inv._id}}", "is": None}, "message": "库存记录不存在"},
+        {"op": "fail", "when": {"lt": "{{inv.stock}}", "than": "{{input.qty}}"}, "message": "库存不足"},
+        {"op": "mutation", "model": "Inventory",
+         "data": {"_id": "{{inv._id}}", "stock": "{{dec:{{inv.stock}},{{input.qty}}}}"}},
+    ],
+})
+
+run = await workflow.run("placeOrder", {"productId": "p1", "warehouse": "w1", "qty": 30})
+```
+
+**结果。** `run["status"]` 取 `succeeded | failed | rejected | drySucceeded | dryFailed` 之一；业务失败不抛错 —— 原因在 `run["error"]`（成功时为 null）。run 落库到内建 `__workflowRun` schema，用普通 GQL 即可查询。
+
+**优势所在。** 定义是与 schema defn 同构的纯 JSON，在 `register()` 时静态校验：未知步骤类型、后向占位符引用、缺操作数的 `when`、`gql` 内嵌占位符，都在注册期失败（`WORKFLOW_UNSUPPORTED`）而非运行期。步骤是白名单（`query` / `mutation` / `fail`），占位符是 `{{input.x}}`、`{{step.field}}`、`{{dec:a,b}}`，每一步都在调用者的权限上下文下运行 —— 不存在超级身份。单源 run 端到端原子；`fail` 守卫把 run 记为 `failed` 并带上 `stepIndex`，绝不静默跳过。`workflow.run(name, input, dry_run=True)` 会真实执行读取，并把写标记为 `wouldRun`。
+
+### 9. fail-secure 模式：一个开关关掉所有开口兜底
+
+**业务背景。** 你要上生产，不能依赖「调用方总是记得设置上下文」。你希望安全默认就是强制默认。
+
+```python
+from py_store import secure
+
+# 启动时执行一次
+secure.secure_mode(admin_roles=["admin"])
+```
+
+**结果。** 未设置上下文时，每次查询/写入都抛 `ERR_NO_CONTEXT` 而非放行（fail-open → fail-secure）。后台任务必须显式声明：
+
+```python
+await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))   # 仍会放行
+```
+
+未配置的 schema 对*所有人*（含 admin）拒绝，直到声明白名单为止；无上下文注册新定义也会被拒。`secure.relax_mode()` 恢复宽松默认；`secure.is_secure()` 报告当前状态。
+
+**优势所在。** `secure_mode()` 一并翻转三个原本独立的开关（require-context、unconfigured-roles-closed、meta-policy-closed），你不会开了其中一个却忘了另外两个。`run_as_internal` 与「缺失上下文」在语义上*截然不同*，这正是系统任务能继续工作、而忘记设置上下文能 fail-closed 的原因 —— 「无上下文」过去恰恰把这两种情况混为一谈。降级路径同样不静默：`set_feedback_sink` 仍会收到结构化事件，而不是让失败悄无声息。
+
+### 10. 多数据源：MySQL + Mongo 挂在同一个 store，一条联邦 GQL
+
+**业务背景。** 用户在 MongoDB、订单在 MySQL，而一个个人主页两样都要。你不想维护两个客户端、两套查询语言，再在中间手写一次 join。
+
+```python
+import asyncmy
+from pymongo import AsyncMongoClient
+from py_store import executors, init, store
+
+await init({
+    "mongo_main": AsyncMongoClient("mongodb://mongo-host:27017")["shop"],
+    "mysql_main": executors.create_connection(
+        "mysql", await asyncmy.create_pool(host="mysql-host", user="app",
+                                           password="…", db="shop", autocommit=True)),
+})
+
+# 每个定义固定自己的源；关系是跨源的
+store.register({
+    "name": "User", "collection": "users", "datasource": "mongo_main",
+    "fields": {"_id": {"type": "string"}, "name": {"type": "string"}},
+    "relations": {
+        "orders": {"model": "Order", "type": "many",
+                   "localField": "_id", "foreignField": "userId"}},
+})
+store.register({
+    "name": "Order", "collection": "orders", "datasource": "mysql_main",
+    "fields": {"_id": {"type": "string"}, "userId": {"type": "string"},
+               "code": {"type": "string"}, "amount": {"type": "float"}},
+    "relations": {},
+})
+
+rows = await store.query_federated(
+    "User($condition:@c0){ _id, name, orders { code, amount } }",
+    {"c0": {"name": "ada"}},
+)
+```
+
+**结果。** 每个用户的 MySQL 订单嵌在同一份文档里返回 —— store 按源取数、内存 join、再水合成树：
+
+```python
+[{"_id": "u1", "name": "ada", "orders": [{"code": "A1", "amount": 30.0}, ...]}]
+```
+
+**优势所在。** schema 由 `(source, database, collection)` 定位，每个定义携带自己的 `datasource`，一份注册表覆盖所有后端。SQL 跨 database / PG-schema 的 join 原生下推（`"db_a"."t" JOIN "db_b"."t"`）；Mongo 跨源关系走联邦路径（`query_federated`）—— 某一段无法下推时你会收到结构化的 `federation_degraded` 事件，而不是悄悄变慢。这正是本仓库四库压测用 8 个并发 worker 跑的拓扑（Mongo 用户 → MySQL 订单，再加一个 PG 源，见[性能](#性能)）。
+
+### 11. 事务 + 原生 SQL：一笔不可能落地一半的转账
+
+**业务背景。** 账户间转账：锁源行、校验余额、一侧扣款、另一侧入账、追加一条台账。任何一步失败都必须整体回滚。
+
+```python
+async def transfer(amount, from_id, to_id):
+    rows = await store.execute_raw(
+        "pg_main", "SELECT balance FROM accounts WHERE _id = $1 FOR UPDATE", [from_id])
+    if rows["rows"][0]["balance"] < amount:
+        raise ValueError("insufficient funds")        # 整个作用域回滚
+
+    await store.execute_raw(
+        "pg_main", "UPDATE accounts SET balance = balance - $1 WHERE _id = $2",
+        [amount, from_id], is_write=True)
+    await store.execute_raw(
+        "pg_main", "UPDATE accounts SET balance = balance + $1 WHERE _id = $2",
+        [amount, to_id], is_write=True)
+    await store.insert("Ledger", {"fromId": from_id, "toId": to_id, "amount": amount})
+    #  ↑ 普通 CRUD 调用 —— 落在同一条事务连接上
+
+await store.transaction("pg_main", lambda: transfer(30, "acc_a", "acc_b"))
+```
+
+**结果。** 四条语句要么一起提交、要么一起不提交。`execute_raw` 返回 `{"rows", "affectedRows"}`（读给 rows、写给受影响行数），`store.transaction(source, fn)` 让 `fn` 内的一切复用同一条连接 —— 原生 SQL 与 CRUD 一视同仁。
+
+**优势所在。** 原生 SQL 由 core 的 `raw_stmt_compile` 编译（命名 `:name` 参数或位置 `?`/`$1`），转义与方言细节不必进你的代码，逃生舱口却完全是原生的（`FOR UPDATE` 照用）。Mongo 源按运行期探针（副本集 / 分片）包进 session 事务；standalone Mongo 或无事务原语的执行器按原样执行 `fn` 并发出 `mongo_transaction_unsupported` / `transaction_not_atomic` —— 降级会被宣告，绝不静默假装。同源嵌套作用域变成保存点：内层失败只回滚本层。
+
+### 12. 会话（Session / 工作单元）：多次写入、一次提交、跨源 fail-closed
+
+**业务背景。** 「创建订单」要碰三张表：插订单、扣库存、追加审计行。你希望这一切构成一个工作单元，而不是手工管连接。
+
+```python
+async with store.session() as s:
+    order = await s.insert("Order", {"userId": "u1", "amount": 30})
+    await s.update("Inventory", {"_id": "sku1"}, {"$inc": {"stock": -1}})
+    await s.insert("AuditLog", {"kind": "order", "ref": order["_id"]})
+# 正常退出 → 一次提交；任何异常 → 一次回滚
+```
+
+**结果。** 同一 SQL 源上的每条命令都落在同一条事务连接上；会话退出时统一提交一次，任何异常统一回滚。无命令的会话绝不检出连接（惰性启动）。
+
+**优势所在。** 会话可嵌套并带保存点（`SAVEPOINT sp_<n>`），内层失败只回滚内层、外层继续。危险情况 fail-closed：向 ≥2 个数据源写入的会话整体回滚并抛 `NonAtomicWriteError` —— 不存在会被静默提交一半的分布式事务。无原语的执行器发出 `session_not_atomic` 事件，而不是假装。
+
+### 13. DDL 生成：schema 进，CREATE TABLE 文本出
+
+**业务背景。** 模型在代码里注册好了，DBA（或 Alembic）现在需要物理表。你想要一个迁移起点，且不引入第二份真相来源。
+
+```python
+sql = store.generate_ddl("postgres")                           # 所有已注册模型
+sql = store.generate_ddl("sqlite", ["Order", "OrderDeleted"])  # 只要这两张
+```
+
+**结果。** 纯 `CREATE TABLE` 文本 —— 从不执行、从不写库 —— 由已注册 def 生成：
+
+```sql
+CREATE TABLE "bench_orders" (
+  "_id" TEXT PRIMARY KEY,
+  "user_id" TEXT,
+  "amount" REAL,
+  "qty" INTEGER,
+  "status" TEXT,
+  "__present" TEXT
+);
+```
+
+**优势所在。** `generate_ddl(backend, names)` 是 `sync_schema()`（只*读*）的逆操作。自由命名的字段按后端翻译（`userId` 在 SQL 上是 `user_id`、在 Mongo 上是 `userId`），每张表都带 `__present` 哨兵列，`<Model>Deleted` 归档表与模型一起恰好生成一次。不发 `CREATE INDEX`（SQL 后端把索引当元数据保留），边界情况大声失败（`ddlPresentOverflow`）而非静默。
+
+### 14. 触发器：同一事务里的声明式审计流水
+
+**业务背景。** `Order` 的每次插入、改金额的更新、删除都必须留下审计行 —— 且审计写失败时，业务写也不能落地。
+
+```python
+DEFS = [{
+    "name": "Order", "collection": "orders", "idPrefix": "OD",
+    "fields": {"_id": {"type": "string"}, "amount": {"type": "float"},
+               "status": {"type": "string"}},
+    "triggers": {
+        "insert": [{"name": "aud_ins", "into": "AuditLog", "op": "insert",
+                    "data": {"_id": "{{now}}", "kind": "ins",
+                             "ref": "{{root._id}}", "amount": "{{root.amount}}"}}],
+        "update": [{"name": "aud_upd", "onFields": ["amount"], "into": "AuditLog",
+                    "op": "insert",
+                    "data": {"_id": "{{now}}", "kind": "upd",
+                             "ref": "{{root._id}}", "amount": "{{root.amount}}"}}],
+        "remove": [{"name": "aud_del", "fnRef": "auditRemove",
+                    "args": {"id": "{{before._id}}"}}],
+    },
+}, {
+    "name": "AuditLog", "collection": "audit_logs", "idPrefix": "AL",
+    "fields": {"_id": {"type": "string"}, "kind": {"type": "string"},
+               "ref": {"type": "string"}, "amount": {"type": "float"}},
+}]
+
+for d in DEFS:
+    store.register(d)
+
+async def audit_remove(args, ctx, host):
+    await host["store"].insert("AuditLog", {"kind": "del", "ref": args["id"]})
+
+store.set_trigger_fn("auditRemove", audit_remove)
+store.assert_trigger_fns_covered(DEFS)   # 启动期：声明的 fnRef 无实现 ⇒ ERR_TRIGGER_FN_MISSING
+```
+
+**结果。** 写事件在 plan 期由 Rust core 展开成有序触发链，由宿主在与源写同一个原子包内执行：`insert` 与 `update(amount)` 留下命令式审计行；删除订单时以删除前文档（`{{before._id}}`）运行 `auditRemove` 回调。
+
+**优势所在。** 触发链是数据、声明在 schema 上。`update` 事件只在被监视字段真的变化时触发（结构化深比较 —— 值没变绝不触发）；`{{root.*}}` / `{{before.*}}` / `{{now}}` 是整值替换（嵌进字符串会抛 `ERR_TRIGGER_PLACEHOLDER`）；重复的 `(step.name, _id)` 只跑一次；回调收到 `(args, ctx, {"store": store})`，回调内任何 `store.*` 都命中同一条事务连接。回调或命令步骤失败会整体回滚 —— 且不级联：触发器写出的数据绝不会再触发其他触发器。
+
+### 15. 软删除归档：remove() 带走完整审计痕迹
+
+**业务背景。** 合规要求删除也要留痕：行从所有列表里消失，但归档仍可查 —— 包括*何时*被删。
+
+```python
+r = await store.remove("Order", {"_id": "o1"})
+# r == {"deletedCount": 1, "archivedCount": 1}
+
+archived = await store.query("OrderDeleted{ _id, amount, deletedAt }")
+```
+
+**结果。** 文档先被复制进自动派生的 `OrderDeleted` 归档（带 `deletedAt`），再从 `orders` 删除。归档是普通已注册 def —— 普通 GQL 直接可查，并在 `generate_ddl()` 里恰好出现一次。
+
+**优势所在。** 每个已注册模型在注册时由 Rust core 免费派生 `<Model>Deleted` 归档集合/表。归档写入按 `_id` upsert，所以重建相同 `_id` 不会冲突、部分失败后的重试会幂等重新归档。空条件的 `remove` 被直接拒绝 —— 忘写过滤条件不可能触发全表删除。
+
+### 16. FastAPI：一个依赖搞定每请求权限上下文
+
+**业务背景。** 内部管理 API：分页列表、创建、软删。权限必须在数据层对每个端点强制，而不是逐路由重写。
+
+```python
+from fastapi import Depends, FastAPI, Request
+from py_store import init, store
+
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup():
+    await init({"default": mongo_db})
+    store.register({
+        "name": "Article", "collection": "articles", "idPrefix": "AR",
+        "fields": {"_id": {"type": "string"}, "title": {"type": "string", "default": ""},
+                   "body": {"type": "string", "default": ""},
+                   "status": {"type": "string", "default": "draft"},
+                   "authorId": {"type": "string", "default": ""}},
+        "read": ["editor", "viewer", "creator"],
+        "write": ["editor", "creator"],
+    })
+
+async def current_user(request: Request) -> dict:
+    user = {"userId": request.headers["x-user-id"],
+            "roles": request.headers.getlist("x-role")}
+    store.set_context(user)          # 一个依赖，覆盖整个请求
+    return user
+
+@app.get("/articles")
+async def list_articles(page: int = 0, page_size: int = 50,
+                        user: dict = Depends(current_user)):
+    return await store.query_with_count(
+        "Article($sort:@s1){ _id, title, status }",
+        {"s1": {"createdAt": -1}, "page": page, "pageSize": page_size})
+    # → {"items", "total", "hasMore", "page", "pageSize"}   (pageSize 上限 5000)
+
+@app.delete("/articles/{article_id}")
+async def delete_article(article_id: str, user: dict = Depends(current_user)):
+    return await store.remove("Article", {"_id": article_id})   # 先归档
+```
+
+**结果。** 角色校验（schema/字段白名单、`creator` 归属）在每次 store 调用时自动运行，无逐路由代码；`delete` 留下可审计的归档行。
+
+**优势所在。** 权限上下文存在 `ContextVar` 里，在 `async` 依赖里设置即覆盖整个请求路径（跑在线程池里的 sync 依赖做不到）。默认缺上下文是 fail-open（向后兼容）；启动时翻转 `store.set_require_context(True)`，忘设上下文就抛 `ERR_NO_CONTEXT` 而非放行。空条件写（`update_many` / `remove` 传 `{}`）被直接拒绝，漏传过滤条件不可能变成全表写。完整演练见
+[doc/use-cases/04-fastapi-admin-backend.md](doc/use-cases/04-fastapi-admin-backend.md)。
+
+## 性能
+
+下面的数字来自两个来源：撰写本 README 的这台机器上运行的微型基准（SQLite，无需任何服务 —— 查询/写入模式可直接复制运行），以及仓库自带的四库压测。
+
+### 微型基准（SQLite，本机实测）
+
+实测于 **2026-10-15**，Python 3.14.4，Windows amd64，`aiosqlite` 文件库，py-store 跑在 Rust core（`rust-store-py`）上。每项数字为丢弃 1 次预热后 4 次运行的中位数。种子数据：200 个用户；写入基准进行中订单表增至 30,000 行。
+
+| 操作 | 数据量 | 中位耗时 | 吞吐 / 对比 |
+|---|---|---|---|
+| `insert_many`（10 批 × 1,000） | 10,000 行 | 392 ms | **≈ 25,500 行/秒** |
+| 循环单条 `insert` | 1,000 行 | 3,439 ms | ≈ 290 行/秒 → 批量快 ≈ 88 倍 |
+| GQL 树查询 —— 1 次调用，关系嵌套 | 100 用户 + 15,000 子行 | 517 ms | 1 次调用 |
+| 手写 N+1 —— 同一份数据 | 100 用户 + 15,000 子行 | 718 ms | 101 次调用 → **慢 1.4 倍** |
+| `$group` 下推 SQL | 10,000 行 | 15 ms | 1 次调用 |
+| 全量拉回 + Python 侧 groupby | 10,000 行 | 600 ms | **慢 41 倍** |
+| 计算列（读取时 `fn`） | 2,000 行 | 29 ms | ≈ 与手写循环持平（29 ms） |
+
+怎么读这张表：
+
+- **聚合是大头。** `$group` 编译成在 SQLite *内部*执行的 `GROUP BY`；手写替代方案要为把 10,000 行搬过驱动、再在 Python 里重新聚合买单。
+- **树查询赢在调用次数，而不只是耗时。** 1 次往返对 101 次。对本机 SQLite 文件每次额外调用都很便宜，所以墙钟差距是 1.4 倍；跨网络连 MySQL/PostgreSQL/MongoDB 时，那 101 次调用每次都要付一个 RTT，差距随之拉大。
+- **批量是最大的单项杠杆。** 同样的行按每 1,000 行一次 `insert_many` 写入，比 1,000 次单条插入快约 88 倍 —— 每次单条插入都要付一次规划加一次自己的提交。
+- **计算列是诚实的，不是魔法。** `fn` 逐行跑在 Python 侧，所以与手写循环持平，同时省掉你原本要手工维护的簿记工作（依赖注入、投影清理）。
+
+### 四库压测（仓库留档）
+
+`stress/stress.py`（本仓库）同时压 MongoDB + MySQL + PostgreSQL + SQLite —— 8 workers × 200 轮 × 每轮 5 操作（一条跨 3 源联邦查询、一次 SQLite 写、一次 PostgreSQL count、一次 Mongo 查询、一次 MySQL `$inc` 更新）。留档运行记录见
+[doc/2026-09-12-压测报告.md](doc/2026-09-12-压测报告.md)：**8,000 次操作，0 错误，824 QPS**，联邦查询 p50 **19.3 ms** / p95 24.2 ms。（待核实：撰写本 README 的机器未复跑 —— 需要运行中的 MySQL/PG/Mongo 服务；这些是仓库留档数字，可用该报告中的命令复现。）
+
+### 时间花在哪（设计说明）
+
+- **规划在 Rust core。** GQL 解析、权限检查、计算列规划、命令规划与 SQL 方言翻译全部跑在 Rust（`rust-store-py`，经 PyO3）；Python 宿主每条命令过一次 FFI 边界，然后做驱动 IO —— 每命令一次跨界，不是每行一次。
+- **下推优先于搬运数据。** `JOIN` / `$lookup`、`GROUP BY` / `HAVING`、`EXISTS` / `NOT EXISTS` semi/anti-join、按父级的子列表排序分页，都编译成每个后端一条语句 —— 活儿在数据所在处干。
+- **读取时再水合。** 扁平 JOIN 行每次结果集只重组一次成嵌套文档；缺失的 `one` 关系变 `None`、空的 `many` 变 `[]` —— 不发额外查询。
+- **已知上限。** Python 侧的工作是真实存在的：`fn` 计算列逐行执行、`asyncFn` 每页执行、跨源 Mongo 联邦在 Python 内存里 join。`local` 磁盘源每集合上限 100,000 文档且不保留索引。这些数字都不是对你硬件的承诺 —— 把它们当预算前，先复跑微型基准（它只需要 `aiosqlite`）。
 
 ## 常见问题
 
