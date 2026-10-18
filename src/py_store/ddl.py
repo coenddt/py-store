@@ -16,6 +16,8 @@ DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回
 对齐 nodejs-store/src/ddl.js（两端输出逐字节一致）。
 """
 
+import json as _json
+
 from .core import native as _native
 from .feedback import emit as _emit_feedback
 from .schema import get as _get_schema
@@ -37,6 +39,111 @@ _TYPES = {
     'date': ('BIGINT', 'BIGINT', 'INTEGER'),
 }
 _NON_COLUMN = ('object', 'array')
+
+
+def _js(v):
+    """等价 JS 模板中的 JSON.stringify（undefined → 'undefined'，整值 float 去 .0）"""
+    if v is None:
+        return 'undefined'
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return _json.dumps(v, ensure_ascii=False)
+
+
+def _is_positive_int(v):
+    """等价 JS Number.isInteger(v) && v > 0（bool 不算整数）"""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return v > 0
+    if isinstance(v, float):
+        return v.is_integer() and v > 0
+    return False
+
+
+def _vector_type(backend, fdef):
+    """vector 字段列类型：PG 原生 vector(dim)，MySQL / SQLite 存 JSON 文本（降级）"""
+    dim = fdef.get('dim') if isinstance(fdef, dict) else None
+    if not _is_positive_int(dim):
+        raise ValueError(
+            f'DDL 生成：vector 字段必须声明正整数 dim，实际 {_js(dim)}')
+    if backend == 'postgres':
+        return f'vector({_js(dim)})'
+    if backend == 'mysql':
+        return 'JSON'
+    return 'TEXT'
+
+
+# pgvector 近似索引（hnsw / ivfflat）维度上限；数值源：rust-store/core `capability::PGVECTOR_INDEX_MAX_DIM`。
+# 宿主无法在运行时读取 Rust 常量，故 node / py 各留一份，parity 测试断言两端一致且等于 2000。
+_PGVECTOR_INDEX_MAX_DIM = 2000
+_VECTOR_METHODS = ('hnsw', 'ivfflat', 'flat')
+_METRIC_OPS = {
+    'cosine': 'vector_cosine_ops',
+    'l2': 'vector_l2_ops',
+    'ip': 'vector_ip_ops',
+}
+
+
+def _vector_index_stmt(defn, backend, field, opts):
+    """向量索引 → CREATE INDEX（PG 原生；MySQL/SQLite 显式反馈不支持；flat 不建索引）"""
+    if backend != 'postgres':
+        _emit_feedback({
+            'type': 'ddl_vector_index_unsupported',
+            'code': 'vectorIndexUnsupported',
+            'layer': 'host',
+            'message': (f'表 {defn.get("collection")} 的向量索引（字段 {field}）'
+                        f'在 {backend} 无原生实现，已跳过'),
+            'hint': '该后端按应用层精确检索执行；检索结果将标记 degraded=true',
+            'backend': backend,
+            'schema': defn.get('name'),
+        })
+        return []
+    fdef = (defn.get('fields') or {}).get(field)
+    dim = fdef.get('dim') if isinstance(fdef, dict) else None
+    if not _is_positive_int(dim):
+        raise ValueError(f'DDL 生成：向量索引字段 {field} 缺少正整数 dim')
+    method = opts.get('method') or 'hnsw'
+    if method not in _VECTOR_METHODS:
+        raise ValueError(
+            f'DDL 生成：向量索引 method 仅支持 {"/".join(_VECTOR_METHODS)}，实际 {_js(method)}')
+    if method == 'flat':
+        _emit_feedback({
+            'type': 'ddl_vector_index_flat',
+            'code': 'vectorIndexFlatNoIndex',
+            'layer': 'host',
+            'message': (f'表 {defn.get("collection")} 的向量索引（字段 {field}）'
+                        '声明 method=flat，未创建近似索引'),
+            'hint': 'flat 表示精确扫描；查询仍可用，native=false',
+            'backend': backend,
+            'schema': defn.get('name'),
+        })
+        return []
+    if dim > _PGVECTOR_INDEX_MAX_DIM:
+        raise ValueError(
+            f'DDL 生成：向量索引字段 {field} 的 dim={_js(dim)} 超过 pgvector 索引上限 '
+            f'{_PGVECTOR_INDEX_MAX_DIM}（改用 method=\'flat\' 走精确扫描）')
+    metric = opts.get('metric') or (fdef.get('metric') if isinstance(fdef, dict) else None) or 'cosine'
+    opclass = _METRIC_OPS.get(metric)
+    if not opclass:
+        raise ValueError(
+            f'DDL 生成：向量索引 metric 仅支持 cosine/l2/ip，实际 {_js(metric)}')
+    table = _pname(backend, defn.get('collection') or defn.get('name'))
+    col = _pname(backend, field)
+    name = 'idx_' + table + '_' + col + '_vec'
+    if method == 'hnsw':
+        with_clause = (f' WITH (m = {opts.get("m") or 16}, '
+                       f'ef_construction = {opts.get("efConstruction") or 64})')
+    else:
+        with_clause = f' WITH (lists = {opts.get("lists") or 100})'
+    return [
+        f'CREATE INDEX {_q(backend, name)} ON {_q(backend, table)} '
+        f'USING {method} ({_q(backend, col)} {opclass}){with_clause}',
+    ]
+
+
 # object/array 字段的列类型（JSON 文本列；同 core Backend::json_type_name）
 _JSON_TYPE = ('JSON', 'jsonb', 'TEXT')
 _ID_TYPE = ('VARCHAR(64)', 'TEXT', 'TEXT')
@@ -94,6 +201,9 @@ def _columns(defn, backend):
                 cols.append((col, _ID_AUTO_TYPE[i], True, True))
             else:
                 cols.append((col, _ID_TYPE[i], True, False))
+            continue
+        if ftype == 'vector':
+            cols.append((col, _vector_type(backend, fdef), False, False))
             continue
         if ftype in _NON_COLUMN:
             # object/array → 单列 JSON 文本（同 core field_column_ref::Json）
@@ -165,6 +275,12 @@ def _index_stmts(defn, backend):
         keys = idx.get('keys')
         if not isinstance(keys, dict) or not keys:
             continue
+        vec_key = next(((k, v) for k, v in keys.items() if v == 'vector'), None)
+        if vec_key:
+            if len(keys) != 1:
+                raise ValueError('DDL 生成：向量索引必须是单字段（keys 仅一个 "字段": "vector"）')
+            out.extend(_vector_index_stmt(defn, backend, vec_key[0], idx.get('options') or {}))
+            continue
         unique = bool(idx.get('unique') or (idx.get('options') or {}).get('unique'))
         phys_keys = [_pname(backend, k) for k in keys]
         cols = ', '.join(
@@ -231,6 +347,8 @@ def _field_sql_type(backend, fdef):
     """字段 def → 列 SQL 类型（与 _columns 同源；object/array → JSON 文本列）"""
     i = _idx(backend)
     ftype = _declared_type(fdef)
+    if ftype == 'vector':
+        return _vector_type(backend, fdef)
     if ftype in _NON_COLUMN:
         return _JSON_TYPE[i]
     if ftype not in _TYPES:
@@ -296,7 +414,8 @@ def diff_defs(old_defn, new_defn):
             continue
         nf_type = _declared_type(nf)
         if name not in old_fields:
-            if nf_type not in _TYPES and nf_type not in _NON_COLUMN:
+            if (nf_type not in _TYPES and nf_type not in _NON_COLUMN
+                    and nf_type != 'vector'):
                 errors.append(f'新列 "{name}" 类型 {nf_type!r} 未知')
                 continue
             changes.append({
@@ -308,6 +427,16 @@ def diff_defs(old_defn, new_defn):
         of = old_fields[name]
         of_type = _declared_type(of)
         if of_type == nf_type:
+            if nf_type == 'vector':
+                od = of.get('dim') if isinstance(of, dict) else None
+                nd = nf.get('dim') if isinstance(nf, dict) else None
+                om = (of.get('metric') if isinstance(of, dict) else None) or 'cosine'
+                nm = (nf.get('metric') if isinstance(nf, dict) else None) or 'cosine'
+                if od != nd or om != nm:
+                    errors.append(
+                        f'字段 "{name}" 的 vector 元数据变更不支持'
+                        f'（dim {_js(od)} → {_js(nd)}，metric {_js(om)} → {_js(nm)}）；'
+                        '需显式重建列与向量索引')
             continue  # 恒等：不上报（含 object 内嵌定义差异——首批不展开，见 N3）
         if nf_type in _WIDEN.get(of_type, ()):
             changes.append({
@@ -379,9 +508,9 @@ def generate_migration(backend, old_defn, new_defn):
             default = field.get('default') if isinstance(field, dict) else None
             col_sql = f'{_q(backend, _pname(backend, name))} {col_type}'
             if default is not None:
-                if ftype in _NON_COLUMN:
+                if ftype in _NON_COLUMN or ftype == 'vector':
                     raise ValueError(
-                        f'MIGRATION_UNSUPPORTED: 新列 "{name}"（object/array JSON 列）不支持 DEFAULT'
+                        f'MIGRATION_UNSUPPORTED: 新列 "{name}"（{ftype} 列）不支持 DEFAULT'
                         '（存量行缺失语义由 __present 哨兵表达；default 仅影响新写入）')
                 col_sql += ' DEFAULT ' + _sql_literal(default)
             stmts.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN {col_sql}')
@@ -404,7 +533,8 @@ def generate_migration(backend, old_defn, new_defn):
                     f'ALTER TABLE {_q(backend, table)} ALTER COLUMN {_q(backend, col)} '
                     f'TYPE {col_type} USING {_q(backend, col)}::{col_type}')
         elif op == 'addIndex':
-            stmts.extend(_index_stmts({'collection': table, 'indexes': [ch['index']]}, backend))
+            stmts.extend(_index_stmts({'collection': table, 'fields': new_defn.get('fields'),
+                                       'indexes': [ch['index']]}, backend))
         else:  # 防御：diff 层不会产出其他 op
             raise ValueError(f'MIGRATION_UNSUPPORTED: 未知变更 {op!r}')
     return stmts
