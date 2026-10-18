@@ -130,16 +130,18 @@ def test_without_index_name_does_not_connect():
 
 
 def test_invalid_dim_raises():
-    schema.register({
-        'name': 'PVecIdxFive',
-        'collection': 'pvec_idx_five',
-        'fields': {'_id': {'type': 'string'}, 'embedding': {'type': 'vector'}},
-        'indexes': [{'keys': {'embedding': 'vector'}, 'options': {'indexName': 'pvidx_five'}}],
-    })
+    # 注册期由 core 校验（A1，rust 侧 vector_fields 用例覆盖）；
+    # 这里直接用伪造视图绕过注册期，验证 ensure_vector_indexes 自身的防御分支。
+    defn = {
+        'name': 'PVecIdxFiveFake',
+        'collection': 'pvec_idx_five_fake',
+        'fields': {'embedding': {'type': 'vector'}},
+        'indexes': [{'keys': {'embedding': 'vector'}, 'options': {'indexName': 'pvidx_five_fake'}}],
+    }
     datasource.set_connections({'default': _Db(_Coll([]))})
 
     try:
-        _run(vector_index.ensure_vector_indexes(_one_store('PVecIdxFive')))
+        _run(vector_index.ensure_vector_indexes(_StoreView(defn['name'], defn)))
     except ValueError as e:
         assert 'dim/metric 非法' in str(e)
     else:  # pragma: no cover - 防御：不抛即失败
