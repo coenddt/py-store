@@ -22,6 +22,7 @@ import weakref
 from collections.abc import Mapping
 
 from . import executors
+from . import vector_scan
 from .feedback import emit as _emit_feedback
 from .schema import get as _get_schema
 from .schema import get_core
@@ -503,7 +504,19 @@ async def exec_sql(source, connection, cmd):
     执行器只做「绑定参数 + 执行 + restore_rows」，返回中立包络；此处依 command.kind
     塑形为 Mongo 驱动等价返回值（见 ``executors.shape_result``），使上层（crud/*）
     对 Mongo / SQL 两条路径无感。
+
+    向量检索降级（03 §4.7）：MySQL / SQLite 不支持 ``$vectorSearch`` →
+    取候选 + core 精确打分；PostgreSQL 由方言翻译为 pgvector SQL，不经此处降级。
     """
+    if vector_scan.can_scan(cmd, _kind_of(connection)):
+        return await vector_scan.scan(
+            cmd, exec=lambda candidate: _exec_sql_direct(source, connection, candidate))
+
+    return await _exec_sql_direct(source, connection, cmd)
+
+
+async def _exec_sql_direct(source, connection, cmd):
+    """``exec_sql`` 的直通路径（不做向量降级）"""
     plan = get_core().dialect_translate(_kind_of(connection), cmd)
     # Host 兜底：core 标记了无法安全下推的组合（如 $lookup 子 $limit 每父 top-N）时，
     # 绝不执行「缺少该段」的 SQL（会静默返回错误结果），改为显式报错，由调用方降级重查。

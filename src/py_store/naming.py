@@ -83,9 +83,24 @@ def _walk(node, rels, transform_refs):
             if k == '$lookup' and isinstance(v, dict):
                 out[k] = _tr_lookup(v, rels)
                 continue
+            if k == '$vectorSearch' and isinstance(v, dict):
+                out[k] = _tr_vector_search(v, rels)
+                continue
             out[_tr_key(k, rels)] = _walk(v, rels, transform_refs)
         return out
     return _tr_ref(node, rels) if transform_refs else node
+
+
+def _tr_vector_search(obj, rels):
+    """``$vectorSearch`` 阶段：``path`` 为字段名（须按数据标识符译），
+    其余键（index / metric 等）逐项走通用翻译"""
+    out = {}
+    for k, v in obj.items():
+        if k == 'path':
+            out[k] = _tr_key(v, rels) if isinstance(v, str) else v
+        else:
+            out[k] = _walk(v, rels, False)
+    return out
 
 
 def _tr_lookup(obj, rels):

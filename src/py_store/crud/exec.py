@@ -16,6 +16,7 @@ import time
 from collections.abc import Mapping
 
 from .. import datasource as _datasource
+from .. import vector_scan as _vector_scan
 from ..executors.mongo import exec_mongo as _exec_mongo
 from ..feedback import emit as _emit_feedback
 from ..naming import _to_logical, _to_mongo
@@ -122,6 +123,37 @@ def _call(fn):
 
 # ─── 命令执行（唯一 IO 边界） ────────────────────────────────
 
+def _physical_for_driver(cmd):
+    """逻辑命令 → 物理命令（逻辑名翻译为物理名，并剥离 core 内部元数据键
+    ``$vectorSearch.metric``；local 求值仍需该键，故只作用于物理副本）"""
+    physical = _to_mongo(cmd)
+    _vector_scan.strip_vector_meta(physical)
+    return physical
+
+
+async def _exec_mongo_vector(db, cmd, session=None):
+    """Mongo 原生执行 + 向量降级（03 §4.7）
+
+    真实驱动不认 ``$vectorSearch``（非 Atlas / 未建向量索引）时，捕获该形态错误后
+    取候选行 → core ``local_eval`` 精确打分；其余错误原样上抛。
+    """
+    try:
+        return _to_logical(await _exec_mongo(db, _physical_for_driver(cmd), session=session), cmd)
+    except Exception as e:
+        if not _vector_scan.can_scan(cmd, 'mongo') or not _vector_scan.is_unsupported_stage_error(e):
+            raise
+        return await _vector_scan.scan(
+            cmd,
+            exec=lambda candidate: _exec_mongo_candidate(db, candidate, session),
+        )
+
+
+async def _exec_mongo_candidate(db, candidate, session=None):
+    """降级候选命令执行：逻辑名 → 物理名 → 驱动 → 逆映射回逻辑名"""
+    return _to_logical(
+        await _exec_mongo(db, _physical_for_driver(candidate), session=session), candidate)
+
+
 async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
@@ -135,11 +167,11 @@ async def _exec_on(source, cmd):
     if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
         # Mongo 事务视图：db 按命令 database 解析，session 透传给驱动
         db = _datasource.mongo_db(connection['conn'], source, cmd.get('database'))
-        return _to_logical(await _exec_mongo(db, _to_mongo(cmd), session=connection.get('session')), cmd)
+        return await _exec_mongo_vector(db, cmd, session=connection.get('session'))
     db = _datasource.mongo_db(connection, source, cmd.get('database'))
     if db is not None:
         # Mongo 物理名翻译（逻辑 → camelCase）；执行后按 schema 逆表回映射（物理 → 逻辑）
-        return _to_logical(await _exec_mongo(db, _to_mongo(cmd)), cmd)
+        return await _exec_mongo_vector(db, cmd)
     return await _datasource.exec_sql(source, connection, cmd)
 
 
