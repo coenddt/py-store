@@ -10,7 +10,7 @@ import aiosqlite
 import pytest
 
 from py_store import metadef as md
-from py_store.migrate import MigrationUnsupported, _UNSUPPORTED_HINT
+from py_store.migrate import _UNSUPPORTED_HINT, MigrationUnsupported
 
 
 def _note_v1():
@@ -62,7 +62,7 @@ async def _version_rows(db):
     cur = await db.execute(
         'SELECT tenant, env, backend, name, version FROM __schemaMigration ORDER BY version')
     try:
-        return [dict(zip(('tenant', 'env', 'backend', 'name', 'version'), r))
+        return [dict(zip(('tenant', 'env', 'backend', 'name', 'version'), r, strict=False))
                 for r in await cur.fetchall()]
     finally:
         await cur.close()

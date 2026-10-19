@@ -25,17 +25,17 @@
 import hashlib
 import time
 
+from . import crud as _crud
 from . import ddl as _ddl
 from . import introspect as _introspect
-from .schema import core as _core
+from .datasource import execute_raw, run_in_transaction
 from .metadef import (
-    MetaDefError,
     _MIGRATION,
+    MetaDefError,
     _internal_ctx,
     stable_stringify,
 )
-from . import crud as _crud
-from .datasource import execute_raw, run_in_transaction
+from .schema import core as _core
 
 #: 白名单外变更的固定分步建议（契约逐字；MigrationUnsupported 消息必须原文携带）
 _UNSUPPORTED_HINT = '白名单外变更请分两版走：先加新列并回填，确认切换后再于下一版删除旧列'
@@ -205,7 +205,8 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
             'sqls': stmts,
         }
 
-        async def _apply():
+        # B023：默认参数显式绑定循环变量（_apply 当轮即被 await，绑定仅为过门禁与防延迟误用）
+        async def _apply(stmts=stmts, row=row):
             for sql in stmts:
                 await execute_raw(source, sql, None, True)
             with _internal_ctx():

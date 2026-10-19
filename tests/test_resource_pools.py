@@ -13,8 +13,7 @@ import tempfile
 import pytest
 
 from py_store import resource
-from py_store.resource import create_provider, configure, pool_names
-
+from py_store.resource import configure, create_provider, pool_names
 from test_resource import _FakeStore
 
 

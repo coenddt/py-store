@@ -16,7 +16,7 @@ from typing import Any
 from ..core import native
 from ..feedback import emit as _emit_feedback
 from . import providers
-from .providers import create_provider
+from .providers import create_provider as create_provider  # 有意转正的公共 API（F401）
 
 _DEFAULT_SCHEMA = {"resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding"}
 

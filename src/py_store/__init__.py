@@ -72,11 +72,11 @@ from .datasource import NativeCommandError as NativeCommandError
 from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
 from .datasource import Session as Session
-from .migrate import MigrationUnsupported as MigrationUnsupported
 from .llm import get_llm as get_llm
 from .llm import make_openai_compat as make_openai_compat
 from .llm import register_llm as register_llm
 from .load import load_defs as load_defs
+from .migrate import MigrationUnsupported as MigrationUnsupported
 from .schema import assert_fns_covered as assert_fns_covered
 from .schema import set_fn as set_fn
 from .schema import text2query
