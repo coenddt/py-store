@@ -22,6 +22,7 @@ from .workflow import register as _register_workflow
 _SCHEMA_DEF = '__schemaDef'
 _WORKFLOW_DEF = '__workflowDef'
 _FEEDBACK = '__feedback'
+_MIGRATION = '__schemaMigration'
 # 读取投影（双端一致；对拍比较用）
 _DEF_FIELDS = '_id, tenant, env, name, version, defn, status, createdBy'
 
@@ -95,15 +96,41 @@ _FEEDBACK_MODEL = {
     },
 }
 
+# 迁移版本表（C3/A4）：行形状对齐 node ``_MIGRATION_MODEL``（迁移编排器 migrate 的幂等闸
+# 与审计载体）。``_id`` 自然键 = ``(tenant,env,backend,name,version)``（``def_id`` 惯例追加
+# backend 段，US 分隔）；``hash`` = 目标 defn ``stable_stringify`` 的 SHA-1 hex。不声明
+# indexes：理由同 ``_def_model``（场景 harness 会对全部注册表执行 CREATE INDEX）。
+_MIGRATION_MODEL = {
+    'name': _MIGRATION,
+    'system': True,
+    'collection': _MIGRATION,
+    'idPrefix': 'mig',
+    'write': [],
+    'fields': {
+        '_id': {'type': 'string'},
+        'tenant': {'type': 'string'},
+        'env': {'type': 'string'},
+        'backend': {'type': 'string'},
+        'name': {'type': 'string'},
+        'hash': {'type': 'string'},
+        'version': {'type': 'int'},
+        'appliedAt': {'type': 'number'},
+        'sqls': {'type': 'array'},
+    },
+}
+
 
 def ensure_builtins():
-    """注册内建 ``__schemaDef``/``__workflowDef``/``__feedback``（幂等；core 对重复三元组显式报错，故先 has 守卫）"""
+    """注册内建 ``__schemaDef``/``__workflowDef``/``__feedback``/``__schemaMigration``
+    （幂等；core 对重复三元组显式报错，故先 has 守卫）"""
     if not _schema_has(_SCHEMA_DEF):
         _schema_register(_SCHEMA_DEF_MODEL)
     if not _schema_has(_WORKFLOW_DEF):
         _schema_register(_WORKFLOW_DEF_MODEL)
     if not _schema_has(_FEEDBACK):
         _schema_register(_FEEDBACK_MODEL)
+    if not _schema_has(_MIGRATION):
+        _schema_register(_MIGRATION_MODEL)
 
 
 class MetaDefError(ValueError):

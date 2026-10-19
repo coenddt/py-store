@@ -59,6 +59,9 @@ from . import (
 from . import (
     local as local,
 )
+from . import (
+    migrate as migrate_module,
+)
 from . import reindex as reindex_mod
 from .ask import AskExhausted as AskExhausted
 from .ask import AskResult as AskResult
@@ -69,6 +72,7 @@ from .datasource import NativeCommandError as NativeCommandError
 from .datasource import NonAtomicWriteError as NonAtomicWriteError
 from .datasource import RawSqlError as RawSqlError
 from .datasource import Session as Session
+from .migrate import MigrationUnsupported as MigrationUnsupported
 from .llm import get_llm as get_llm
 from .llm import make_openai_compat as make_openai_compat
 from .llm import register_llm as register_llm
@@ -279,6 +283,15 @@ class Store:
     async def rollback_to(self, opts: dict) -> dict:
         """回滚到历史版本（追加式，重新 register 该版本 defn）"""
         return await metadef.rollback_to(self, opts)
+
+    async def migrate(self, *, backend: str, source: str, defs: dict,
+                      old_defs: dict | None = None, driver=None,
+                      tenant: str | None = None, env: str | None = None) -> dict:
+        """迁移编排（A4）：diff → 方言 SQL → 事务执行 → ``__schemaMigration`` 版本行；
+        白名单外拒绝并给分步建议（对齐 node ``store.migrate``）"""
+        return await migrate_module.migrate(backend=backend, source=source, defs=defs,
+                                            old_defs=old_defs, driver=driver,
+                                            tenant=tenant, env=env)
 
     # 定义控制面：workflow 定义（kind=workflow；见 metadef.py）
     async def persist_workflow_def(self, defn: dict, opts: dict | None = None) -> dict:

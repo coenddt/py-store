@@ -114,7 +114,7 @@ Typical concrete scenarios (see [`doc/use-cases/`](doc/use-cases/) for full walk
 
 Being explicit about the boundary saves you time:
 
-- **You want a full ORM with a migration engine (Alembic, Django migrations).** `py-store` is a *data layer*, not a migration tool. It can **read** a SQL backend's physical structure (`sync_schema` → introspection) but it never writes DDL back. There is an optional `generate_ddl()` that renders `CREATE TABLE` text from your registered schemas — pure text, it never connects to or writes to the database.
+- **You want a full ORM with a migration engine (Alembic, Django migrations).** `py-store` is a *data layer*, not a full migration tool. It can **read** a SQL backend's physical structure (`sync_schema` → introspection) but it never invents DDL on its own. It does ship a whitelist migration **orchestrator** — `store.migrate()` diffs two def versions, renders per-dialect SQL and applies it transactionally with a `__schemaMigration` version trail (see "Schema migration (orchestrator)") — and an optional `generate_ddl()` that renders `CREATE TABLE` text from your registered schemas (pure text, it never connects to the database by itself). Beyond the whitelist (add table/column/index, type widening), pair it with your migration tool of choice.
 - **You want a Pydantic-model-centric ORM.** Schemas here are runtime JSON dicts, giving you cross-language parity (the same schema runs in Python and Node.js) rather than Pydantic type validation.
 - **You only ever use one database and rarely join.** A plain driver (or a single-database ODM/ORM) will be simpler.
 - **You need raw aggregation escape hatches.** `$pipeline` passthrough and `store.aggregate()` were deliberately removed. Use `$condition` / `$group` / `$having` / relations; anything that cannot be safely translated fails **explicitly** rather than silently.
@@ -132,7 +132,7 @@ General positioning, not a benchmark — always verify against each tool's curre
 | Built-in role / field-level RBAC + owner injection | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ (permissions are app-level) |
 | Read-time computed columns (sync / async / relation-agg) | ✅ | ➖ (hybrid properties) | ➖ | ➖ | ➖ | ➖ |
 | Soft-delete archive table auto-provisioned | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ |
-| Migration / DDL engine | ➖ (introspection read-only; optional `generate_ddl` text) | ✅ (Alembic) | ➖ | ✅ (Aerich) | ✅ (Alembic) | ✅ |
+| Migration / DDL engine | ➖ (introspection read-only; whitelist `migrate()` orchestrator; optional `generate_ddl` text) | ✅ (Alembic) | ➖ | ✅ (Aerich) | ✅ (Alembic) | ✅ |
 | Framework coupling | none (asyncio) | none | none | none | none | Django |
 | Shared native core across Python & Node | ✅ (Rust `rust-store`) | ➖ | ➖ | ➖ | ➖ | ➖ |
 
@@ -142,7 +142,7 @@ Positioning only, based on those projects' public documentation at the time of w
 
 - **vs SQLAlchemy / SQLModel / Django ORM** — all SQL-only and model-class-centric: they do not target MongoDB, and none of them ships schema-declared role/field access control or read-time computed columns. `py-store` compiles one GQL to native MongoDB aggregation or to parameterized SQL.
 - **vs Beanie / Motor** — MongoDB-only. `py-store` uses the same MongoDB-flavoured query style but the identical query also runs on MySQL, SQLite and PostgreSQL.
-- **vs Tortoise ORM / pyloquent** — async Python ORMs over SQL backends, with model classes and (in Tortoise's case) a migration tool. `py-store` has no migration engine — introspection only reads physical structure, and `generate_ddl()` only *renders* `CREATE TABLE` text without touching the database — and describes models as plain dicts, which is exactly what makes a schema portable to the Node.js host.
+- **vs Tortoise ORM / pyloquent** — async Python ORMs over SQL backends, with model classes and (in Tortoise's case) a migration tool. `py-store` has no inline migration engine — introspection only reads physical structure, `generate_ddl()` only *renders* `CREATE TABLE` text, and `migrate()` orchestrates whitelist-only changes (add column/index/table, widening) with a version trail — and describes models as plain dicts, which is exactly what makes a schema portable to the Node.js host.
 - **vs `nodejs-store`** — the same engine and the same GQL, in JavaScript. Use whichever host matches your service; schemas and query semantics are interchangeable.
 
 Short version: use an ORM when you want **model classes, Pydantic validation and migrations**; use `py-store` when you want **one runtime schema + one query dialect spanning MongoDB and SQL**, with RBAC and computed columns built in.
@@ -414,6 +414,27 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 - The `<Name>Deleted` archive def is **derived by the Rust core when the model is registered**; the Python host only mirrors it (`collection` `<c>_deleted`, the `deletedAt` field, empty `idPrefix`) and never re-registers it into the core. So `schema.list()` and `generate_ddl()` contain each archive table exactly once; if a duplicate ever appears (upstream regression), they deduplicate and emit a `schemaDuplicateName` / `ddlDuplicateTable` feedback event instead of silently emitting duplicate `CREATE TABLE`s.
 - No `CREATE INDEX` is emitted — SQL backends keep indexes as metadata only.
 - MySQL `__present` is `VARCHAR(255)`; a schema whose present-token string would overflow emits a `ddlPresentOverflow` feedback event rather than failing silently.
+
+### Schema migration (orchestrator)
+
+`store.migrate(backend=..., source=..., defs=..., old_defs=..., driver=..., tenant=None, env=None)` orchestrates the whitelist migration physically: diff two def versions → per-dialect SQL (`generate_migration`) → execute in one transaction per table → record a version row in the built-in `__schemaMigration` table.
+
+```python
+r = await store.migrate(
+    backend="sqlite", source="default",
+    defs={"Note": note_v2},        # {name: defn}, same shape as persist_def
+    old_defs=None,                 # None → introspect (needs `driver`: the native driver instance,
+                                   #        same convention as sync_schema — the connection view does
+                                   #        not expose it); or pass old_defs explicitly to skip it
+    driver=db,
+)
+# r = {"applied": [{"name", "from", "to", "version"}], "skipped": [{"name", "reason"}]}
+```
+
+- **Idempotent** — the latest `__schemaMigration` row for the same `(tenant, env, backend, name)` is hash-compared (SHA-1 of the stable-serialized defn) *before* diffing; an identical rerun is reported as `skipped: [{"name", "reason": "unchanged"}]` and touches nothing.
+- **Whitelist-only** — add table / add column / add index / type widening. Anything else raises `MigrationUnsupported` (a `MetaDefError` subclass) whose message carries a fixed two-step recipe: *"白名单外变更请分两版走：先加新列并回填，确认切换后再于下一版删除旧列"* — no auto-execution, no auto-rollback.
+- **Atomic per table** — the SQL statements and the version row commit or roll back together; a mid-way failure leaves no orphan version row. A multi-table batch is *not* one cross-table transaction — reconcile by `applied` / `skipped` and re-run.
+- **Diff runs in the physical namespace** — introspected keys are physical (`view_count`, snake_case on SQL backends) and physical names are not reversible, so the target defn is translated through the same single-point physical-name function before diffing; introspection-inferred granularity (e.g. SQLite `INTEGER` → `number`) is aligned so a re-run is never mis-read as a change. Type widening (`int→long` etc.) produces DDL on MySQL/PostgreSQL; on SQLite numeric columns have no physical difference, so it reports unchanged.
 
 ## Multi-datasource connections
 
@@ -1480,7 +1501,7 @@ Every registered model automatically gets a `<Model>Deleted` archive collection/
 Yes. Locate a schema by `(source, database, schema, collection)` and pass a `{"source", "database", "schema"}` route override per request. Treat `route_override` as trusted server-side input only.
 
 **Does it run migrations?**
-No. `sync_schema()` only *reads* physical structure via introspection (introspect → merge overlay → register). Schema changes / DDL are your migration tool's job (Alembic, etc.). If you want a starting point, `store.generate_ddl(backend)` renders `CREATE TABLE` text from the registered schemas — but it is pure text generation: it never runs or writes DDL.
+`sync_schema()` only *reads* physical structure via introspection (introspect → merge overlay → register). For applying schema changes there is a whitelist **orchestrator**: `store.migrate()` diffs two def versions, renders per-dialect SQL and applies it transactionally per table with a `__schemaMigration` version trail — whitelist-only (add table/column/index, type widening); anything destructive raises `MigrationUnsupported` with a two-step recipe instead (see "Schema migration (orchestrator)"). Beyond the whitelist, schema changes remain your migration tool's job (Alembic, etc.). If you want a starting point, `store.generate_ddl(backend)` renders `CREATE TABLE` text from the registered schemas — pure text generation: it never runs or writes DDL by itself.
 
 **Can I see the generated query without running it?**
 Yes — `store.build_pipeline(gql, params)` returns the compiled plan with no execution and no permission/compute application.
