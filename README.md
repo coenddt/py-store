@@ -705,6 +705,24 @@ store.assert_trigger_fns_covered(defns)  # startup: a declared fnRef without an 
 
 **Boundaries**: single-source real transaction / a cross-source write declares `nonAtomic` / cross-source writes inside `store.session()` fail closed (see [Transaction boundary](#transaction-boundary)); **no cascading** (a trigger write does not fire further triggers); `update_many` does not support field-level triggers (explicitly refused, no silent degradation); the command step `op: "upsert"` is a registration-time `Err`.
 
+## Resource storage (named credential pools)
+
+Content-addressed blob storage beside the CRUD path: `resource.put / open / remove / url` fan bytes out to a provider registry (`local` directory, `s3`; register more via `registerProvider` / `store.register_resource_provider`) while metadata lands in three plain CRUD schemas (`Resource` / `ResourceLocation` / `ResourceBinding`).
+
+```python
+from py_store import resource
+
+resource.configure({"store": store, "pools": {
+    "sys": {"providers": [{"kind": "s3", "options": {...sys creds...}}]},
+    "biz": {"providers": [{"kind": "s3", "options": {...biz creds...}}]},
+}})
+out = await resource.put(bytes=data, file_name="a.pdf", pool="biz")
+```
+
+- **Named credential pools**: the `pools` config shape builds one isolated provider set per name — the same `kind` can appear in two pools with different credentials without overwriting each other. Every accessor takes `pool=...` (`put` / `open` / `remove` / `url`); `pool=None` means the default pool, and an unknown pool name raises `ValueError` (no silent fallback to the default pool). `resource.pool_names()` lists the configured pools.
+- **Backward compatible**: the legacy `{"providers": [...]}` shape is exactly the default pool `"default"` — existing config keeps working unchanged. The two shapes are mutually exclusive: passing both `providers` and `pools` raises `ValueError` (no silent merge). `schema` / `fields` / `store` / `url` / `sign` stay global and cannot be set per pool (a per-pool occurrence raises).
+- **`resource.create_provider(kind, options=None)` is a stable public API**: it returns `{"kind", "put", "get", "remove", "exists"}` (callables) or raises `ValueError` on an unknown kind. Services that previously reached into the internal factory and built their own cache (e.g. manager-side storage adapters) should migrate to this export plus the `pool=` parameter — the module-level `_pool` variable remains only as a default-pool alias and is no longer the supported surface.
+
 ## Transactional capabilities
 
 Capabilities aimed at transactional workloads (orders, inventory — write contention plus

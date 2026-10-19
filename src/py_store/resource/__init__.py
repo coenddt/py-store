@@ -16,6 +16,7 @@ from typing import Any
 from ..core import native
 from ..feedback import emit as _emit_feedback
 from . import providers
+from .providers import create_provider
 
 _DEFAULT_SCHEMA = {"resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding"}
 
@@ -76,13 +77,54 @@ _cfg: dict[str, Any] = {
     "sign": None,
 }
 _pool: dict = {}
+# 命名池注册表（C2）：池名 → {kind → provider}。默认池恒名 "default"；
+# _pool 保留为默认池别名（兼容既有 import，禁删/禁改名）
+_pools: dict[str, dict] = {}
 
 _BYTES_TYPES = (bytes, bytearray)
 
 
+def _build_pool(sub, *, strict):
+    """单池构建：复用既有建池循环（create_provider 纯工厂 + priority 缺省按序）。
+
+    strict=True（命名池子形状）时仅接受 ``providers`` 键——schema/fields/store/url/sign
+    是全局配置，池级出现即抛错（禁静默丢弃让用户误以为已按池生效）。
+    """
+    if not isinstance(sub, dict):
+        raise ValueError("configure_resource: pools.<名> 须为对象")
+    if strict:
+        for k in sub:
+            if k != "providers":
+                raise ValueError(
+                    f"configure_resource: pools.<名>.{k} 不被接受（{k} 为全局配置不得按池分化；"
+                    "池级仅接受 providers）")
+    pool: dict = {}
+    for i, spec in enumerate(sub.get("providers") or []):
+        p = providers.create_provider(spec["kind"], spec.get("options") or {})
+        p["priority"] = spec.get("priority", i)
+        pool[spec["kind"]] = p
+    return pool
+
+
 def configure(cfg=None):
-    global _cfg, _pool
+    """配置资源能力。cfg 两种形状（互斥——同 cfg 同时出现 ``providers`` 与 ``pools``
+    键抛 ``ValueError``，禁静默合并）：
+
+    ① 旧形状 ``{"providers": [...], "schema"/"fields"/"store"/"url"/"sign": ...}``
+       → 等价默认池 ``"default"``（行为与 4.7.x 完全一致，完全向后兼容）；
+    ② 新形状 ``{"pools": {"<池名>": {"providers": [...]}, ...}, "schema"/...: ...}``
+       → 逐池独立构建（同 kind 双凭据 sys/biz 共存互不覆盖）；``"default"`` 为保留
+         池名，新形状中显式使用合法，但与旧形状互斥。
+
+    返回 ``{"<池名>": <pool>, ...}`` 结构视图（池的浅拷贝，防外部改池）；模块级
+    ``_pool`` 仍指向默认池（兼容既有 import），``_pools`` 为全池注册表
+    （``pool_names()`` 枚举）。
+    """
+    global _cfg, _pool, _pools
     cfg = cfg or {}
+    if cfg.get("providers") and cfg.get("pools"):
+        raise ValueError(
+            "configure_resource: providers 与 pools 互斥（同一 cfg 只允许一种形状），禁静默合并")
     _cfg = {
         "schema": {**_DEFAULT_SCHEMA, **(cfg.get("schema") or {})},
         "fields": _parse_fields(cfg.get("fields") or {}),
@@ -91,12 +133,31 @@ def configure(cfg=None):
         "url": cfg.get("url") or {},
         "sign": cfg.get("sign") if callable(cfg.get("sign")) else None,
     }
-    _pool = {}
-    for i, spec in enumerate(_cfg["providers"]):
-        p = providers.create_provider(spec["kind"], spec.get("options") or {})
-        p["priority"] = spec.get("priority", i)
-        _pool[spec["kind"]] = p
-    return _pool
+    _pools = {}
+    if cfg.get("pools") is not None:
+        if not isinstance(cfg["pools"], dict) or not cfg["pools"]:
+            raise ValueError("configure_resource: pools 须为非空对象")
+        for name, sub in cfg["pools"].items():
+            _pools[name] = _build_pool(sub, strict=True)
+    else:
+        _pools["default"] = _build_pool(cfg, strict=False)
+    # _pool 恒为「默认池别名」：旧形状 → "default" 池本身；纯命名池（未配 "default"）
+    # → 空 dict（旧直调引用方应迁公开面 pool 参数/pool_names，见 README 迁移指引）
+    _pool = _pools.get("default", {})
+    return {name: dict(p) for name, p in _pools.items()}
+
+
+def pool_names():
+    """已配置池名列表（旧形状配置 → 恒 ``["default"]``；只读快照）"""
+    return list(_pools.keys())
+
+
+def _require_pool(name=None):
+    """取池：``None`` = 默认池；未知池名抛 ``ValueError``（禁静默回落默认池）"""
+    key = name or "default"
+    if key not in _pools:
+        raise ValueError(f"未知资源池: {key}（已配置: {', '.join(_pools.keys())}）")
+    return _pools[key]
 
 
 def fields():
@@ -157,19 +218,20 @@ def _meta_gql(schema):
     return f"{schema}($condition: @c0) {{ {', '.join(dict.fromkeys(cols))} }}"
 
 
-async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None):
+async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None, pool=None):
     if bytes is None:
         raise ValueError("resource.put 需要 bytes")
     data = bytes if isinstance(bytes, _BYTES_TYPES) else str(bytes).encode("utf-8")
     crud = _crud()
     f = _cfg["fields"]
+    pool_ = _require_pool(pool)
     sha1 = hashlib.sha1(data).hexdigest()
     resource_id = sha1
     key = native.resource_content_path(sha1)
 
     locations = []          # 返回用（canonical 键，API 契约不变）
     location_rows = []      # 落库用（按映射列名）
-    for backend, p in _pool.items():
+    for backend, p in pool_.items():
         try:
             await _call(p["put"], key, data, {"mime": mime})
             locations.append({"resourceId": resource_id, "backend": backend, "key": key,
@@ -219,12 +281,13 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None):
     return {"resourceId": resource_id, "sha1": sha1, "locations": locations}
 
 
-async def open(resource_id, *, order=None):
+async def open(resource_id, *, order=None, pool=None):
     crud = _crud()
     f = _cfg["fields"]
+    pool_ = _require_pool(pool)
     rows = await _call(crud.query, _loc_gql(_cfg["schema"]["location"]),
                        {"c0": {f["location"]["resourceId"]: resource_id}})
-    seq = list(order) if order else list(_pool.keys())
+    seq = list(order) if order else list(pool_.keys())
 
     def rank(b):
         return seq.index(b) if b in seq else 2 ** 31
@@ -241,7 +304,7 @@ async def open(resource_id, *, order=None):
         backend = backend_of(loc)
         if f["location"]["status"] and loc.get(f["location"]["status"]) == "failed":
             continue
-        p = _pool.get(backend)
+        p = pool_.get(backend)
         if p is None:
             _emit_feedback({"type": "resource_location_provider_missing", "code": "resourceLocationProviderMissing",
                             "layer": "resource", "backend": backend, "resourceId": resource_id,
@@ -281,15 +344,16 @@ async def open(resource_id, *, order=None):
     raise FileNotFoundError(f"ERR_RESOURCE_NOT_FOUND:资源不存在或无可读副本: {resource_id}")
 
 
-async def remove(resource_id):
+async def remove(resource_id, *, pool=None):
     crud = _crud()
     f = _cfg["fields"]
+    pool_ = _require_pool(pool)
     rows = await _call(crud.query, _loc_gql(_cfg["schema"]["location"]),
                        {"c0": {f["location"]["resourceId"]: resource_id}})
     removed = []
     for loc in rows:
         backend = loc[f["location"]["backend"]]
-        p = _pool.get(backend)
+        p = pool_.get(backend)
         if p is None:
             continue
         try:
@@ -305,7 +369,8 @@ async def remove(resource_id):
     return {"removed": removed}
 
 
-async def url(reference, *, vars=None):
+async def url(reference, *, vars=None, pool=None):
+    _require_pool(pool)  # 池存在性 fail-fast；URL 模板/签名为全局配置（跨池共享），行为不变
     cfg = dict(_cfg["url"])
     if vars:
         cfg["vars"] = {**(cfg.get("vars") or {}), **vars}
