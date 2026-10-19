@@ -166,4 +166,12 @@ async def exec_mongo(db, cmd, session=None):
         _norm_filter(cmd)
         return await coll.delete_many(cmd['filter'], **_opts(session))
 
+    if kind in ('claim', 'compareAndSet'):
+        # 并发原语（C1）仅 SQL 三后端有方言路径：Mongo 无行锁语义等价物，
+        # 禁止静默走通用路径或伪装成功 —— 显式报错并指引改用 SQL 源。
+        from ..datasource import PushdownUnsupportedError
+        raise PushdownUnsupportedError(
+            cmd.get('source') or '', kind, ['concurrencyPrimitivesSqlOnly'],
+            ['claim/compareAndSet 仅 SQL 源支持（MongoDB 无行锁等价物）；请使用 SQL 源'])
+
     raise RuntimeError(f'未支持的命令: {kind}')

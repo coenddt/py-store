@@ -151,6 +151,32 @@ class Store:
                      route_override: dict | None = None) -> dict[str, Any] | None:
         return await crud.upsert(schema_name, condition, data, options, route_override)
 
+    async def claim(self, schema_name: str, filter: dict, update: dict, *,
+                    limit: int = 1, sort: list | None = None,
+                    route_override: dict | None = None) -> list[dict[str, Any]]:
+        """条件领取 N 行并原子置标；返回领到的行（含领取后最新值）
+
+        并发原语（C1）：MySQL/PG 走 ``FOR UPDATE SKIP LOCKED`` 两步同事务，
+        SQLite 走 ``IN (子查询)`` 原子领取；仅 SQL 源（Mongo 显式拒绝）。
+        时间戳/身份字段由调用方写入 ``update``（门面与 core 均无时钟）。
+        """
+        return await crud.claim(schema_name, filter, update, limit=limit, sort=sort,
+                                route_override=route_override)
+
+    async def compare_and_set(self, schema_name: str, filter: dict, update: dict,
+                              *,
+                              route_override: dict | None = None) -> dict[str, Any]:
+        """条件更新并返回 ``{"matched": int, "modified": int}``（matched = WHERE 命中行数，三后端一致）"""
+        return await crud.compare_and_set(schema_name, filter, update,
+                                          route_override=route_override)
+
+    async def renew_lease(self, schema_name: str, filter: dict, lease_fields: dict,
+                          *,
+                          route_override: dict | None = None) -> dict[str, Any]:
+        """租约续期：compare_and_set 组合门面（归属条件由 filter 携带，时间戳由调用方写入）"""
+        return await crud.renew_lease(schema_name, filter, lease_fields,
+                                      route_override=route_override)
+
     async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
                           overlay: list | None = None, datasource: str | None = None,
                           database: str | None = None, schema: str | None = None,

@@ -362,6 +362,29 @@ await store.transaction("default", transfer)
 - `store.execute_native(source, collection, pipeline=None, options=None)` runs a native aggregation pipeline on a Mongo source (the Mongo counterpart of the SQL-side `execute_raw` escape hatch): `pipeline` is a native aggregation pipeline, `options` uses driver-native keys (`allowDiskUse` / `batchSize` / `hint` / `maxTimeMS`..., no host-side whitelist). Inside a transaction / session the session is injected automatically (owned by the transaction; `options.session` cannot override it); resolution always follows the read path, so `$merge` / `$out` write stages require you to open a transaction yourself. Mongo sources only — a SQL source raises `NativeCommandError` pointing to `execute_raw`; the MongoClient form requires a schema-declared `database`. Returns `{"rows"}`.
 - **The non-transactional path commits explicitly**: on SQL sources, a write plan that runs outside `store.transaction` is committed by the executor (`commit` on success; `rollback` then re-raise on failure). `aiosqlite` is not autocommit by default, so without that commit the write would be visible only on the current connection while `execute_raw` still reported success — a silent data-loss hazard. Multi-statement writes that must be atomic as a group belong inside `store.transaction`.
 
+### Concurrency primitives
+
+Declarative task-claiming and compare-and-swap on top of the same plan → Mongo-command pipeline — the patterns that previously required a raw-SQL escape hatch (`FOR UPDATE SKIP LOCKED` via `execute_raw`) now have first-class methods, so outbox dispatching and leader election no longer need bare SQL:
+
+```python
+got = await store.claim("Job", {"status": "pending", "runAt": {"$lte": now}},
+    {"claimedBy": "worker-1", "status": "claimed", "leaseUntil": now + 30_000},
+    limit=10, sort=[["runAt", 1]])     # returns the claimed rows (their latest values)
+
+matched = await store.compare_and_set("Leader",
+    {"_id": "leader-1", "term": 7},    # current-state guard: the CAS condition
+    {"term": 8, "holder": "node-a"})   # the write to apply when it matches
+
+await store.renew_lease("Leader",
+    {"_id": "leader-1", "holder": "node-a"},   # ownership condition: only the holder renews
+    {"leaseUntil": now + 30_000})
+```
+
+- `store.claim(schema_name, filter, update, *, limit=1, sort=None, route_override=None)` atomically claims up to `limit` rows matching `filter` and applies `update` to exactly those rows in one transaction (`atomic_commands`: every command lands on the same connection, in order). Returns the claimed rows. PostgreSQL uses `SELECT … FOR UPDATE SKIP LOCKED` so concurrent claimers skip locked rows instead of blocking; SQLite compiles the same plan into a single `UPDATE … RETURNING`; **MySQL has no `SKIP LOCKED`-equivalent in one statement for this plan, so the core compiles it as two steps on one connection** (`SELECT _id … FOR UPDATE` → `UPDATE _id IN (…)`), still atomic within the transaction but contenders queue on the lock rather than skipping.
+- `store.compare_and_set(schema_name, filter, update, *, route_override=None)` applies `update` only when `filter` still matches the current state; it returns `{"matched", "modified"}` (both counts). **MySQL matched semantics**: the core pre-reads the matching rows with a locking `SELECT` and drives the `UPDATE` by the returned primary keys, so `matched` is the number of pre-read rows — not MySQL's default "rows changed" count. `renew_lease` is `compare_and_set` by another name: the lease-ownership condition (`holder` / `claimedBy`) is part of `filter`, supplied by the caller.
+- Lease bookkeeping fields (`claimedBy` / `leaseUntil` / …) are **caller-owned schema fields**, not built-ins: declare them on the schema, and expiry/cleanup is a plain query on your side.
+- SQL sources only. A Mongo source raises with code `concurrencyPrimitivesSqlOnly` — Mongo has no `SKIP LOCKED`-style claim primitive, and faking one with `find_one_and_update` loops would not be atomic under concurrency (explicit refusal, no silent degradation).
+
 ### Session (Unit of Work)
 
 ```python

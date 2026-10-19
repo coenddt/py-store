@@ -310,3 +310,71 @@ def resolve_placeholders(command, ids=None, steps=None):
         return s
 
     return _substitute(command, resolver)
+
+
+_CLAIMED_IDS = '___claimed_ids___'
+_MODE_ATOMIC = 'atomic_commands'
+
+
+def _fill_claimed(command, ids):
+    """atomic_commands 专用占位符替换：``___claimed_ids___`` → 领取到的 _id 数组
+
+    与 ``{{phase1.ids}}`` 分开实现（two_phase 与 claim 各用各的替换入口），
+    契约同源：整值替换（字符串整体匹配才替换）；未命中原样保留——token 残留会让
+    SQL 因非法语法显式报错（no-error-masking：禁静默当作空集执行）。
+    """
+
+    def resolver(s):
+        return ids if s == _CLAIMED_IDS else s
+
+    return _substitute(command, resolver)
+
+
+def _claimed_ids_of(env):
+    """从 claim 命令的执行包络提取领取到的 _id 列表
+
+    三后端 rows 形状统一含 ``_id`` 列：MySQL/PG 为 stmt1 ``SELECT _id`` 的行；
+    SQLite 为 stmt2 同一子查询取回的完整行。行缺 ``_id`` 视为契约漂移——跳过而非
+    静默顶替（禁伪造领取结果）。
+    """
+    rows = env.get('rows') or [] if isinstance(env, Mapping) else []
+    return [r['_id'] for r in rows
+            if isinstance(r, Mapping) and '_id' in r]
+
+
+async def run_atomic_commands(source, plan):
+    """atomic_commands mode 执行器（claim / compareAndSet 的执行管道）
+
+    - mode 校验：仅接受 ``atomic_commands``，其余显式报错（禁静默走通用路径——
+      该 mode 的语义是「全部命令同连接同事务内顺序执行」，走通用路径会丢失原子性）；
+    - 事务包裹：``datasource.run_in_transaction``（claim 的 SELECT FOR UPDATE SKIP
+      LOCKED 与标记 UPDATE 必须同一作用域）；
+    - 占位符回填：前条 claim 包络的 _id 列表（``___claimed_ids___`` 整值替换）→
+      末条取行命令；零领取（rows 空）直接返回空、不执行后续命令；
+    - compareAndSet 为单命令 plan：直接执行并返回包络（matched 从 affectedRows 读，
+      见 crud/claim.py）。
+    """
+    mode = (plan or {}).get('mode')
+    if mode != _MODE_ATOMIC:
+        raise ValueError(
+            f"run_atomic_commands 仅接受 mode='{_MODE_ATOMIC}'，实际 {mode!r}"
+            '（禁静默走通用路径：atomic_commands 的同事务语义不可降级）')
+    commands = plan.get('commands') or []
+    if not commands:
+        raise ValueError("atomic_commands plan 缺少 commands（禁静默空执行）")
+
+    async def _do():
+        env = await _exec(commands[0])
+        if len(commands) == 1:
+            return env
+        # 方言已随领取语句取回完整还原行（如 SQLite 的 UPDATE … RETURNING，
+        # docs = 领取后最新值）→ 直接作为领取结果，不再执行取行命令
+        docs = env.get('docs') if isinstance(env, Mapping) else None
+        if docs is not None:
+            return docs
+        ids = _claimed_ids_of(env)
+        if not ids:
+            return []
+        return await _exec(_fill_claimed(commands[1], ids))
+
+    return await _datasource.run_in_transaction(source, _do)
