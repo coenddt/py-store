@@ -257,6 +257,33 @@ class Store:
         """
         return await datasource.execute_native(source, collection, pipeline, options)
 
+    async def aggregate(self, schema_name: str, pipeline: list | None = None,
+                        options: dict | None = None) -> dict[str, Any]:
+        """按 schema 名执行原生聚合管道（execute_native 的 schema 名孪生；opt-in）
+
+        默认关闭（产品边界）：``init(connections, {'allowNativeAggregate': True})``
+        显式开启后可用；关闭时抛 ``ERR_NATIVE_AGGREGATE_DISABLED``。开启后按
+        schema 注册元数据解析落点（datasource/collection）转调 ``execute_native``，
+        无 GQL 权限过滤、computes 不 rehydrate——与原生驱动行为一致；
+        ``$merge``/``$out`` 写管道请自行开事务。未注册 schema 抛
+        ``ERR_AGGREGATE_SCHEMA``。返回 ``{'rows': list}``。
+        """
+        if not _allow_native_aggregate:
+            err = RuntimeError(
+                'ERR_NATIVE_AGGREGATE_DISABLED:原生聚合别名未开启——默认关闭是产品边界，'
+                'init(connections, {"allowNativeAggregate": True}) 显式开启；'
+                '或改用 GQL $group / $having 归一聚合 / execute_native 直调')
+            err.code = 'ERR_NATIVE_AGGREGATE_DISABLED'
+            raise err
+        try:
+            m = schema.get(schema_name)
+        except KeyError:
+            err = RuntimeError(f'ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}')
+            err.code = 'ERR_AGGREGATE_SCHEMA'
+            raise err
+        return await datasource.execute_native(
+            m.get('datasource') or 'default', m['collection'], pipeline, options)
+
     def generate_ddl(self, backend: str, names: list | None = None) -> str:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
         return ddl.generate(backend, names)
@@ -547,7 +574,11 @@ async def _create_indexes_if_needed():
                 })
 
 
-async def init(connections):
+# aggregate opt-in 开关（漉金Core 接入扩展 03）：默认关闭，仅 init 第二参显式开启
+_allow_native_aggregate = False
+
+
+async def init(connections, options: dict | None = None):
     """
     初始化 store — 传入数据源连接映射
 
@@ -557,11 +588,16 @@ async def init(connections):
         MongoClient，自动归一为 ``{'default': 连接}``）
 
     连接按命令的 ``source`` 路由、``database`` 定位库（schema 声明）；缺省绑定回落 ``default``。
+
+    ``options``（可选）：``{'allowNativeAggregate': True}`` 开启 ``store.aggregate``
+    原生聚合别名（默认关闭，产品边界；每次 init 重置——不带该项即恢复关闭）。
     """
     if connections is None or (
             not isinstance(connections, Mapping)
             and not callable(getattr(connections, '__getitem__', None))):
         raise TypeError('init(connections) 需要数据源连接映射（或单个 PyMongo 的 db 实例）')
+    global _allow_native_aggregate
+    _allow_native_aggregate = (options or {}).get('allowNativeAggregate') is True
     datasource.set_connections(connections)
 
     # 自动创建索引（仅 Mongo 源）— 幂等安全

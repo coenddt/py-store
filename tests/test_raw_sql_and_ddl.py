@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from py_store import datasource, feedback, store
+from py_store import datasource, feedback, init, store
 
 
 @pytest.fixture(autouse=True)
@@ -298,6 +298,81 @@ def test_execute_native_non_mongo_source_raises():
     with pytest.raises(store.NativeCommandError) as ei:
         _run(store.execute_native('db', 't', []))
     assert '不是 Mongo 源' in str(ei.value)
+
+
+# ─── ①⁗ store.aggregate（execute_native 的 schema 名孪生，opt-in；与 js 侧对拍）───
+
+class _FakeAggDb:
+    """get_collection + __getitem__ → Database 形态（init 建索引探测 list_indexes 可走通）"""
+
+    def get_collection(self, name):
+        return None  # 不会被真正调用（exec_mongo 被替换）
+
+    def __getitem__(self, name):
+        class _Coll:
+            async def list_indexes(self):
+                class _Cur:
+                    async def to_list(self, length=None):
+                        return []
+                return _Cur()
+        return _Coll()
+
+
+def test_aggregate_disabled_by_default():
+    store.register({'name': 'AggOff', 'fields': {'a': 'int'}})
+    with pytest.raises(RuntimeError) as ei:
+        _run(store.aggregate('AggOff', [{'$match': {'a': 1}}]))
+    # 默认关闭是产品边界：显式报错并指引开启方式（禁静默）
+    assert str(ei.value).startswith('ERR_NATIVE_AGGREGATE_DISABLED')
+    assert 'allowNativeAggregate' in str(ei.value)
+    assert ei.value.code == 'ERR_NATIVE_AGGREGATE_DISABLED'
+
+
+def test_aggregate_enabled_resolves_schema_and_delegates(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['db'] = db
+        captured['cmd'] = cmd
+        captured['session'] = session
+        return [{'n': 1}]
+
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    db = _FakeAggDb()
+    store.register({'name': 'AggModel', 'fields': {'a': 'int'},
+                    'datasource': 'db', 'collection': 'agg_models'})
+    _run(init({'db': db}, {'allowNativeAggregate': True}))
+
+    out = _run(store.aggregate('AggModel', [{'$match': {'a': 1}}], {'allowDiskUse': True}))
+    assert captured['db'] is db
+    assert captured['cmd'] == {'kind': 'aggregate', 'collection': 'agg_models',
+                               'pipeline': [{'$match': {'a': 1}}],
+                               'options': {'allowDiskUse': True}}
+    assert captured['session'] is None
+    assert out == {'rows': [{'n': 1}]}
+
+    # 未知 schema 显式报错（对拍 nodejs ERR_AGGREGATE_SCHEMA）
+    with pytest.raises(RuntimeError) as ei:
+        _run(store.aggregate('NoSuchModel', []))
+    assert str(ei.value).startswith('ERR_AGGREGATE_SCHEMA')
+    assert ei.value.code == 'ERR_AGGREGATE_SCHEMA'
+
+
+def test_aggregate_session_injected_in_tx_scope(monkeypatch):
+    captured = {}
+
+    async def fake_exec_mongo(db, cmd, session=None):
+        captured['session'] = session
+        return []
+
+    async def fake_resolve(source, is_write=False):
+        return {'kind': 'mongo', 'conn': _FakeAggDb(), 'session': 'SENTINEL', 'tx': {}}
+
+    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    # 事务/会话作用域 session 强制注入（复用 execute_native 通道，与 js 侧对拍）
+    _run(store.aggregate('AggModel', []))
+    assert captured['session'] == 'SENTINEL'
 
 
 def test_exec_mongo_aggregate_forwards_options():
