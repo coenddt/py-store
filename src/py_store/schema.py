@@ -200,7 +200,10 @@ def _mirror(defn):
 
     # 归档表镜像（形状对齐 core archive_defn：registry.rs:395-417）
     # —— 字段 + deletedAt、collection=<c>_deleted、idPrefix=''、timestamps 默认 true
-    if not defn.get('_isArchive') and not defn['name'].endswith('Deleted'):
+    # archive:False（漉金Core 接入扩展 02）→ 归档模型在 core 注册期即不派生，
+    # Host 镜像同步跳过（与 core 模型表保持一致，禁出现「core 无归档模型而 Host 有镜像」的中间态）
+    if (not defn.get('_isArchive') and not defn['name'].endswith('Deleted')
+            and defn.get('archive') is not False):
         _schemas[f"{defn['name']}Deleted"] = {
             'name': f"{defn['name']}Deleted",
             'collection': f"{defn.get('collection') or defn['name']}_deleted",

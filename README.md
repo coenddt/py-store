@@ -1362,6 +1362,12 @@ same `_id` never collides and a retry after partial failure idempotently re-arch
 empty-condition `remove` is rejected outright — a full-table delete cannot be triggered by
 forgetting a filter.
 
+**Opting out.** A schema that must not keep an archive passes `"archive": False` at registration —
+the `<Model>Deleted` archive def is then never derived (DDL / migrations skip it too), and
+`remove()` deletes without archiving (`archivedCount == 0`, return shape unchanged). For one-shot
+control pass `remove(cond, None, {"archive": False})` to skip the archive for that call only;
+later default calls archive as usual.
+
 ### 16. FastAPI: per-request permission context in one dependency
 
 **Scenario.** An internal admin API: paginated list, create, soft-delete. Permissions must be

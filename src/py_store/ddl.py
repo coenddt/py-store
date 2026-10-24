@@ -497,10 +497,12 @@ def generate_migration(backend, old_defn, new_defn):
         if op == 'addTable':
             stmts.append(_create_table(new_defn, backend))
             stmts.extend(_index_stmts(new_defn, backend))
-            # 归档表跟随（addTable 一次性建全：列 = 主列 + deletedAt，剔除自增策略）
-            arch = _archive_defn_of(new_defn)
-            stmts.append(_create_table(arch, backend))
-            stmts.extend(_index_stmts(arch, backend))
+            # 归档表跟随（addTable 一次性建全：列 = 主列 + deletedAt，剔除自增策略）；
+            # archive:False（漉金Core 接入扩展 02）→ core 不派生归档模型，迁移侧同步跳过
+            if new_defn.get('archive') is not False:
+                arch = _archive_defn_of(new_defn)
+                stmts.append(_create_table(arch, backend))
+                stmts.extend(_index_stmts(arch, backend))
         elif op == 'addColumn':
             name = ch['name']
             field = ch['field']
@@ -515,8 +517,11 @@ def generate_migration(backend, old_defn, new_defn):
                         '（存量行缺失语义由 __present 哨兵表达；default 仅影响新写入）')
                 col_sql += ' DEFAULT ' + _sql_literal(default)
             stmts.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN {col_sql}')
-            # 归档表跟随：不同步则归档 insert（显式拷贝全列）因缺列报错
-            stmts.append(f'ALTER TABLE {_q(backend, table + "_deleted")} ADD COLUMN {col_sql}')
+            # 归档表跟随：不同步则归档 insert（显式拷贝全列）因缺列报错；
+            # archive:False（漉金Core 接入扩展 02）无归档表，跳过
+            if new_defn.get('archive') is not False:
+                stmts.append(
+                    f'ALTER TABLE {_q(backend, table + "_deleted")} ADD COLUMN {col_sql}')
         elif op == 'widenColumn':
             name = ch['name']
             nf = new_defn['fields'][name]

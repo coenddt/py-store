@@ -166,14 +166,21 @@ async def update_many(schema_name, condition, data, route_override=None):
     return {'modifiedCount': result.modified_count}
 
 
-async def remove(schema_name, condition, route_override=None):
+async def remove(schema_name, condition, route_override=None, options=None):
     """删除 —— 原表数据先归档到对应 `_deleted` 附表（附 deletedAt），再物理删除原表数据。
     归档命令带 ``upsertById``（幂等），重试不再因 _id 冲突整批失败；单一 SQL 源时
     归档+删除整体事务化（Mongo / 跨源按顺序执行，非原子边界见 README「事务边界」）。
 
     remove 触发链（A5：未声明触发器时无此路径，行为不变）：before = 归档 findCommand
     首条（被删文档代表值、全字段）；未删到（docs 空）不触发，与 update 0 行命中语义一致。
+
+    ``options.archive`` 为 ``False``（漉金Core 接入扩展 02）：本次调用跳过归档副作用
+    （删除照常，返回结构不变，archivedCount=0）；schema ``archive: False`` 时 core
+    注册期已不派生归档模型，plan_remove 无 findCommand，天然无归档。
     """
+    # 归档判定（漉金Core 接入扩展 02）：调用级 options.archive 显式 False → 跳过归档段；
+    # schema 级裁决在 core 注册期（archive:False 不派生归档模型 → plan_remove 无 findCommand）
+    do_archive = not (isinstance(options, dict) and options.get('archive') is False)
     out = await _plan_with_probe(lambda found, doc: _call(lambda: get_core().plan_remove(
         schema_name, condition, _ctx(), found, doc, route_override)))
 
@@ -185,7 +192,7 @@ async def remove(schema_name, condition, route_override=None):
         ids = None
         if pre:
             ids = [d['_id'] for d in await _exec(pre) if isinstance(d, dict) and '_id' in d]
-        if out.get('findCommand'):
+        if do_archive and out.get('findCommand'):
             find_cmd = out['findCommand']
             docs = await (_fill_pre_ids(find_cmd, ids) if ids is not None else _exec(find_cmd))
             if docs:

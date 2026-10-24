@@ -135,8 +135,9 @@ class Store:
         return await crud.update_many(schema_name, condition, data, route_override)
 
     async def remove(self, schema_name: str, condition: dict,
-                     route_override: dict | None = None) -> dict[str, Any]:
-        return await crud.remove(schema_name, condition, route_override)
+                     route_override: dict | None = None,
+                     options: dict | None = None) -> dict[str, Any]:
+        return await crud.remove(schema_name, condition, route_override, options)
 
     async def exists(self, schema_name: str, condition: dict,
                      route_override: dict | None = None) -> bool:

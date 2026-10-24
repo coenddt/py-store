@@ -365,6 +365,61 @@ def test_exec_store_e2e(tmp_path):
         _ds.set_connections({})
 
 
+# ─── 漉金Core接入扩展 02：archive 归档开关（schema 级 / 调用级） ───
+
+def test_exec_store_schema_archive_off(tmp_path):
+    _sc.register({
+        'name': 'ElKeep', 'collection': 'el_keeps', 'idPrefix': 'ek_', 'timestamps': False,
+        'archive': False,
+        'fields': {'title': {'type': 'string'}}, 'relations': {},
+    })
+    try:
+        _run(init(connect({'dir': str(tmp_path)})))
+
+        async def _main():
+            p = await store.insert('ElKeep', {'title': 'K1'})
+            r = await store.remove('ElKeep', {'_id': p['_id']})
+            assert r['deletedCount'] == 1
+            assert r['archivedCount'] == 0
+            snap = read_snapshot(tmp_path)
+            assert snap['elKeeps'] == []
+            assert 'elKeepsDeleted' not in snap, 'archive:False 不应出现归档集合'
+
+        _run(_main())
+    finally:
+        _ds.set_connections({})
+
+
+def test_exec_store_options_archive_false_single_skip(tmp_path):
+    _sc.register({
+        'name': 'ElOnce', 'collection': 'el_onces', 'idPrefix': 'eo_', 'timestamps': False,
+        'fields': {'title': {'type': 'string'}}, 'relations': {},
+    })
+    try:
+        _run(init(connect({'dir': str(tmp_path)})))
+
+        async def _main():
+            a = await store.insert('ElOnce', {'title': 'A'})
+            b = await store.insert('ElOnce', {'title': 'B'})
+
+            # 本次调用级跳过：删除照常、归档集合不出现
+            r1 = await store.remove('ElOnce', {'_id': a['_id']}, None, {'archive': False})
+            assert r1['deletedCount'] == 1
+            assert r1['archivedCount'] == 0
+            assert 'elOncesDeleted' not in read_snapshot(tmp_path), \
+                'options.archive=False 本次不应归档'
+
+            # 后续默认调用照常归档（注册态未被污染 → 「单次」语义）
+            r2 = await store.remove('ElOnce', {'_id': b['_id']})
+            assert r2['deletedCount'] == 1
+            assert r2['archivedCount'] == 1
+            assert len(read_snapshot(tmp_path)['elOncesDeleted']) == 1
+
+        _run(_main())
+    finally:
+        _ds.set_connections({})
+
+
 # ─── 步骤 7：索引声明告警 + 模块导出 ───────────────────────
 
 def test_index_declares_indexes_warns(tmp_path):
