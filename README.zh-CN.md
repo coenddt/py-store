@@ -441,7 +441,7 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
 ```
 
 - `super_admin`/`admin`/`internal` 角色可通过一切；其他角色按 schema 级与字段级 `read`/`write` 白名单检查；`guest` 永远不能写。
-- `creator` 是伪角色，由 `doc.createdBy == ctx.userId` 解析；授予它的 schema 会自动在查询上注入属主条件，并在 update/remove 时做归属校验。
+- `creator` 是伪角色，由 `doc.<归属键> == ctx.userId` 解析（归属键由 schema `ownerKey` 声明，缺省 `createdBy`，可自定义如 `"_id"`）；授予它的 schema 会自动在查询上注入属主条件，并在 update/remove 时做归属校验。
 - 未设置上下文 → 权限检查禁用（向后兼容）。
 - 拒绝访问会抛出 `store.PermissionError`（带 `status = 403`）。
 
@@ -501,6 +501,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
     ],
     "read": ["editor", "viewer"],      # 可选的 schema 级角色白名单
     "write": ["editor"],
+    "ownerKey": "_id",                 # 可选：`creator` 伪角色的归属键；缺省 "createdBy"
 }
 ```
 
@@ -1262,7 +1263,7 @@ async def delete_article(article_id: str, user: dict = Depends(current_user)):
 可以 —— 关系聚合谓词在不产生扇出的情况下实现 semi/anti-join；SQL 使用 `EXISTS`/`NOT EXISTS`。
 
 **如何实现行级权限？**
-使用 `store.set_context({"userId": ..., "roles": [...]})` 加上 schema 级 `read`/`write` 白名单。`creator` 伪角色会带来自动的归属校验与属主条件注入。`guest` 永远不能写。开启 `set_require_context(True)` 可获得失败安全行为。
+使用 `store.set_context({"userId": ..., "roles": [...]})` 加上 schema 级 `read`/`write` 白名单。`creator` 伪角色会带来自动的归属校验与属主条件注入（归属键由 schema `ownerKey` 声明，缺省 `createdBy`）。`guest` 永远不能写。开启 `set_require_context(True)` 可获得失败安全行为。
 
 **如何做软删除？**
 每个已注册模型都会自动获得一个 `<Model>Deleted` 归档集合/表。`store.remove()` 先归档文档再删除；重新创建相同的 `_id` 不会冲突，因为归档写入是按 `_id` upsert。

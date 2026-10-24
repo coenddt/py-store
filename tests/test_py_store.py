@@ -403,6 +403,34 @@ def test_schema_register_rejects_invalid_timestamps():
         raise AssertionError('非法 timestamps 应报错')
 
 
+def test_schema_owner_key_mirror_and_default():
+    # 漉金Core 接入扩展 01：ownerKey 自定义键回显镜像；缺省 None（零破坏）
+    _sc.register({
+        'name': 'OwnDoc', 'collection': 'own_docs', 'ownerKey': '_id',
+        'fields': {'title': 'string'}, 'relations': {},
+    })
+    assert _sc.get('OwnDoc')['ownerKey'] == '_id'
+    _sc.register({
+        'name': 'DefaultOwn', 'collection': 'default_own',
+        'fields': {'title': 'string'}, 'relations': {},
+    })
+    assert _sc.get('DefaultOwn')['ownerKey'] is None
+
+
+def test_schema_register_rejects_invalid_owner_key():
+    # 非法 ownerKey（空串/非字符串）注册即报错（core 校验透传）
+    for bad in ('', 123, True):
+        try:
+            _sc.register({
+                'name': 'BadOwn', 'collection': 'bad_own', 'ownerKey': bad,
+                'fields': {}, 'relations': {},
+            })
+        except Exception as e:
+            assert 'ownerKey' in str(e)
+        else:
+            raise AssertionError(f'非法 ownerKey 应报错: {bad!r}')
+
+
 def test_feedback_sink_and_default_stderr():
     from py_store import feedback
     events = []

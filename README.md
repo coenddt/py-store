@@ -554,6 +554,7 @@ store.set_feedback_sink(lambda event: log.warning("store feedback: %s", event))
     ],
     "read": ["editor", "viewer"],      # optional schema-level role whitelists
     "write": ["editor"],
+    "ownerKey": "_id",                 # optional ownership key for the `creator` pseudo-role; default "createdBy"
 }
 ```
 
@@ -1492,7 +1493,7 @@ Yes — normalized aggregation is part of GQL: root-level `$group` / `$having` a
 Yes — relation aggregate predicates implement semi/anti-join without fanning out; SQL uses `EXISTS`/`NOT EXISTS`.
 
 **How do I implement row-level permissions?**
-Use `store.set_context({"userId": ..., "roles": [...]})` plus schema-level `read`/`write` whitelists. The `creator` pseudo-role adds automatic ownership checks and owner-condition injection. `guest` can never write. Turn on `set_require_context(True)` for fail-secure behaviour.
+Use `store.set_context({"userId": ..., "roles": [...]})` plus schema-level `read`/`write` whitelists. The `creator` pseudo-role adds automatic ownership checks and owner-condition injection (ownership key defaults to `createdBy`; override per schema with `ownerKey`, e.g. `"ownerKey": "_id"` when documents are owned by their own `_id`). `guest` can never write. Turn on `set_require_context(True)` for fail-secure behaviour.
 
 **How do I do soft delete?**
 Every registered model automatically gets a `<Model>Deleted` archive collection/table. `store.remove()` archives the document first, then deletes it; re-creating the same `_id` does not collide because the archive write is upsert-by-`_id`.

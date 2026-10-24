@@ -191,6 +191,9 @@ def _mirror(defn):
         'indexes': defn.get('indexes') or [],
         'read': defn.get('read'),
         'write': defn.get('write'),
+        # 归属键元数据镜像（漉金Core 接入扩展 01）：creator 伪角色判定/注入的键，
+        # 判决唯一在 core（缺省 createdBy 由 core 兜底）；值合法性由 core.register 校验
+        'ownerKey': defn.get('ownerKey'),
         # 数据源绑定（缺省视为 default，见 datasource.py）— Phase 3/4 多后端路由
         'datasource': defn.get('datasource'),
     }
