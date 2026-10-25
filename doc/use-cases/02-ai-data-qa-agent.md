@@ -66,7 +66,7 @@ for event in events:
 
 - **`build_pipeline` plans only.** It returns the compiled plan with no execution and without applying permissions or computed columns — do not treat it as a dry-run of the *result*.
 - **A rejected SQL pushdown raises *and* emits.** `PushdownUnsupportedError` (a `RuntimeError`) is thrown and a `sql_pushdown_unsupported` event is emitted through the sink. Catch it if you want to re-run that segment on a Mongo source.
-- **There is no raw aggregation escape hatch.** `$pipeline` passthrough and `store.aggregate()` were removed; a GQL containing `$pipeline` fails explicitly. Steer the model toward `$condition` / `$group` / `$having` / relations instead.
+- **There is no raw aggregation escape hatch inside GQL.** `$pipeline` passthrough was removed; a GQL containing `$pipeline` fails explicitly (`ERR_GQL_PARSE:`). Raw access is limited to explicit opt-in entries (`store.aggregate()` behind `allowNativeAggregate`, `execute_native()`, `execute_raw()`). Steer the model toward `$condition` / `$group` / `$having` / relations instead.
 - **Boundary rules fail loudly.** Filtering on array fields, whole object fields or object dot-paths is rejected on every backend, and relation predicates support only one level. Surface those errors back to the model rather than retrying blindly.
 
 ## See also

@@ -118,7 +118,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 - **你想要带迁移引擎的完整 ORM（Alembic、Django migrations）。** `py-store` 是*数据层*，不是迁移工具。它能**读取** SQL 后端的物理结构（`sync_schema` → 内省），但从不回写 DDL。另有一个可选的 `generate_ddl()`，可从已注册 schema 渲染出 `CREATE TABLE` 文本 —— 纯文本，绝不连接或写入数据库。
 - **你想要以 Pydantic 模型为中心的 ORM。** 这里的 schema 是运行时 JSON dict，带来的是跨语言一致性（同一 schema 可在 Python 与 Node.js 中运行），而非 Pydantic 类型校验。
 - **你只用一种数据库，且很少做关联。** 直接用驱动（或单库 ODM/ORM）会更简单。
-- **你需要裸聚合的逃生通道。** `$pipeline` 透传与 `store.aggregate()` 已被有意移除。请使用 `$condition` / `$group` / `$having` / relations；任何无法被安全翻译的东西都会**显式失败**，而不是静默处理。
+- **你需要裸聚合的逃生通道。** 用户 `$pipeline` 透传已移除 —— 含 `$pipeline` 的 GQL 一律在解析期显式失败。原生逃生口只保留显式入口：`store.aggregate()`（严格 **opt-in**，默认关闭，需 `init(connections, {"allowNativeAggregate": True})` 显式开启）、`execute_native()`（Mongo 原生聚合）与 `execute_raw()`（原生 SQL）。日常查询请使用 `$condition` / `$group` / `$having` / relations；任何无法被安全翻译的东西都会**显式失败**，而不是静默处理。
 
 ## 横向对比
 
@@ -267,7 +267,7 @@ Model($condition:@c0,$sort:@s1,$skip:@sk,$limit:@l1) {
 - `many` 关系返回列表（为空时返回 `[]`）；`one` 关系合并进父文档（缺失时为 `None`）。
 - 关系级 `$sort`/`$skip`/`$limit` 是**按父级取 top-N**（每个父级各有自己的窗口；在 SQL 上翻译为窗口函数）。
 
-> **破坏性变更**：用户 `$pipeline` 透传与 `store.aggregate()` 已被移除（裸聚合逃生通道）。包含 `$pipeline` 的 GQL 现在会显式失败，而不是被静默忽略。
+> **破坏性变更**：用户 `$pipeline` 透传已移除 —— 包含 `$pipeline` 的 GQL 现在在解析期显式失败（`ERR_GQL_PARSE:`），而不是被静默忽略，也不再按档位放行。原生聚合逃生通道只保留显式入口：`store.aggregate()`（严格 opt-in，默认关闭，需 `init(connections, {"allowNativeAggregate": True})`）、`execute_native()` 与 `execute_raw()`。
 
 ## 聚合
 

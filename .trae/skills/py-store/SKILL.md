@@ -95,7 +95,7 @@ store.register({"name": "Order", "collection": "orders", "datasource": "pg_a",
 | `count` | `(schema_name, filter=None, route_override=None) -> int` | ✅ | |
 | `mutation` | `(schema_name, data: dict \| list, route_override=None)` | ✅ | 智能 upsert + 递归处理关系子文档 |
 | `upsert` | `(schema_name, condition, data, options=None, route_override=None)` | ✅ | 显式条件 upsert，不处理关系 |
-| `aggregate` | — | ❌ | **已移除**（README/CHANGELOG 2.0.0）；用户 `$pipeline` 直通亦已移除并显式报错 |
+| `aggregate` | `(schema_name, pipeline, options=None)` | ⚠️ | **严格 opt-in**（默认关闭；`init(connections, {"allowNativeAggregate": True})` 开启）；用户 `$pipeline` 直通已移除并显式报错 |
 
 ### 4.3 Schema / 数据源 / 权限 / 反馈 / 结构同步
 
@@ -183,7 +183,7 @@ python -m mypy src/py_store
 5. **默认是 fail-open**：未设置权限上下文时所有检查放行（向后兼容）。安全敏感宿主应在启动时 `store.set_require_context(True)`，此后缺 ctx 抛 `ERR_NO_CONTEXT:...`，内部任务显式用 `run_as_internal`。
 6. **不得静默失守方向**：`scoped_roles` 用 token set/reset（嵌套安全），不要用 `set_context(...)` + finally 清空（会误清外层且"无上下文=全放行"）。
 7. **时间戳单位**：schema `timestamps` 仅接受 `True/False/'ms'/'s'`（缺省毫秒），非法值**注册即报错**；`createdAt`/`updatedAt` 由框架维护，勿手写。core 无时钟，`now` 由 Host 提供。
-8. **迁移注意（2.0.0 Breaking）**：计算列 `lookup` 形态已移除 → 改用 `agg`；`store.aggregate()` / 用户 `$pipeline` 已移除。
+8. **迁移注意（2.0.0 Breaking）**：计算列 `lookup` 形态已移除 → 改用 `agg`；用户 `$pipeline` 已移除；`store.aggregate()` 改为**严格 opt-in**（需 `init(connections, {"allowNativeAggregate": True})` 显式开启）。
 9. **U1~U4 全局显式报错**：数组字段直接过滤（U1）、对象深度等值过滤（U2）、对象点号路径过滤（U3）/排序（U4）在所有后端统一报错，不静默降级。
 10. **SQL 下推不可翻译时显式抛错**：`PushdownUnsupportedError`（`RuntimeError`，`datasource.py`）并同时走 `feedback` 通道；可捕获后改用 Mongo 源执行该段。
 11. **`__init__` 里 `list` 是 staticmethod 且置于末尾**（遮蔽内置名），扩展该类时注意顺序。
