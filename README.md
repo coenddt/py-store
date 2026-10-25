@@ -11,6 +11,9 @@
 `py-store` lets a Python service talk to MongoDB (native aggregation), MySQL, PostgreSQL, SQLite and local disk through a **single schema definition and a single query dialect**. Nested relations compile to **one native query per backend** — you never hand-write `$lookup` or raw SQL.
 
 > Also looking for the Node.js version? See [`nodejs-store`](https://github.com/coenddt/nodejs-store) (npm `nodejs-store`). Both are thin hosts over the shared Rust engine [`rust-store`](https://github.com/coenddt/rust-store).
+>
+> **Store family on Gitee:** [`rust-store`](https://gitee.com/coenddt/rust-store) (shared Rust core) · [`nodejs-store`](https://gitee.com/coenddt/nodejs-store) (Node.js host, npm `nodejs-store`) · [`py-store`](https://gitee.com/coenddt/py-store) (this repo — Python host, pip `storepy`)
+>
 > 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
 **Documentation site:** <https://coenddt.github.io/py-store/> — every scenario walkthrough with runnable code and the engine's exact limits, one indexable page per scenario.
@@ -1562,8 +1565,8 @@ $env:MYSQL_URI='mysql://user:pass@host:3306/db'; $env:PG_URI='postgres://user:pa
 
 ## Related projects
 
-- [`nodejs-store`](https://github.com/coenddt/nodejs-store) — the Node.js twin (npm `nodejs-store`, camelCase API).
-- [`rust-store`](https://github.com/coenddt/rust-store) — the shared Rust core and its `rust-store-node` / `rust-store-py` bindings.
+- [`nodejs-store`](https://github.com/coenddt/nodejs-store) ([Gitee](https://gitee.com/coenddt/nodejs-store)) — the Node.js twin (npm `nodejs-store`, camelCase API).
+- [`rust-store`](https://github.com/coenddt/rust-store) ([Gitee](https://gitee.com/coenddt/rust-store)) — the shared Rust core and its `rust-store-node` / `rust-store-py` bindings.
 - `text-to-query` — a skill that turns natural-language questions into GQL + params for this data layer.
 
 ## Framework usage contract
