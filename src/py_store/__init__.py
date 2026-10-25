@@ -273,13 +273,13 @@ class Store:
                 'ERR_NATIVE_AGGREGATE_DISABLED:原生聚合别名未开启——默认关闭是产品边界，'
                 'init(connections, {"allowNativeAggregate": True}) 显式开启；'
                 '或改用 GQL $group / $having 归一聚合 / execute_native 直调')
-            err.code = 'ERR_NATIVE_AGGREGATE_DISABLED'
+            err.code = 'ERR_NATIVE_AGGREGATE_DISABLED'  # type: ignore[attr-defined]
             raise err
         try:
             m = schema.get(schema_name)
         except KeyError:
             err = RuntimeError(f'ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}')
-            err.code = 'ERR_AGGREGATE_SCHEMA'
+            err.code = 'ERR_AGGREGATE_SCHEMA'  # type: ignore[attr-defined]
             raise err from None
         return await datasource.execute_native(
             m.get('datasource') or 'default', m['collection'], pipeline, options)
