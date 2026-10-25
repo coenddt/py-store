@@ -96,10 +96,9 @@ def enable_feedback_table(store):
     prev = get_sink()
 
     def _sink(event):
-        # 事件类别键 `type` 与 field 级契约保留键冲突（core §6.3）→ 落库列名为 `eventType`
+        # fields 键空间完全开放、无字段名保留字：事件类别直接落库为 `type` 字段
         e = event or {}
-        row = {k: v for k, v in e.items() if k != 'type'}
-        row['eventType'] = e.get('type')
+        row = dict(e)
         ns = _current_meta()
         row.update({'tenant': ns.get('tenant', ''),
                     'env': ns.get('env', ''), 'now': int(time.time() * 1000)})
