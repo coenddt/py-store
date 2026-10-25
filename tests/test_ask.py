@@ -431,7 +431,7 @@ def test_t11_nested_relation_predicate_blocked_then_retry():
     assert [e['code'] for e in res.events] == ['profileBlocked']
 
 
-# ── T12 $pipeline 直通（forbid_t2q）→ 回喂重试 ─────────────────
+# ── T12 $pipeline 直通（core 5.0.0 撤销：解析期一律显式报错）→ 回喂重试 ──
 
 def test_t12_pipeline_direct_blocked_then_retry():
     _mock(_DOCS)
@@ -441,10 +441,10 @@ def test_t12_pipeline_direct_blocked_then_retry():
     )
     res = _run(store.ask('自定义管道查询', llm=llm, ctx=CTX_USER))
     err = res.attempts[0]['error']
-    assert err['code'] == 'profileBlocked'
-    assert err['feature'] == '$pipeline 直通'
+    assert err['code'] == 'planError'
+    assert '$pipeline 直通已移除' in err['message']
     assert res.data == _PROJ_DOCS
-    assert [e['code'] for e in res.events] == ['profileBlocked']
+    assert [e['code'] for e in res.events] == []
 
 
 # ── D6 插拔注册表：注册名与客户端两路同一入口 ──────────────────
