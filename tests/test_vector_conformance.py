@@ -193,6 +193,10 @@ async def _connections(tag, tmp_path):
         try:
             pool = await asyncio.wait_for(asyncpg.create_pool(dsn=PG_URI, timeout=2), timeout=4)
             await pool.execute('SELECT 1')
+            # DDL 为裸 CREATE TABLE（含归档表 _deleted）：先 DROP 残留再建，
+            # 对齐 mysql 分支与 nodejs postgres 套件口径
+            await pool.execute('DROP TABLE IF EXISTS vector_conformance')
+            await pool.execute('DROP TABLE IF EXISTS vector_conformance_deleted')
             sql = ddl.generate('postgres', [_schema_name('postgres')])
             for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
                 await pool.execute(stmt)
@@ -222,6 +226,10 @@ async def _close(tag, driver):
             driver.close()
             await driver.wait_closed()
         elif tag == 'postgres':
+            # teardown 同步 DROP（含归档表）：不留残留表污染同库的 nodejs
+            # postgres 套件与 real-backends-e2e introspect 整库扫描
+            await driver.execute('DROP TABLE IF EXISTS vector_conformance')
+            await driver.execute('DROP TABLE IF EXISTS vector_conformance_deleted')
             await driver.close()
     finally:
         datasource.set_connections({})
