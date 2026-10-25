@@ -280,7 +280,7 @@ class Store:
         except KeyError:
             err = RuntimeError(f'ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}')
             err.code = 'ERR_AGGREGATE_SCHEMA'
-            raise err
+            raise err from None
         return await datasource.execute_native(
             m.get('datasource') or 'default', m['collection'], pipeline, options)
 
