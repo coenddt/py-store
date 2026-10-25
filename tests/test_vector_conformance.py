@@ -134,6 +134,21 @@ async def _connections(tag, tmp_path):
         except Exception as e:  # 实例不可达即 skip
             await client.close()
             return None, f'MongoDB 不可达（{MONGO_URI}）: {e}', None
+        # $vectorSearch 为 Atlas Search 专属能力：本地 mongod 不支持该聚合阶段
+        # （31082 SearchNotEnabled / Unrecognized pipeline stage）。探测试探聚合
+        # 报错即 skip，避免向量用例以 31082 硬失败。
+        try:
+            # PyMongo async 下 aggregate 是协程（同 executors/mongo.py 口径）
+            cursor = await client.get_default_database()['_vc_probe'].aggregate([
+                {'$vectorSearch': {
+                    'queryVector': [0.0, 0.0, 0.0], 'path': 'embedding',
+                    'numCandidates': 1, 'limit': 1,
+                }},
+            ])
+            await cursor.to_list(length=1)
+        except Exception as e:  # 能力缺失即 skip（理由附探测原始错误）
+            await client.close()
+            return None, f'MongoDB 不支持 $vectorSearch（Atlas Search 专属）: {e}', None
         return {'vc_mongodb': client.get_default_database()}, None, client
     if tag == 'mysql':
         try:
@@ -147,6 +162,7 @@ async def _connections(tag, tmp_path):
             'db': unquote((u.path or '/').lstrip('/')),
             'autocommit': True, 'connect_timeout': 1,
         }
+        pool = None
         try:
             pool = await asyncio.wait_for(asyncmy.create_pool(**cfg), timeout=3)
             async with pool.acquire() as conn:
@@ -154,10 +170,17 @@ async def _connections(tag, tmp_path):
                     await cur.execute('SELECT 1')
                     await cur.fetchall()
         except Exception as e:
+            if pool is not None:  # skip 前关池，防连接泄漏挤爆 max_connections
+                pool.close()
+                await pool.wait_closed()
             return None, f'MySQL 不可达（{MYSQL_URI}）: {e}', None
         sql = ddl.generate('mysql', [_schema_name('mysql')])
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                # DDL 为裸 CREATE TABLE（含归档表 _deleted）：先 DROP 残留再建，
+                # 对齐 nodejs vector-conformance mysql 套件口径
+                await cur.execute('DROP TABLE IF EXISTS vector_conformance')
+                await cur.execute('DROP TABLE IF EXISTS vector_conformance_deleted')
                 for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
                     await cur.execute(stmt)
         return {'vc_mysql': executors.create_connection('mysql', pool)}, None, pool
@@ -166,6 +189,7 @@ async def _connections(tag, tmp_path):
             import asyncpg
         except ImportError as e:  # pragma: no cover
             return None, f'缺少 asyncpg 驱动: {e}', None
+        pool = None
         try:
             pool = await asyncio.wait_for(asyncpg.create_pool(dsn=PG_URI, timeout=2), timeout=4)
             await pool.execute('SELECT 1')
@@ -173,6 +197,8 @@ async def _connections(tag, tmp_path):
             for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
                 await pool.execute(stmt)
         except Exception as e:
+            if pool is not None:  # skip 前关池，防连接泄漏挤爆 max_connections
+                await pool.close()
             return None, f'PostgreSQL 不可达 / 无 pgvector（{PG_URI}）: {e}', None
         return {'vc_postgres': executors.create_connection('postgres', pool)}, None, pool
     raise AssertionError(tag)
@@ -186,6 +212,12 @@ async def _close(tag, driver):
         elif tag == 'mongodb':
             await driver.close()
         elif tag == 'mysql':
+            # teardown 同步 DROP（含归档表）：不留残留表污染同库的 nodejs
+            # real-backends-e2e introspect 整库扫描
+            async with driver.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute('DROP TABLE IF EXISTS vector_conformance')
+                    await cur.execute('DROP TABLE IF EXISTS vector_conformance_deleted')
             # asyncmy 的 ``Pool.close()`` 为同步方法，``wait_closed()`` 才需 await
             driver.close()
             await driver.wait_closed()
