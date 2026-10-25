@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "storepy"
-version = "4.9.0"
+version = "5.0.0"
 description = "Multi-backend data layer for Python asyncio (MongoDB, MySQL, SQLite, PostgreSQL, local disk): pure JSON schemas, GQL tree queries compiled to a single native query, GROUP BY/HAVING aggregation, computed columns, soft-delete and role-based access control"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,7 @@ authors = [
 ]
 dependencies = [
   "pymongo>=4.9",
-  "rust-store-py>=4.9.0,<5.0.0",
+  "rust-store-py>=5.0.0,<6.0.0",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
