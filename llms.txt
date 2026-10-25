@@ -2,7 +2,7 @@
 
 > Lightweight multi-backend data layer for Python asyncio: pure JSON schemas plus a MongoDB-style GQL tree query dialect that runs on MongoDB, MySQL, SQLite and PostgreSQL, with built-in role-based access control, computed columns and soft-delete.
 
-`py-store` lets a Python service define a model once as a dict and query it with a single dialect across MongoDB (native aggregation, PyMongo `AsyncMongoClient`) and MySQL / PostgreSQL / SQLite (parameterized SQL). Nested relations compile to one native query per backend. It is the Python host over the shared Rust engine [`rust-store`](https://github.com/coenddt/rust-store) (binding: `rust-store-py`); its Node.js twin is [`nodejs-store`](https://github.com/coenddt/nodejs-store).
+`py-store` lets a Python service define a model once as a dict and query it with a single dialect across MongoDB (native aggregation, PyMongo `AsyncMongoClient`) and MySQL / PostgreSQL / SQLite (parameterized SQL). Nested relations compile to one native query per backend. It is the Python host over the shared Rust engine [`rust-store`](https://github.com/coenddt/rust-store) ([Gitee](https://gitee.com/coenddt/rust-store)) (binding: `rust-store-py`); its Node.js twin is [`nodejs-store`](https://github.com/coenddt/nodejs-store) ([Gitee](https://gitee.com/coenddt/nodejs-store)).
 
 - PyPI distribution name: `storepy` — import package: `py_store` (`pip install storepy`, `from py_store import init, store`)
 - Runtime: Python 3.10+
@@ -42,5 +42,5 @@
 
 ## Optional
 
-- [nodejs-store (Node.js twin)](https://github.com/coenddt/nodejs-store): same schemas, same GQL, camelCase API
-- [rust-store (shared Rust core)](https://github.com/coenddt/rust-store): GQL parsing, permissions, computed columns, command planning, SQL dialect translation
+- [nodejs-store (Node.js twin)](https://github.com/coenddt/nodejs-store) ([Gitee](https://gitee.com/coenddt/nodejs-store)): same schemas, same GQL, camelCase API
+- [rust-store (shared Rust core)](https://github.com/coenddt/rust-store) ([Gitee](https://gitee.com/coenddt/rust-store)): GQL parsing, permissions, computed columns, command planning, SQL dialect translation
