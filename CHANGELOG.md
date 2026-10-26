@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.1.0 (2026-10-26)
+
+### Added（feat：计算列可覆盖同名字段）
+
+- **`fields` 与 `computes` 同名放行**：注册 `fields: {'favoriteCount': 'int'}` +
+  `computes: {'favoriteCount': {'asyncFn': ..., 'depends': []}}` 不再抛
+  `ERR_NAME_CONFLICT`，与 `nodejs-store` 行为一致。查询期输出计算值（存储字段仍照常
+  读取并回填默认值，随后被计算列覆盖）；写入期仍按 `fields` 声明落库，
+  `$inc` / `$set` 同名键正常通过。`fields` / `relations` / `computes` 各自组内撞名、
+  `fields` ∩ `relations`、`relations` ∩ `computes` 仍报错；`_score` 仍为保留名。
+- 依赖下限：`rust-store-py>=5.1.0,<6.0.0`（本次语义由 core 5.1.0 提供）。
+- 测试：新增 `tests/test_compute_override.py`（注册成功 → 查询返回计算值 3
+  （库内原值 7）→ `$inc favoriteCount` 后落库原值递增到 8）。
+
 ## 5.0.0 (2026-10-25)
 
 ### Breaking（撤销：用户 `$pipeline` 直通）
