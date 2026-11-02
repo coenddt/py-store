@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.2.0 (2026-11-02)
+
+### Added（feat：`accessKeys` 声明式行级权限）
+
+- schema 新增 `accessKeys` 声明式行级权限：`read`/`write` 引用 ctx 清单，`bypassRoles` 豁免；
+  单值字段成员判定、array 字段读交集 / 写子集；ctx 缺键 fail closed，空清单读空结果、写全拒。
+- 方言：MySQL `JSON_OVERLAPS`、PG `&&`、SQLite `json_each`；Mongo 原生 `$in`。
+- 宿主：`_mirror` 镜像 `accessKeys`（判决唯一在 core）；归档镜像不继承。
+- 测试：新增 `tests/test_access_keys.py`（9 例）与 `scripts/parity_access.py`（双端对拍）。
+- 依赖下限：`rust-store-py>=5.2.0,<6.0.0`（本次能力由 core 5.2.0 提供）。
+
 ## 5.1.0 (2026-10-26)
 
 ### Added（feat：计算列可覆盖同名字段）
