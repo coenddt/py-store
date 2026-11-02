@@ -13,7 +13,8 @@ import asyncio
 import pytest
 
 from py_store import datasource as _ds
-from py_store import init, permission as perm, store
+from py_store import init, store
+from py_store import permission as perm
 from py_store import schema as _sc
 from py_store.memory import connect
 
