@@ -523,6 +523,69 @@ def test_ddl_unknown_field_type_raises():
         store.generate_ddl('mysql', ['DdlBad'])
 
 
+def test_ddl_owner_key_uses_custom_field():
+    """ownerKey 自定义 + creator 权限 ⇒ 补 ownerKey 列，不再补 created_by（三后端）。"""
+    store.register({
+        'name': 'DdlOwnerCustom', 'collection': 'ddl_owner_custom', 'idPrefix': 'o',
+        'timestamps': False, 'write': ['creator'], 'ownerKey': 'creatorId',
+        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+    })
+    for backend, pat in (('mysql', '`creator_id` VARCHAR(255)'),
+                         ('postgres', '"creator_id" TEXT'),
+                         ('sqlite', '"creator_id" TEXT')):
+        ddl = store.generate_ddl(backend, ['DdlOwnerCustom'])
+        assert pat in ddl, ddl
+        assert 'created_by' not in ddl, ddl
+
+
+def test_ddl_owner_key_without_owner_control_adds_nothing():
+    """无 creator 行控（ownerKey 仅声明语义）⇒ 不补列，行为不变。"""
+    store.register({
+        'name': 'DdlOwnerNoCtl', 'collection': 'ddl_owner_noctl', 'idPrefix': 'o',
+        'timestamps': False, 'ownerKey': 'creatorId', 'read': ['admin'],
+        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+    })
+    for backend in ('mysql', 'postgres', 'sqlite'):
+        ddl = store.generate_ddl(backend, ['DdlOwnerNoCtl'])
+        assert 'creator_id' not in ddl, ddl
+        assert 'created_by' not in ddl, ddl
+
+
+def test_ddl_creator_permission_adds_created_by_column():
+    """A2：read/write 含 creator ⇒ DDL 自动补 created_by 列（三后端）。
+
+    与 core schema/registry.rs::add_creator_field 同口径：注册期字段声明补齐 +
+    建表列补齐，避免写入路径注入 createdBy 时 SQL 1054 Unknown column。
+    """
+    store.register({
+        'name': 'DdlCreator', 'collection': 'ddl_creator', 'idPrefix': 'c',
+        'timestamps': False, 'write': ['creator'],
+        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+    })
+    my = store.generate_ddl('mysql', ['DdlCreator'])
+    pg = store.generate_ddl('postgres', ['DdlCreator'])
+    lite = store.generate_ddl('sqlite', ['DdlCreator'])
+
+    assert '`created_by` VARCHAR(255)' in my
+    assert '"created_by" TEXT' in pg
+    assert '"created_by" TEXT' in lite
+
+
+def test_ddl_creator_permission_keeps_declared_type():
+    """已声明 createdBy 时沿用声明类型，不重复建列。"""
+    store.register({
+        'name': 'DdlCreatorDecl', 'collection': 'ddl_creator_decl', 'idPrefix': 'c',
+        'timestamps': False, 'read': ['creator'],
+        'fields': {
+            '_id': {'type': 'string'},
+            'createdBy': {'type': 'string'},
+        },
+    })
+    sql = store.generate_ddl('mysql', ['DdlCreatorDecl'])
+
+    assert sql.count('`created_by`') == 1, sql
+
+
 def test_ddl_present_overflow_emits_feedback():
     events = []
     feedback.set_sink(events.append)

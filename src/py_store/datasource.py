@@ -613,6 +613,8 @@ async def execute_native(source, collection, pipeline, options=None):
         ``options.session`` 不可覆盖）；统一按读路径解析（``is_write=False``），
         ``$merge``/``$out`` 写管道请自行开事务；
       - 仅支持 Mongo 源：SQL 源显式报错并指引 ``execute_raw``（绝不静默）；
+        **适用源不同**：``execute_native`` 只跑 Mongo 原生命令；按 schema 的
+        ``aggregate``/``query``（pipeline 由 core 翻译成各方言 SQL）在 SQL 源同样可用。
         MongoClient 形态须经 schema 声明 database（``mongo_db`` 既有校验，缺名即报错）；
       - 返回 ``{'rows': list}``。
     """
@@ -627,7 +629,9 @@ async def execute_native(source, collection, pipeline, options=None):
         session = conn.get('session')
     elif is_sql(conn):
         raise NativeCommandError(
-            f'数据源 {source} 是 SQL 源（原生 Mongo 命令入口仅支持 mongo；SQL 源请用 execute_raw）')
+            f'数据源 {source} 是 SQL 源（execute_native 仅接受 Mongo 原生命令，SQL 源请用 '
+            f'execute_raw；按 schema 的 aggregate/query（pipeline 由 core 翻译）在 SQL 源'
+            f'可用——两者适用源不同）')
     elif _is_mongo_client(conn) or hasattr(conn, 'get_collection'):
         # 全局裸连接：MongoClient（须声明 database，缺名由 mongo_db 显式报错）/ db 实例
         db = mongo_db(conn, source, None)

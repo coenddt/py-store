@@ -154,6 +154,11 @@ _ID_TYPE = ('VARCHAR(64)', 'TEXT', 'TEXT')
 _ID_AUTO_TYPE = ('INT AUTO_INCREMENT', 'SERIAL', 'INTEGER')
 _PRESENT_TYPE = ('VARCHAR(255)', 'TEXT', 'TEXT')
 _TIMESTAMP_FIELDS = ('createdAt', 'updatedAt')
+# creator 权限隐含归属键（A2）：与 core schema/registry.rs::add_creator_field 同款。
+# 写入路径在 creator 权限场景下必注入 `createdBy`，因此该列必须建；仅靠「声明字段」
+# 会导致未声明时 SQL 层报 1054 Unknown column 'created_by'（应用层只能再打补丁）。
+_CREATOR_ROLE = 'creator'
+_CREATOR_FIELD = 'createdBy'
 _MYSQL_PRESENT_MAX = 255
 
 
@@ -187,9 +192,29 @@ def _pname(backend, logical):
     return _native.translate_name(logical, backend)
 
 
+def _has_creator_permission(defn):
+    """schema 的 read/write 是否含 creator 伪角色（决定归属键必建）"""
+    def _has(roles):
+        return bool(roles) and _CREATOR_ROLE in roles
+    return _has(defn.get('read')) or _has(defn.get('write'))
+
+
+def _owner_field(defn):
+    """owner 行控使用的归属键名；None = 不使用 owner 行控（不补列）。
+
+    ownerKey 缺省 = createdBy；`_id` 是系统主键，DDL 已建，不重复补列。
+    与 core schema/registry.rs::add_owner_field 同口径。
+    """
+    if not _has_creator_permission(defn):
+        return None
+    declared = defn.get('ownerKey')
+    name = declared if isinstance(declared, str) and declared else _CREATOR_FIELD
+    return None if name == '_id' else name
+
+
 def _columns(defn, backend):
     """返回 [(name, sql_type, pk, auto)]，顺序：声明的字段（标量 / object·array JSON 列）→
-    timestamps → __present；name 为该后端物理列名（snake_case）。"""
+    timestamps → 归属键（owner 行控隐含）→ __present；name 为该后端物理列名（snake_case）。"""
     i = _idx(backend)
     cols = []
     fields = defn.get('fields') or {}
@@ -222,6 +247,13 @@ def _columns(defn, backend):
             col = _pname(backend, ts)
             if not any(c[0] == col for c in cols):
                 cols.append((col, _TYPES['number'][i], False, False))
+    # A2：owner 行控（creator 权限）⇒ 归属键必建（与时间戳同款自动补齐；
+    # 已声明则沿用声明的类型）。键名取 ownerKey（缺省 createdBy），与 core 同口径。
+    owner = _owner_field(defn)
+    if owner is not None:
+        col = _pname(backend, owner)
+        if not any(c[0] == col for c in cols):
+            cols.append((col, _TYPES['string'][i], False, False))
     cols.append(('__present', _PRESENT_TYPE[i], False, False))
     return cols
 
@@ -374,7 +406,10 @@ def _archive_defn_of(defn):
     """主 def → 归档表 def（列 = 主列 + deletedAt；剔除 _id 自增策略；indexes 继承；
     对齐 core registry.rs::archive_defn）"""
     fields = dict(defn.get('fields') or {})
-    fields['deletedAt'] = {'type': 'number'}
+    # 主 def 可能已声明 deletedAt / deleted_at：已存在则不重复追加，
+    # 否则归档表 CREATE TABLE 会 duplicate column name
+    if 'deletedAt' not in fields and 'deleted_at' not in fields:
+        fields['deletedAt'] = {'type': 'number'}
     idf = fields.get('_id')
     if isinstance(idf, dict):
         idf = {k: v for k, v in idf.items() if k != 'strategy'}
@@ -514,7 +549,9 @@ def generate_migration(backend, old_defn, new_defn):
                 if ftype in _NON_COLUMN or ftype == 'vector':
                     raise ValueError(
                         f'MIGRATION_UNSUPPORTED: 新列 "{name}"（{ftype} 列）不支持 DEFAULT'
-                        '（存量行缺失语义由 __present 哨兵表达；default 仅影响新写入）')
+                        '（建新表可设 default；老表新增列必须「加列 + 回填」两步：'
+                        '先 ADD COLUMN 不带 default，再回填存量行——漏回填的行按新列过滤'
+                        '会全表不可见；存量行缺失语义由 __present 哨兵表达）')
                 col_sql += ' DEFAULT ' + _sql_literal(default)
             stmts.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN {col_sql}')
             # 归档表跟随：不同步则归档 insert（显式拷贝全列）因缺列报错；

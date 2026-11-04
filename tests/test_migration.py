@@ -114,6 +114,31 @@ def test_generate_bad_backend():
         ddl.generate_migration('mongodb', OLD, NEW)
 
 
+def test_object_column_default_requires_backfill():
+    """A5：区分「标量列可随 ADD COLUMN 设 DEFAULT」与「object/vector 列必须加列 + 回填」。"""
+    obj_add = {
+        'name': 'Order', 'collection': 'orders', 'idPrefix': 'o', 'timestamps': False,
+        'fields': dict(OLD['fields'],
+                       meta={'type': 'object', 'default': {'k': 1},
+                             'fields': {'k': {'type': 'int'}}}),
+        'indexes': OLD['indexes'],
+    }
+    with pytest.raises(ValueError, match=r'加列 \+ 回填'):
+        ddl.generate_migration('mysql', OLD, obj_add)
+
+
+def test_declared_deleted_at_creates_single_archive_column():
+    """主 def 已声明 deletedAt 时，归档表不得重复建 deleted_at 列。"""
+    defn = {
+        'name': 'Doc', 'collection': 'docs', 'idPrefix': 'd', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'deleted_at': {'type': 'number', 'default': 0}},
+    }
+    stmts = ddl.generate_migration('sqlite', None, defn)
+    arch = [s for s in stmts if 'CREATE TABLE "docs_deleted"' in s]
+    assert arch, stmts
+    assert arch[0].count('"deleted_at"') == 1, arch[0]
+
+
 def test_parity_anchor():
     """双宿主 parity 锚：nodejs-store/tests/migration.test.js 的同输入输出必须逐字节一致。"""
     # sqlite 遇混合变更中的 widen → 整体显式拒绝（不产半截语句）
