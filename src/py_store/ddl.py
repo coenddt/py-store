@@ -29,6 +29,10 @@ _BACKENDS = ('mysql', 'postgres', 'sqlite')
 # schema 声明类型 → (mysql, postgres, sqlite) 列类型
 _TYPES = {
     'string': ('VARCHAR(255)', 'TEXT', 'TEXT'),
+    # 长文本（序列化状态、正文、base64 等数 KB 起步的字符串）：MySQL 用 MEDIUMTEXT
+    # （16MB），避免调用方只能声明 string 再在建表后手改列型（宿主私改列型即绕过
+    # DDL 真源，见 AGENTS §22）。PG / SQLite 的 TEXT 本身无长度上限。
+    'text': ('MEDIUMTEXT', 'TEXT', 'TEXT'),
     'int': ('INT', 'INTEGER', 'INTEGER'),
     'long': ('BIGINT', 'BIGINT', 'INTEGER'),
     'number': ('BIGINT', 'BIGINT', 'INTEGER'),

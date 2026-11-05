@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.3.0 (2026-11-05)
+
+### Fixed（fix：MySQL 两步化 claim / CAS 的 SQL 文本占位符回填）
+
+- `_exec_sql_direct` 识别 `stmts[1]` 文本含 `___claimed_ids___` 时，先执行首条取回命中
+  `_id`、按领取结果回填置标语句再执行；零领取不执行置标语句。修复 MySQL 报
+  `1054 Unknown column '___claimed_ids___'`（此前只能由宿主 monkey patch 兜住，
+  见 AGENTS §22）。
+- 测试：`tests/test_raw_sql_and_ddl.py` 新增两例（占位符回填 / 零领取跳过）。
+
+### Added（feat：`text` 长文本字段类型）
+
+- `text` → MySQL `MEDIUMTEXT`、PG / SQLite `TEXT`；`string` 仍为 `VARCHAR(255)`。
+  长字符串（序列化状态、base64、正文）此前只能声明 `string`，宿主被迫在建表后手改列型。
+- README 同步：`schema.indexes` 按阶段 3 生成 `CREATE INDEX`（旧文「不建索引」为阶段 3 前口径）。
+- 测试：`tests/test_raw_sql_and_ddl.py` 新增一例（三后端列型）。
+
 ## 5.2.0 (2026-11-02)
 
 ### Added（feat：`accessKeys` 声明式行级权限）

@@ -416,7 +416,8 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 - Only scalar fields become columns; `object` / `array` fields do not.
 - Every table gets the `__present` sentinel column; `timestamps` models also get `createdAt` / `updatedAt`; the `<collection>_deleted` archive table is generated like any other registered def.
 - The `<Name>Deleted` archive def is **derived by the Rust core when the model is registered**; the Python host only mirrors it (`collection` `<c>_deleted`, the `deletedAt` field, empty `idPrefix`) and never re-registers it into the core. So `schema.list()` and `generate_ddl()` contain each archive table exactly once; if a duplicate ever appears (upstream regression), they deduplicate and emit a `schemaDuplicateName` / `ddlDuplicateTable` feedback event instead of silently emitting duplicate `CREATE TABLE`s.
-- No `CREATE INDEX` is emitted — SQL backends keep indexes as metadata only.
+- `schema.indexes` (`{keys: {f: 1|-1}}`, Mongo shape) are emitted as `CREATE [UNIQUE] INDEX` after the table (phase 3 landed; see `ddl.py::_index_stmts`). The generator is still pure text.
+- Field type `text` maps to `MEDIUMTEXT` (MySQL) / `TEXT` (PG, SQLite) for long strings (serialized state, base64, bodies). `string` stays `VARCHAR(255)`.
 - MySQL `__present` is `VARCHAR(255)`; a schema whose present-token string would overflow emits a `ddlPresentOverflow` feedback event rather than failing silently.
 
 ### Schema migration (orchestrator)

@@ -599,3 +599,70 @@ def test_ddl_present_overflow_emits_feedback():
     store.generate_ddl('mysql', ['DdlWide'])
 
     assert any(e.get('code') == 'ddlPresentOverflow' for e in events), events
+
+
+def test_ddl_text_field_uses_backend_long_text():
+    """text 类型 → MySQL MEDIUMTEXT / PG·SQLite TEXT
+
+    长字符串（任务序列化状态、base64、正文等数 KB 起步）此前只能声明 string，
+    而 string 在 MySQL 侧固定 VARCHAR(255)，宿主被迫在建表后手改列型（绕过 DDL 真源）。
+    """
+    store.register({
+        'name': 'DdlText', 'collection': 'ddl_text', 'idPrefix': 'x', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'payload': {'type': 'text'}},
+    })
+    my = store.generate_ddl('mysql', ['DdlText'])
+    pg = store.generate_ddl('postgres', ['DdlText'])
+    lite = store.generate_ddl('sqlite', ['DdlText'])
+
+    assert '`payload` MEDIUMTEXT' in my
+    assert '"payload" TEXT' in pg
+    assert '"payload" TEXT' in lite
+
+
+# ─── ③ 两步化 claim / compareAndSet：SQL 文本占位符回填 ─────────
+
+class _TwoStepCore:
+    """dialect_translate 桩：返回 core 在 MySQL 侧产出的两条 stmt（首条取 _id、次条占位）"""
+
+    def dialect_translate(self, kind, cmd):
+        return {'stmts': [
+            {'text': 'SELECT _id FROM claim_jobs WHERE status = 0 LIMIT 2'},
+            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN ___claimed_ids___'},
+        ]}
+
+
+def test_two_step_claim_backfills_sql_text_placeholder(monkeypatch):
+    calls = []
+
+    async def fake_exec(plan):
+        calls.append([dict(s) for s in plan['stmts']])
+        if len(calls) == 1:
+            return {'rows': [{'_id': 'a1'}, {'_id': 'a2'}], 'affectedRows': 0, 'insertId': None}
+        return {'rows': [], 'affectedRows': 2, 'insertId': None}
+
+    monkeypatch.setattr(datasource, 'get_core', lambda: _TwoStepCore())
+    out = _run(datasource._exec_sql_direct(
+        'default', {'kind': 'mysql', 'exec': fake_exec},
+        {'kind': 'updateMany', 'collection': 'claim_jobs', 'filter': {}}))
+
+    # 置标语句的占位符必须按首条取回的 _id 回填，否则 MySQL 报 1054 Unknown column
+    assert calls[1][0]['text'] == (
+        "UPDATE claim_jobs SET status = 1 WHERE _id IN ('a1','a2')"), calls
+    assert out.modified_count == 2
+
+
+def test_two_step_claim_zero_rows_skips_marker_stmt(monkeypatch):
+    calls = []
+
+    async def fake_exec(plan):
+        calls.append([dict(s) for s in plan['stmts']])
+        return {'rows': [], 'affectedRows': 0, 'insertId': None}
+
+    monkeypatch.setattr(datasource, 'get_core', lambda: _TwoStepCore())
+    out = _run(datasource._exec_sql_direct(
+        'default', {'kind': 'mysql', 'exec': fake_exec},
+        {'kind': 'updateMany', 'collection': 'claim_jobs', 'filter': {}}))
+
+    assert len(calls) == 1          # 零领取：不执行置标语句（与 run_atomic_commands 一致）
+    assert out.modified_count == 0

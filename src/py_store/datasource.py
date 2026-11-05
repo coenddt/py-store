@@ -50,6 +50,16 @@ LOCAL_KIND = 'local'
 # 进程内内存数据源类型标记（与 local 同族：同为嵌入式载体）
 MEMORY_KIND = 'memory'
 
+# MySQL 两步化 claim / compareAndSet 的 SQL 文本占位符（core 规划产物；
+# 领取结果在下一条 stmt 文本中占位，由执行层回填，见 _exec_sql_direct）
+_CLAIMED_IDS = '___claimed_ids___'
+
+
+def _render_claimed_ids(ids) -> str:
+    """_id 列表 → SQL IN 字面量（单引号转义；_id 为框架生成值，转义为防御）"""
+    return '(' + ','.join("'" + str(v).replace("'", "''") + "'" for v in ids) + ')'
+
+
 _MISSING = object()
 # Mongo 事务能力缓存：client -> True/False（探测失败不写缓存，下次重探）
 _mongo_tx_cap: 'weakref.WeakKeyDictionary[object, bool]' = weakref.WeakKeyDictionary()
@@ -550,6 +560,27 @@ async def _exec_sql_direct(source, connection, cmd):
     if not callable(exec_fn):
         raise RuntimeError(
             f'SQL 数据源 {source}({_kind_of(connection)}) 的执行器未接入（见执行文档 Phase 4）')
+    stmts = plan.get('stmts') or []
+    if len(stmts) >= 2 and _CLAIMED_IDS in (stmts[1].get('text') or ''):
+        # MySQL 两步化 claim / compareAndSet：core 把领取结果下沉为 SQL 文本占位符
+        # （PG/SQLite 走 UPDATE…RETURNING 单条，不出现该分支）。必须先执行首条取回
+        # 命中 _id，回填后再执行置标语句——跳过回填会让驱动直接报
+        # ``1054 Unknown column '___claimed_ids___'``。
+        first = await exec_fn({'stmts': [stmts[0]]})
+        ids = [r['_id'] for r in (first.get('rows') or [])
+               if isinstance(r, Mapping) and '_id' in r]
+        if not ids:
+            # 零领取：不执行置标语句（与 run_atomic_commands「零领取直接返回空」一致）
+            return executors.shape_result(cmd, {
+                'docs': None, 'rows': [], 'affectedRows': 0, 'insertId': None})
+        second = dict(stmts[1])
+        second['text'] = second['text'].replace(_CLAIMED_IDS, _render_claimed_ids(ids))
+        out1 = await exec_fn({'stmts': [second]})
+        # docs 置 None：首条只取 _id，其 restore 出的残行不能当作完整领取结果
+        # （「docs 直返」分支专为 SQLite UPDATE…RETURNING 设计）
+        return executors.shape_result(cmd, {
+            'docs': None, 'rows': first.get('rows'),
+            'affectedRows': out1.get('affectedRows', 0), 'insertId': None})
     out = await exec_fn(plan)
     return executors.shape_result(cmd, out)
 
