@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Fixed（fix：内建列清单收口 / 类型对齐 / 迁移 diff parity / 执行路径）
+
+- **D1/D2 迁移的内建列剔除改由 `ddl.builtin_field_names` 单一来源判定**：此前迁移侧用
+  `timestamps` 真值 + 固定两列，与 DDL 的「未声明即建」口径分叉，且从不剔除归属键；
+  默认 timestamps + creator 权限的表在 SQLite 实机迁移报 `MigrationUnsupported`
+  （把 `created_at`/`updated_at`/`created_by` 当待删字段）。
+- **D3 `_align_types` 按内省物理族归一**：内省反推 `number` 的列改声明
+  `date`/`datetime`/`bool` 不再被判「非放宽变更」。
+- **P8 `diff_defs` 的 `addColumn` 去掉 `sqlType: None`**，变更对象键集合与 nodejs-store
+  一致（`op`/`name`/`field`）。
+- **P9 索引相等判定改为稳定序列化**（键序无关 + JS 数字语义），不再依赖 Python
+  `1 == True` 的相等语义；与 nodejs-store 判定一致。
+- **A1 MySQL 两步化 claim 的 `_render_claimed_ids` 不再输出外层括号**：core 模板已写作
+  `IN (___claimed_ids___)`，旧实现回填成 `IN (('a','b'))`，MySQL 视作单个行构造器报 1241。
+- **A3 `execute_native` 识别 `$merge`/`$out` 写管道并按写路径解析连接**（主库 / 事务），
+  不再一律按读路径。
+- **`_to_core_defn` 剔除落点键 `database`/`schema`**：core 01 起不再解析定义内落点
+  （白名单不含 `database`），旧写法注册期会被 reject（「含未知顶层键」）。落点仍由
+  `_loc_of` 显式注入，行为不变；定义持久化不再携带落点键。
+
+### Changed（契约：defn hash 的数值序列化改为项目规范格式）
+
+- `stable_stringify` 的数字输出统一为**本项目的规范格式（不是 JS 语义）**，与
+  nodejs-store 逐字节一致：整值 float → 整数（`1.0` → `1`）；有限 double 取最短往返位，
+  按 ECMAScript 排版阈值（`1e-6 <= |v| < 1e21` 用普通小数，其余科学记数）；
+  指数**无补零、无 `+`**（`1e-7` / `1e21`，不再出现 `1e-07` / `1e+21`）；`-0` → `0`；
+  NaN / ±Infinity → `null`；超出 `2^53-1` 的 Python `int` 先按 double 归一。
+  修复此前非整数浮点跨端 hash 分叉（py `1e-07` vs node `1e-7`）导致的 migrate 幂等闸
+  失效。**影响**：历史版本行记录的 hash 与新算 hash 不同，升级后首次 `migrate` 会对这些
+  defn 重新走一次 diff（通常为空变更 `sqls: []`，新增一个版本行）；数据与列型不变。
+  跨端对拍语料见 `tests/fixtures/stable-stringify-parity.json`（两仓同内容）。
+
 ## 5.3.0 (2026-11-05)
 
 ### Fixed（fix：MySQL 两步化 claim / CAS 的 SQL 文本占位符回填）
