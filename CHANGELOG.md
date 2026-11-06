@@ -42,6 +42,16 @@
   defn 重新走一次 diff（通常为空变更 `sqls: []`，新增一个版本行）；数据与列型不变。
   跨端对拍语料见 `tests/fixtures/stable-stringify-parity.json`（两仓同内容）。
 
+### Docs（绑定二进制版本要求 / 本地验证手段）
+
+- **加载优先级**：未设置 `LOCAL_CORE=1`（或 `NODE_ENV=production`）时**只**从已安装的
+  `rust_store_py`（site-packages）加载；仅该导入失败时才回落相邻 `rust-store` 的构建产物。
+- **发版要求**：`rust-store-py` 的 wheel 必须重新构建自含 core `273bc11`（internal 上下文允许
+  显式写归属键）的提交。`pyproject.toml` 现有的 `>=5.3.2` 下限**不足以**表达「含 273bc11 的
+  5.3.2」，发布后须抬到新的绑定版本号，否则 `pip install -U` 会退回旧二进制，内建 metadef
+  落库丢 `createdBy`。本地重装产物（`site-packages/rust_store_py/*.pyd`）只是验证手段，
+  不随仓入库。
+
 ## 5.3.0 (2026-11-05)
 
 ### Fixed（fix：MySQL 两步化 claim / CAS 的 SQL 文本占位符回填）
