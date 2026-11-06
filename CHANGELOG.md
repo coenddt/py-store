@@ -30,12 +30,17 @@
   **升级提示**：此前依赖「空名单=放行」或「admin 自动放行」的 workflow 定义，需把
   角色名显式写进名单。
 
-### Changed（契约：defn hash 的数值序列化）
+### Changed（契约：defn hash 的数值序列化改为项目规范格式）
 
-- `stable_stringify` 按 JS 语义把整值 float 序列化为整数（`1.0` → `1`），与
-  nodejs-store 逐字节一致（P3）。**影响**：历史版本行记录的 hash 与新算 hash 不同，
-  升级后首次 `migrate` 会对这些 schema 重新走一次 diff（通常为空变更，新增一个版本行）；
-  数据与列型不变。
+- `stable_stringify` 的数字输出统一为**本项目的规范格式（不是 JS 语义）**，与
+  nodejs-store 逐字节一致：整值 float → 整数（`1.0` → `1`）；有限 double 取最短往返位，
+  按 ECMAScript 排版阈值（`1e-6 <= |v| < 1e21` 用普通小数，其余科学记数）；
+  指数**无补零、无 `+`**（`1e-7` / `1e21`，不再出现 `1e-07` / `1e+21`）；`-0` → `0`；
+  NaN / ±Infinity → `null`；超出 `2^53-1` 的 Python `int` 先按 double 归一。
+  修复此前非整数浮点跨端 hash 分叉（py `1e-07` vs node `1e-7`）导致的 migrate 幂等闸
+  失效。**影响**：历史版本行记录的 hash 与新算 hash 不同，升级后首次 `migrate` 会对这些
+  defn 重新走一次 diff（通常为空变更 `sqls: []`，新增一个版本行）；数据与列型不变。
+  跨端对拍语料见 `tests/fixtures/stable-stringify-parity.json`（两仓同内容）。
 
 ## 5.3.0 (2026-11-05)
 

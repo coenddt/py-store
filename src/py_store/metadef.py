@@ -160,30 +160,97 @@ def _assert_serializable(value, path=''):
             _assert_serializable(v, f'{path}.{i}' if path else str(i))
 
 
-def _js_number(value):
-    """整值 float → int：对齐 ``JSON.stringify(1.0) === '1'``（Python ``json.dumps`` 会输出
-    ``1.0``，两端 hash 因此分叉——P3）。``abs >= 1e21`` 时 JS 改用指数记法，保持 float 交给
-    json 处理（该区间的指数格式差异属已知遗留，见 CHANGELOG）。"""
-    if isinstance(value, float) and value.is_integer() and abs(value) < 1e21:
-        return int(value)
-    return value
+#: IEEE-754 双精度可无损表示的最大整数（``2^53 - 1``）；超出后 Python ``int`` 与 JS
+#: ``number`` 不再同值，必须按 double 归一才能双端同 hash
+_MAX_SAFE_INT = 2 ** 53 - 1
 
 
-def _normalize_numbers(value):
-    if isinstance(value, dict):
-        return {k: _normalize_numbers(v) for k, v in value.items()}
+def _shortest_digits(value):
+    """正有限 float → ``(digits, n)``：``value == digits × 10^(n - len(digits))``。
+
+    ``repr`` 给出最短往返十进制位（与 JS ``String`` 同源同长），此处只拆位并去掉尾零；
+    ``n`` 是「小数点在 digits 中的位置 + 1」的 JS 记法（ECMAScript ToString 的 ``n``）。
+    """
+    mantissa, _, exp = repr(value).partition('e')
+    exp = int(exp) if exp else 0
+    ip, _, fp = mantissa.partition('.')
+    digits = (ip + fp).lstrip('0').rstrip('0')
+    if ip.strip('0'):
+        e10 = len(ip) - 1
+    else:
+        e10 = -(fp.index(fp.lstrip('0')[0]) + 1) if fp.strip('0') else 0
+    return digits, e10 + 1 + exp
+
+
+def _format_digits(digits, n):
+    """按 ECMAScript 排版规则输出（仅指数符号归一为无 ``+``、无补零）"""
+    k = len(digits)
+    if k <= n <= 21:
+        return digits + '0' * (n - k)
+    if 0 < n <= 21:
+        return digits[:n] + '.' + digits[n:]
+    if -6 < n <= 0:
+        return '0.' + '0' * (-n) + digits
+    return digits[0] + ('.' + digits[1:] if k > 1 else '') + 'e' + str(n - 1)
+
+
+def _canonical_number(value):
+    """数字 → 规范字面量（**本项目的规范格式，不是 JS 语义**）。
+
+    两宿主逐字节一致是硬约束（同一定义跨端必须同 hash，否则 migrate 幂等闸失效）。规则：
+
+    1. NaN / ±Infinity → ``null``（同 ``JSON.stringify``）；``-0`` → ``0``；
+    2. ``|v| <= 2^53 - 1`` 的整数原样输出；超出的 Python ``int`` 先按 double 归一
+       （JS 侧本就是 double，不归一则大整数两端不同值）；
+    3. 有限 double 取**最短往返十进制位**（py ``repr`` / node ``String`` 同源），按
+       ECMAScript 的排版阈值输出：``1e-6 <= |v| < 1e21`` 用普通小数，其余用科学记数法；
+    4. 指数固定为**最简形式**（无补零、无 ``+``）：``1e-7`` / ``1e21``。
+       因此 py 旧输出的 ``1e-07`` 与 ``1e+21`` 不再出现——这正是本轮修复的跨端分叉。
+    """
+    if isinstance(value, int):
+        if abs(value) <= _MAX_SAFE_INT:
+            return str(value)
+        try:
+            value = float(value)
+        except OverflowError:  # 超出 double 范围：JS 侧为 Infinity → null
+            return 'null'
+    if value != value or value in (float('inf'), float('-inf')):
+        return 'null'
+    if value == 0:
+        return '0'
+    sign = '-' if value < 0 else ''
+    return sign + _format_digits(*_shortest_digits(abs(value)))
+
+
+def _encode_json(value):
+    """JSON 编码（键序无关 + 规范数字）——对齐 node ``_stableStringify`` 逐字节"""
+    if value is None:
+        return 'null'
+    if value is True:
+        return 'true'
+    if value is False:
+        return 'false'
+    if isinstance(value, (int, float)):
+        return _canonical_number(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
     if isinstance(value, (list, tuple)):
-        return [_normalize_numbers(v) for v in value]
-    return _js_number(value)
+        return '[' + ','.join(_encode_json(v) for v in value) + ']'
+    if isinstance(value, dict):
+        return '{' + ','.join(
+            json.dumps(str(k), ensure_ascii=False) + ':' + _encode_json(v)
+            for k, v in sorted(value.items(), key=lambda kv: kv[0])) + '}'
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
 
 
 def stable_stringify(value):
     """稳定序列化（键序无关）：与 node ``_stableStringify`` 逐字节等价。
 
-    数字先按 JS 语义归一（整值 float → int），否则 ``default: 1.0``（py）与 ``default: 1``
-    （node）得到不同 hash，幂等闸失效、同一 defn 跨端重复迁移（P3）。"""
-    return json.dumps(_normalize_numbers(value), sort_keys=True,
-                      separators=(',', ':'), ensure_ascii=False)
+    数字走 :func:`_canonical_number`（项目规范格式，非 JS 语义），否则非整数浮点在
+    py（``1e-07``）与 node（``1e-7``）得到不同字符串 → 同一定义跨端 hash 分叉 →
+    migrate 幂等闸失效、每次跨端重跑追加空版本行。跨端对拍语料见
+    ``tests/fixtures/stable-stringify-parity.json``。"""
+    return _encode_json(value)
 
 
 def same_defn(a, b):
