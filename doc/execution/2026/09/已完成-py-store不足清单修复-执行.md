@@ -48,7 +48,7 @@
 | ruff 范围纳入 stress | `py-store/.github/workflows/release-pypi.yml` | `ruff check src tests` → `ruff check src tests stress` |
 | stress 7 处 lint | `py-store/stress/stress.py` | 7 处告警 → `ruff check stress --fix` 后零告警 |
 | 覆盖率 margin | `py-store/tests/*` | 按 `term-missing` 补分支断言（见步骤 7） |
-| README / CHANGELOG 落档 | `py-store/README.md`、`README.zh-CN.md`、`CHANGELOG.md` | 补提交契约与归档派生两条说明 + 版本记录 |
+| README / CHANGELOG 落档 | `py-store/README.md`、`README.en.md`、`CHANGELOG.md` | 补提交契约与归档派生两条说明 + 版本记录 |
 
 ### 3.3 删除清单
 | 删除项 | 位置 | 原因 | 替代 |
@@ -497,7 +497,7 @@ stress\stress.py:261:29: RUF100 [*] Unused `noqa` directive (non-enabled: `BLE00
 | 10. py：stress 修复 7 处 lint | [x] 已完成 | **做什么**：`python -m ruff check stress --fix`（见 §4.8） <br>**涉及文件**：`py-store/stress/stress.py` <br>**验证方式**：`python -m ruff check stress` → All checks passed |
 | 11. py：lint 范围纳入 stress | [x] 已完成 | **做什么**：`release-pypi.yml` 的 `ruff check src tests` → `ruff check src tests stress`（与第 8 步 ci.yml 一致） <br>**涉及文件**：`py-store/.github/workflows/release-pypi.yml` <br>**验证方式**：`python -m ruff check src tests stress` 零告警 |
 | 12. 全量回归 | [x] 已完成 | **做什么**：跑 py 全量 pytest + ruff + mypy，确认无新增失败 <br>**涉及文件**：无改动 <br>**验证方式**：`PYTHONPATH=src python -m pytest -q`；`python -m ruff check src tests stress`；`python -m mypy src/py_store` |
-| 13. README / CHANGELOG 落档 | [x] 已完成 | **做什么**：README 补「SQL 写路径提交契约（非事务路径显式提交）」与「归档表由 core 自动派生、Host 只补镜像不重复注册」；CHANGELOG 记本次修复 <br>**涉及文件**：`py-store/README.md`、`py-store/README.zh-CN.md`、`py-store/CHANGELOG.md` <br>**验证方式**：文字与实现一致，无悬空描述 |
+| 13. README / CHANGELOG 落档 | [x] 已完成 | **做什么**：README 补「SQL 写路径提交契约（非事务路径显式提交）」与「归档表由 core 自动派生、Host 只补镜像不重复注册」；CHANGELOG 记本次修复 <br>**涉及文件**：`py-store/README.md`、`py-store/README.en.md`、`py-store/CHANGELOG.md` <br>**验证方式**：文字与实现一致，无悬空描述 |
 
 ### 步骤说明
 
