@@ -216,6 +216,45 @@ def _owner_field(defn):
     return None if name == '_id' else name
 
 
+def implicit_columns(defn, backend):
+    """宿主自动补齐的内建列清单（**DDL 生成与迁移剔除共用的唯一来源**）。
+
+    返回 ``[(逻辑名, sql_type)]``，顺序：timestamps → 归属键（owner 行控隐含）。
+    ``__present`` 与声明字段不在此列（分别由 ``_columns`` / 调用方处理）。
+    timestamps 判定与 DDL 同口径：**未声明即建**（``is not False``），而不是真值判断——
+    这正是 D1 的根因（迁移剔除曾用真值判断，与 DDL 分叉）。
+    """
+    i = _idx(backend)
+    out = []
+    if defn.get('timestamps') is not False:
+        for ts in _TIMESTAMP_FIELDS:
+            out.append((ts, _TYPES['number'][i]))
+    owner = _owner_field(defn)
+    if owner is not None:
+        out.append((owner, _TYPES['string'][i]))
+    return out
+
+
+def builtin_field_names(defn, backend):
+    """内建物理列名清单（迁移剔除用；与 ``implicit_columns`` 同源）。
+
+    「内建」= 宿主按 schema 声明自动建、但用户未显式声明的列：``__present`` 哨兵 +
+    timestamps + 归属键。用户显式声明了同名字段时**不剔除**（该列已参与字段 diff，
+    误剔会被当成「新增列」重复 ADD COLUMN）。同时返回物理名与逻辑名，兼容显式传入
+    camelCase 形式的 ``old_defs``。"""
+    declared = defn.get('fields') or {}
+    declared_phys = {_pname(backend, k) for k in declared}
+    names = ['__present']
+    for logical, _sql_type in implicit_columns(defn, backend):
+        phys = _pname(backend, logical)
+        if phys in declared_phys or logical in declared:
+            continue
+        names.append(phys)
+        if phys != logical:
+            names.append(logical)
+    return names
+
+
 def _columns(defn, backend):
     """返回 [(name, sql_type, pk, auto)]，顺序：声明的字段（标量 / object·array JSON 列）→
     timestamps → 归属键（owner 行控隐含）→ __present；name 为该后端物理列名（snake_case）。"""
@@ -246,18 +285,11 @@ def _columns(defn, backend):
         cols.append((col, _TYPES[ftype][i], False, False))
     if not any(c[2] for c in cols):
         raise ValueError(f'DDL 生成：schema "{defn["name"]}" 缺少 _id 字段')
-    if defn.get('timestamps') is not False:
-        for ts in _TIMESTAMP_FIELDS:
-            col = _pname(backend, ts)
-            if not any(c[0] == col for c in cols):
-                cols.append((col, _TYPES['number'][i], False, False))
-    # A2：owner 行控（creator 权限）⇒ 归属键必建（与时间戳同款自动补齐；
-    # 已声明则沿用声明的类型）。键名取 ownerKey（缺省 createdBy），与 core 同口径。
-    owner = _owner_field(defn)
-    if owner is not None:
-        col = _pname(backend, owner)
+    # 内建列（timestamps → 归属键）统一来自 implicit_columns：已声明则沿用声明列型，不重复补列。
+    for logical, sql_type in implicit_columns(defn, backend):
+        col = _pname(backend, logical)
         if not any(c[0] == col for c in cols):
-            cols.append((col, _TYPES['string'][i], False, False))
+            cols.append((col, sql_type, False, False))
     cols.append(('__present', _PRESENT_TYPE[i], False, False))
     return cols
 
@@ -460,7 +492,6 @@ def diff_defs(old_defn, new_defn):
                 continue
             changes.append({
                 'op': 'addColumn', 'name': name,
-                'sqlType': None,  # generate 侧按 backend 解析（保持 diff 后端无关）
                 'field': nf if isinstance(nf, dict) else {'type': nf},
             })
             continue
@@ -492,6 +523,10 @@ def diff_defs(old_defn, new_defn):
             errors.append(f'删除字段 "{name}" 不支持（破坏性变更；请显式走数据迁移脚本）')
 
     # ── 索引：new 有 old 无 → addIndex ──
+    # 相等判定用稳定序列化（键序无关 + JS 数字语义），对齐 node diffDefs 的 _stableStringify：
+    # 直接 dict 相等（py `1 == True`）与 node `JSON.stringify` 键序敏感会得出不同结论（P9）。
+    from .metadef import stable_stringify as _canon
+
     def _index_keys(defn):
         out = []
         for idx in defn.get('indexes') or []:
@@ -499,9 +534,9 @@ def diff_defs(old_defn, new_defn):
                 out.append(idx)
         return out
 
-    old_idx = _index_keys(old_defn)
+    old_idx = {_canon(i) for i in _index_keys(old_defn)}
     for idx in _index_keys(new_defn):
-        if idx not in old_idx:
+        if _canon(idx) not in old_idx:
             changes.append({'op': 'addIndex', 'index': idx})
 
     # collection 改名 = 建新表丢旧表（破坏性）→ Err

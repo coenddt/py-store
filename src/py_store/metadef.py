@@ -160,9 +160,30 @@ def _assert_serializable(value, path=''):
             _assert_serializable(v, f'{path}.{i}' if path else str(i))
 
 
+def _js_number(value):
+    """整值 float → int：对齐 ``JSON.stringify(1.0) === '1'``（Python ``json.dumps`` 会输出
+    ``1.0``，两端 hash 因此分叉——P3）。``abs >= 1e21`` 时 JS 改用指数记法，保持 float 交给
+    json 处理（该区间的指数格式差异属已知遗留，见 CHANGELOG）。"""
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e21:
+        return int(value)
+    return value
+
+
+def _normalize_numbers(value):
+    if isinstance(value, dict):
+        return {k: _normalize_numbers(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_numbers(v) for v in value]
+    return _js_number(value)
+
+
 def stable_stringify(value):
-    """稳定序列化（键序无关）：与 node ``_stableStringify`` 逐字节等价"""
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    """稳定序列化（键序无关）：与 node ``_stableStringify`` 逐字节等价。
+
+    数字先按 JS 语义归一（整值 float → int），否则 ``default: 1.0``（py）与 ``default: 1``
+    （node）得到不同 hash，幂等闸失效、同一 defn 跨端重复迁移（P3）。"""
+    return json.dumps(_normalize_numbers(value), sort_keys=True,
+                      separators=(',', ':'), ensure_ascii=False)
 
 
 def same_defn(a, b):

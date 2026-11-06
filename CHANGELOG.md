@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Fixed（fix：内建列清单收口 / 类型对齐 / 迁移 diff parity / 执行路径）
+
+- **D1/D2 迁移的内建列剔除改由 `ddl.builtin_field_names` 单一来源判定**：此前迁移侧用
+  `timestamps` 真值 + 固定两列，与 DDL 的「未声明即建」口径分叉，且从不剔除归属键；
+  默认 timestamps + creator 权限的表在 SQLite 实机迁移报 `MigrationUnsupported`
+  （把 `created_at`/`updated_at`/`created_by` 当待删字段）。
+- **D3 `_align_types` 按内省物理族归一**：内省反推 `number` 的列改声明
+  `date`/`datetime`/`bool` 不再被判「非放宽变更」。
+- **P8 `diff_defs` 的 `addColumn` 去掉 `sqlType: None`**，变更对象键集合与 nodejs-store
+  一致（`op`/`name`/`field`）。
+- **P9 索引相等判定改为稳定序列化**（键序无关 + JS 数字语义），不再依赖 Python
+  `1 == True` 的相等语义；与 nodejs-store 判定一致。
+- **A1 MySQL 两步化 claim 的 `_render_claimed_ids` 不再输出外层括号**：core 模板已写作
+  `IN (___claimed_ids___)`，旧实现回填成 `IN (('a','b'))`，MySQL 视作单个行构造器报 1241。
+- **A3 `execute_native` 识别 `$merge`/`$out` 写管道并按写路径解析连接**（主库 / 事务），
+  不再一律按读路径。
+
+### Changed（契约：defn hash 的数值序列化）
+
+- `stable_stringify` 按 JS 语义把整值 float 序列化为整数（`1.0` → `1`），与
+  nodejs-store 逐字节一致（P3）。**影响**：历史版本行记录的 hash 与新算 hash 不同，
+  升级后首次 `migrate` 会对这些 schema 重新走一次 diff（通常为空变更，新增一个版本行）；
+  数据与列型不变。
+
 ## 5.3.0 (2026-11-05)
 
 ### Fixed（fix：MySQL 两步化 claim / CAS 的 SQL 文本占位符回填）

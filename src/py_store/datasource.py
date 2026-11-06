@@ -56,8 +56,12 @@ _CLAIMED_IDS = '___claimed_ids___'
 
 
 def _render_claimed_ids(ids) -> str:
-    """_id 列表 → SQL IN 字面量（单引号转义；_id 为框架生成值，转义为防御）"""
-    return '(' + ','.join("'" + str(v).replace("'", "''") + "'" for v in ids) + ')'
+    """_id 列表 → SQL IN **列表字面量**（不含外层括号；core 模板已写作 ``IN (___claimed_ids___)``）。
+
+    单引号转义（_id 为框架生成值，转义为防御）。此前返回带括号的 ``('a','b')``，回填后成为
+    ``IN (('a','b'))``——MySQL 视作单个行构造器，与非行操作数比较报 1241。
+    """
+    return ','.join("'" + str(v).replace("'", "''") + "'" for v in ids)
 
 
 _MISSING = object()
@@ -539,6 +543,43 @@ async def exec_sql(source, connection, cmd):
     return await _exec_sql_direct(source, connection, cmd)
 
 
+def _claim_two_step(plan):
+    """识别 MySQL 两步化 claim / compareAndSet 计划（core 把领取结果下沉为 SQL 文本占位符）。
+
+    返回 ``{'first': stmt0, 'second': stmt1}``；非两步化计划返回 ``None``。
+    PG/SQLite 走单条 UPDATE…RETURNING 或 IN(子查询)，不出现该形态。
+    """
+    stmts = plan.get('stmts') or []
+    if len(stmts) < 2:
+        return None
+    text = stmts[1].get('text') if isinstance(stmts[1], Mapping) else None
+    if not isinstance(text, str) or _CLAIMED_IDS not in text:
+        return None
+    return {'first': stmts[0], 'second': stmts[1]}
+
+
+async def _exec_claim(exec_fn, cmd, step):
+    """执行两步化 claim：先取命中 _id，回填 SQL 文本占位符后再执行置标语句。
+
+    跳过回填会让驱动直接报 ``1054 Unknown column '___claimed_ids___'``（禁静默失守）。
+    零领取不执行置标语句（与 ``run_atomic_commands`` 零领取直接返回空一致）。
+    """
+    first = await exec_fn({'stmts': [step['first']]})
+    ids = [r['_id'] for r in ((first or {}).get('rows') or [])
+           if isinstance(r, Mapping) and '_id' in r]
+    if not ids:
+        return executors.shape_result(cmd, {
+            'docs': None, 'rows': [], 'affectedRows': 0, 'insertId': None})
+    second = dict(step['second'])
+    second['text'] = second['text'].replace(_CLAIMED_IDS, _render_claimed_ids(ids))
+    out1 = await exec_fn({'stmts': [second]})
+    # docs 置 None：首条只取 _id，其 restore 出的残行不能当作完整领取结果
+    # （「docs 直返」分支专为 SQLite UPDATE…RETURNING 设计）
+    return executors.shape_result(cmd, {
+        'docs': None, 'rows': first.get('rows'),
+        'affectedRows': out1.get('affectedRows', 0), 'insertId': None})
+
+
 async def _exec_sql_direct(source, connection, cmd):
     """``exec_sql`` 的直通路径（不做向量降级）"""
     plan = get_core().dialect_translate(_kind_of(connection), cmd)
@@ -560,27 +601,9 @@ async def _exec_sql_direct(source, connection, cmd):
     if not callable(exec_fn):
         raise RuntimeError(
             f'SQL 数据源 {source}({_kind_of(connection)}) 的执行器未接入（见执行文档 Phase 4）')
-    stmts = plan.get('stmts') or []
-    if len(stmts) >= 2 and _CLAIMED_IDS in (stmts[1].get('text') or ''):
-        # MySQL 两步化 claim / compareAndSet：core 把领取结果下沉为 SQL 文本占位符
-        # （PG/SQLite 走 UPDATE…RETURNING 单条，不出现该分支）。必须先执行首条取回
-        # 命中 _id，回填后再执行置标语句——跳过回填会让驱动直接报
-        # ``1054 Unknown column '___claimed_ids___'``。
-        first = await exec_fn({'stmts': [stmts[0]]})
-        ids = [r['_id'] for r in (first.get('rows') or [])
-               if isinstance(r, Mapping) and '_id' in r]
-        if not ids:
-            # 零领取：不执行置标语句（与 run_atomic_commands「零领取直接返回空」一致）
-            return executors.shape_result(cmd, {
-                'docs': None, 'rows': [], 'affectedRows': 0, 'insertId': None})
-        second = dict(stmts[1])
-        second['text'] = second['text'].replace(_CLAIMED_IDS, _render_claimed_ids(ids))
-        out1 = await exec_fn({'stmts': [second]})
-        # docs 置 None：首条只取 _id，其 restore 出的残行不能当作完整领取结果
-        # （「docs 直返」分支专为 SQLite UPDATE…RETURNING 设计）
-        return executors.shape_result(cmd, {
-            'docs': None, 'rows': first.get('rows'),
-            'affectedRows': out1.get('affectedRows', 0), 'insertId': None})
+    step = _claim_two_step(plan)
+    if step is not None:
+        return await _exec_claim(exec_fn, cmd, step)
     out = await exec_fn(plan)
     return executors.shape_result(cmd, out)
 
@@ -633,6 +656,18 @@ class NativeCommandError(RuntimeError):
     """原生 Mongo 命令入口的显式错误（非 Mongo 源 / 非 Mongo 形态）"""
 
 
+def pipeline_writes(pipeline):
+    """聚合管道是否为写管道：任一阶段含 ``$merge`` / ``$out``（Mongo 的写出口）。
+
+    写管道必须按写路径解析连接（主库 / 事务连接）——按读路径解析会在主从分离或
+    只读连接上报错或落到错误节点（A3）。
+    """
+    for stage in pipeline or []:
+        if isinstance(stage, Mapping) and ('$merge' in stage or '$out' in stage):
+            return True
+    return False
+
+
 async def execute_native(source, collection, pipeline, options=None):
     """
     在指定 Mongo 源上执行原生聚合管道（Host 层逃生口，对标 SQL 侧 ``execute_raw``）
@@ -641,15 +676,15 @@ async def execute_native(source, collection, pipeline, options=None):
         aggregate 分支），``options`` 为驱动原生透传项（allowDiskUse/batchSize/...，
         宿主不做白名单）；
       - 事务 / 会话作用域内自动透传 session（session 由事务强制接管，
-        ``options.session`` 不可覆盖）；统一按读路径解析（``is_write=False``），
-        ``$merge``/``$out`` 写管道请自行开事务；
+        ``options.session`` 不可覆盖）；连接按管道语义解析：含 ``$merge``/``$out``
+        的写管道走写路径（主库 / 事务连接），其余按读路径；
       - 仅支持 Mongo 源：SQL 源显式报错并指引 ``execute_raw``（绝不静默）；
         **适用源不同**：``execute_native`` 只跑 Mongo 原生命令；按 schema 的
         ``aggregate``/``query``（pipeline 由 core 翻译成各方言 SQL）在 SQL 源同样可用。
         MongoClient 形态须经 schema 声明 database（``mongo_db`` 既有校验，缺名即报错）；
       - 返回 ``{'rows': list}``。
     """
-    conn = await resolve_connection(source, is_write=False)
+    conn = await resolve_connection(source, is_write=pipeline_writes(pipeline))
     if is_embedded(conn):
         # 嵌入式载体（local / memory；描述符或事务视图）：db = handle；session 已绑定在 handle 上，不另传
         db = conn['handle']
