@@ -22,23 +22,23 @@
 ## Docs
 
 - [Documentation site](https://coenddt.github.io/py-store/): the scenario walkthroughs as individual, indexable pages — the fastest way in
-- [README](https://github.com/coenddt/py-store#readme): full overview, quick start, GQL syntax, API, schema reference, FAQ
-- [Chinese README](https://github.com/coenddt/py-store/blob/main/README.zh-CN.md): 中文文档
+- [中文 README](https://github.com/coenddt/py-store#readme): 完整概览、快速开始、GQL 语法、API、schema 参考、FAQ
+- [English README](https://github.com/coenddt/py-store/blob/main/README.en.md): full overview, quick start, GQL syntax, API, schema reference, FAQ
 - [Use cases](https://github.com/coenddt/py-store/tree/main/doc/use-cases): scenario walkthroughs (multi-tenant SaaS, AI data-QA, cross-database migration, admin CRUD, async ETL/batch writes, migrating from SQLAlchemy or Beanie)
 - [Scenario test suite](https://github.com/coenddt/py-store/tree/main/example/course-platform): real-data, four-backend scenario cases (fields, relations, computes, permissions, aggregation, boundaries)
 - [CHANGELOG](https://github.com/coenddt/py-store/blob/main/CHANGELOG.md)
 
 ## Concepts
 
-- [GQL tree syntax](https://github.com/coenddt/py-store#gql-syntax): `Model($condition:@c0,$sort:@s1,$limit:@l){ field, Relation{ f } }`
-- [Aggregation](https://github.com/coenddt/py-store#aggregation): root-level `$group` / `$having`, relation aggregate predicates (semi/anti-join), relation-rolling computed columns
-- [Query & write API](https://github.com/coenddt/py-store#query--write-api): `query`, `query_one`, `query_with_count`, `insert`, `update`, `remove`, `mutation`, `upsert`
-- [Permissions](https://github.com/coenddt/py-store#permission-context): `set_context`, `run_as_internal`, fail-secure `set_require_context(True)`
-- [Multi-datasource & multi-tenant](https://github.com/coenddt/py-store#multi-datasource-connections): `{ source, database, schema, collection }` and route override
-- [Schema reference](https://github.com/coenddt/py-store#schema-reference): fields, relations, computes, indexes, read/write whitelists
-- [Vector search](https://github.com/coenddt/py-store#vector-search): `vector` fields, `$near`, `_score`, `capabilities()`, `reindex_vectors`
-- [Feedback events](https://github.com/coenddt/py-store#feedback-events): `set_feedback_sink`, `PushdownUnsupportedError`
-- [Transactions](https://github.com/coenddt/py-store#transaction-boundary): per-source atomicity guarantees
+- [GQL tree syntax](https://github.com/coenddt/py-store#gql-语法): `Model($condition:@c0,$sort:@s1,$limit:@l){ field, Relation{ f } }`
+- [Aggregation](https://github.com/coenddt/py-store#聚合): root-level `$group` / `$having`, relation aggregate predicates (semi/anti-join), relation-rolling computed columns
+- [Query & write API](https://github.com/coenddt/py-store#查询与写入-api): `query`, `query_one`, `query_with_count`, `insert`, `update`, `remove`, `mutation`, `upsert`
+- [Permissions](https://github.com/coenddt/py-store#权限上下文): `set_context`, `run_as_internal`, fail-secure `set_require_context(True)`
+- [Multi-datasource & multi-tenant](https://github.com/coenddt/py-store#多数据源连接): `{ source, database, schema, collection }` and route override
+- [Schema reference](https://github.com/coenddt/py-store#schema-参考): fields, relations, computes, indexes, read/write whitelists
+- [Vector search](https://github.com/coenddt/py-store#向量检索): `vector` fields, `$near`, `_score`, `capabilities()`, `reindex_vectors`
+- [Feedback events](https://github.com/coenddt/py-store#反馈事件): `set_feedback_sink`, `PushdownUnsupportedError`
+- [Transactions](https://github.com/coenddt/py-store#事务边界): per-source atomicity guarantees
 
 ## Optional
 
