@@ -628,7 +628,7 @@ class _TwoStepCore:
     def dialect_translate(self, kind, cmd):
         return {'stmts': [
             {'text': 'SELECT _id FROM claim_jobs WHERE status = 0 LIMIT 2'},
-            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN ___claimed_ids___'},
+            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN (___claimed_ids___)'},
         ]}
 
 
@@ -666,3 +666,46 @@ def test_two_step_claim_zero_rows_skips_marker_stmt(monkeypatch):
 
     assert len(calls) == 1          # 零领取：不执行置标语句（与 run_atomic_commands 一致）
     assert out.modified_count == 0
+
+
+# ─── ④ execute_native：$merge/$out 写管道的连接路由（A3） ────────────
+
+class _RecordingSession:
+    """会话桩：只记录 conn_for 的 is_write 参数，然后中断以证明调用发生"""
+
+    def __init__(self):
+        self.calls = []
+
+    async def conn_for(self, source, is_write):
+        self.calls.append((source, is_write))
+        raise RuntimeError('MARK-resolve')
+
+
+def test_pipeline_writes_detects_merge_and_out():
+    assert datasource.pipeline_writes([{'$match': {}}, {'$out': 'x'}])
+    assert datasource.pipeline_writes([{'$merge': {'into': 'x'}}])
+    assert not datasource.pipeline_writes([{'$match': {}}, {'$sort': {'a': 1}}])
+    assert not datasource.pipeline_writes([])
+
+
+def test_execute_native_write_pipeline_routes_to_write_path():
+    # 改前：execute_native 固定 is_write=False —— 写管道会被当作读连接解析
+    sess = _RecordingSession()
+    token = datasource._current_session.set(sess)
+    try:
+        with pytest.raises(RuntimeError, match='MARK-resolve'):
+            _run(datasource.execute_native('default', 'c', [{'$out': 'x'}]))
+    finally:
+        datasource._current_session.reset(token)
+    assert sess.calls == [('default', True)]
+
+
+def test_execute_native_read_pipeline_stays_read_path():
+    sess = _RecordingSession()
+    token = datasource._current_session.set(sess)
+    try:
+        with pytest.raises(RuntimeError, match='MARK-resolve'):
+            _run(datasource.execute_native('default', 'c', [{'$match': {}}]))
+    finally:
+        datasource._current_session.reset(token)
+    assert sess.calls == [('default', False)]

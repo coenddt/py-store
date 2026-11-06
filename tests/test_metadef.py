@@ -29,6 +29,19 @@ def test_same_defn_key_order_insensitive():
     assert md.same_defn({'x': [1, {'k': 'v'}]}, {'x': [1, {'k': 'v'}]})
 
 
+def test_stable_stringify_matches_js_number_semantics():
+    """P3：整值 float 按 JS 语义序列化为整数，否则 py/node 对同一 defn 得到不同 hash。
+
+    改前：stable_stringify({'default': 1.0}) == '{"default":1.0}'，node 为 '{"default":1}'。
+    """
+    assert md.stable_stringify({'default': 1.0}) == '{"default":1}'
+    assert md.stable_stringify({'default': 1}) == '{"default":1}'
+    # 整值 float 与 int 同形 → 幂等闸跨端一致
+    assert md.same_defn({'default': 1.0}, {'default': 1})
+    # 小数、bool、含中文键值保持 JS JSON.stringify 语义
+    assert md.stable_stringify({'a': 1.5, 'b': True, '名': '值'}) == '{"a":1.5,"b":true,"名":"值"}'
+
+
 def test_next_version():
     assert md.next_version([]) == 1
     assert md.next_version([{'version': 1}, {'version': 3}]) == 4

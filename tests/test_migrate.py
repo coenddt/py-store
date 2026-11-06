@@ -181,3 +181,93 @@ def test_missing_driver_with_old_defs_none_raises():
                                 defs={'Note': _note_v1()})
 
     _run_in_sqlite(body)
+
+
+def test_datetime_and_bool_fields_align_after_introspect():
+    """D3：内省把 datetime/bool 列反推为 number，新声明同族类型不得判「非放宽变更」。
+
+    改前：_align_types 只归一数值族 → 再迁移时报
+    `字段 "published_at" 类型 "number" → "datetime" 非放宽变更`。
+    """
+
+    async def body(store, db):
+        v1 = {
+            'name': 'Post', 'collection': 'posts', 'idPrefix': 'p', 'timestamps': False,
+            'fields': {
+                '_id': {'type': 'string'},
+                'publishedAt': {'type': 'datetime'},
+                'active': {'type': 'bool'},
+            },
+        }
+        await store.migrate(backend='sqlite', source='default',
+                            defs={'Post': v1}, old_defs=None, driver=db)
+        v2 = {**v1, 'fields': {**v1['fields'], 'title': {'type': 'string'}}}
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'Post': v2}, old_defs=None, driver=db)
+        assert r['applied'] == [{'name': 'Post', 'from': 1, 'to': 2, 'version': 2}], r
+        cols = await _cols(db, 'posts')
+        assert 'title' in cols
+        assert cols.count('published_at') == 1 and cols.count('active') == 1
+
+    _run_in_sqlite(body)
+
+
+def _default_ts_creator_v1():
+    """未声明 timestamps（默认建）+ creator 行控（隐含 created_by）——D1/D2 触发面"""
+    return {
+        'name': 'Task', 'collection': 'tasks', 'idPrefix': 't',
+        'write': ['creator'],
+        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+    }
+
+
+def test_default_timestamps_and_creator_columns_not_treated_as_dropped():
+    """D1/D2：默认 timestamps + creator 权限的表，内省迁移不得把内建列当「待删字段」。
+
+    改前：_strip_builtin_fields 用真值判断 timestamps（未声明 → 不剔）+ 从不剔归属键，
+    迁移抛 MigrationUnsupported（删除字段 created_at/updated_at/created_by）。
+    改后：剔除清单取 ddl.builtin_field_names（与 DDL 生成同一份内建列定义）。
+    """
+
+    async def body(store, db):
+        v1 = _default_ts_creator_v1()
+        await store.migrate(backend='sqlite', source='default',
+                            defs={'Task': v1}, old_defs=None, driver=db)
+        v2 = {**v1, 'fields': {**v1['fields'], 'priority': {'type': 'int'}}}
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'Task': v2}, old_defs=None, driver=db)
+        assert r['applied'] == [{'name': 'Task', 'from': 1, 'to': 2, 'version': 2}], r
+        cols = await _cols(db, 'tasks')
+        assert 'priority' in cols
+        # 内建列仍在（未被当作删除、也未重复 ADD COLUMN）
+        for builtin in ('created_at', 'updated_at', 'created_by', '__present'):
+            assert builtin in cols, f'{builtin} 应保留（got {cols}）'
+        assert cols.count('created_at') == 1 and cols.count('created_by') == 1
+
+    _run_in_sqlite(body)
+
+
+def test_declared_builtin_like_fields_are_not_stripped():
+    """D1/D2 边界：用户显式声明 createdAt / createdBy ⇒ 不剔除（否则会误判新增列重复 ADD）"""
+
+    async def body(store, db):
+        v1 = {
+            'name': 'Decl', 'collection': 'decls', 'idPrefix': 'd',
+            'timestamps': False, 'write': ['creator'],
+            'fields': {
+                '_id': {'type': 'string'},
+                'createdAt': {'type': 'number'},
+                'createdBy': {'type': 'string'},
+            },
+        }
+        await store.migrate(backend='sqlite', source='default',
+                            defs={'Decl': v1}, old_defs=None, driver=db)
+        v2 = {**v1, 'fields': {**v1['fields'], 'note': {'type': 'string'}}}
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'Decl': v2}, old_defs=None, driver=db)
+        assert r['applied'] == [{'name': 'Decl', 'from': 1, 'to': 2, 'version': 2}], r
+        cols = await _cols(db, 'decls')
+        assert cols.count('created_at') == 1, f'created_at 不得重复（got {cols}）'
+        assert cols.count('created_by') == 1, f'created_by 不得重复（got {cols}）'
+
+    _run_in_sqlite(body)

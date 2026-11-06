@@ -42,6 +42,33 @@ def test_diff_whitelist():
     assert ('addColumn', '_id') not in ops and ('addColumn', 'orderNo') not in ops
 
 
+def test_diff_add_column_change_keys_match_node():
+    """P8：addColumn 变更对象的键集合两端一致（py 曾多带 `sqlType: None`）"""
+    plan = ddl.diff_defs(OLD, NEW)
+    adds = [c for c in plan['changes'] if c['op'] == 'addColumn']
+    assert adds, plan
+    for c in adds:
+        assert set(c) == {'op', 'name', 'field'}, c
+
+
+def test_diff_add_index_key_order_insensitive():
+    """P9：同一索引仅键序不同 → 不得误判为新增（对齐 node 的稳定序列化判定）"""
+    old = {'name': 'Idx', 'collection': 'idx_t', 'idPrefix': 'i', 'timestamps': False,
+           'fields': {'_id': {'type': 'string'}, 'a': {'type': 'string'}, 'b': {'type': 'int'}},
+           'indexes': [{'keys': {'a': 1, 'b': -1}, 'unique': True}]}
+    new = {'name': 'Idx', 'collection': 'idx_t', 'idPrefix': 'i', 'timestamps': False,
+           'fields': old['fields'],
+           'indexes': [{'unique': True, 'keys': {'b': -1, 'a': 1}}]}
+    plan = ddl.diff_defs(old, new)
+    assert plan['errors'] == [], plan
+    assert [c for c in plan['changes'] if c['op'] == 'addIndex'] == [], plan
+    # python 相等语义不得把 1 与 True 判同形（node JSON 语义要求区分）
+    old2 = {**old, 'indexes': [{'keys': {'a': 1}, 'partial': 1}]}
+    new2 = {**old, 'indexes': [{'keys': {'a': 1}, 'partial': True}]}
+    assert [c for c in ddl.diff_defs(old2, new2)['changes'] if c['op'] == 'addIndex'], \
+        '1 与 True 不是同一索引定义'
+
+
 def test_diff_destructive_rejected():
     dropped = {'name': 'Order', 'collection': 'orders', 'idPrefix': 'o',
                'fields': {'_id': {'type': 'string'}, 'orderNo': {'type': 'string'}}}
