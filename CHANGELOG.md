@@ -58,7 +58,7 @@
   `execute_raw()`。
 - 依赖下限：`rust-store-py` 需同步升级到含本次 core 撤销的版本（当前已发布最高为
   4.9.0，未含本变更）。
-- 文档同步：`README.md` / `README.zh-CN.md` / `llms-full.txt` / `SKILL.md` /
+- 文档同步：`README.md` / `README.en.md` / `llms-full.txt` / `SKILL.md` /
   `doc/use-cases/02`、`doc/use-cases/06` 的 `$pipeline` 与 `store.aggregate()` 表述改为
   与代码一致（`aggregate` 为 opt-in 别名，不是「已移除」）。
 
