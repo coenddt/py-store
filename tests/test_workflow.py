@@ -246,14 +246,22 @@ def test_when_null_three_state():
 
 _PERM_CASES = [
     (None, None, True),
-    (None, {'roles': ['guest']}, False),
+    # 未配置（None）= 缺省姿态 Open：core 清单化后不再对 guest 硬拒（对齐 permission.rs）
+    (None, {'roles': ['guest']}, True),
     (None, {'roles': ['user']}, True),
+    # 显式空名单（[]）= 显式不允许；ctx 缺失 / internal 直通先于名单判定
+    ([], None, True),
+    ([], {'roles': ['user']}, False),
+    ([], {'roles': ['admin']}, False),
+    ([], {'internal': True}, True),
     (['ops'], None, True),
     (['ops'], {'roles': ['ops']}, True),
     (['ops'], {'roles': ['user']}, False),
     (['ops'], {'roles': ['user', 'ops']}, True),
-    (['ops'], {'roles': ['admin']}, True),
-    (['ops'], {'roles': ['super_admin']}, True),
+    # 无内置角色硬编码：admin / super_admin 须写进名单才放行（对齐 core 清单化）
+    (['ops'], {'roles': ['admin']}, False),
+    (['ops'], {'roles': ['super_admin']}, False),
+    (['ops'], {'roles': ['admin', 'ops']}, True),
     (['ops'], {'roles': ['guest']}, False),
     (['ops'], {'internal': True, 'roles': ['guest']}, True),
     (['creator'], {'userId': 'u1'}, True),
@@ -277,15 +285,20 @@ def test_builtin_schema_registered():
     fields = set(mirror['fields'])
     assert fields == {'_id', 'workflow', 'status', 'input', 'steps',
                       'error', 'stepIndex', 'dryRun', 'now'}
-    # write 显式空名单（R2：拒普通角色 GQL 篡改 run 审计；internal/admin 保留）
+    # write 显式空名单（R2：拒普通角色 GQL 篡改 run 审计；internal 与 exempt_roles 直通）
     assert mirror['write'] == []
 
 
 def test_run_whitelist_fallback():
-    """run 缺省回退 write；显式 run 优先（§0.6）"""
+    """run 缺省回退 write；显式 run 优先；显式 [] 不得回退（§0.6）"""
     assert wf._run_whitelist({'write': ['w1']}) == ['w1']
     assert wf._run_whitelist({'run': ['r1'], 'write': ['w1']}) == ['r1']
     assert wf._run_whitelist({}) is None
+    # 显式空名单 = 显式不允许：不得被 falsy 判断吞成「未配置」
+    assert wf._run_whitelist({'run': []}) == []
+    assert wf._run_whitelist({'write': []}) == []
+    assert wf._run_whitelist({'run': [], 'write': ['w1']}) == []
+    assert wf._run_whitelist({'run': None, 'write': []}) == []
 
 
 # ─── parity 锚：run 文档与步骤迹形状（双宿主逐字段一致） ─────────

@@ -39,7 +39,8 @@ from py_store.llm import get_llm, register_llm
 _AK_SCHEMAS = [
     {
         'name': 'AkUser', 'collection': 'ak_users', 'idPrefix': 'aku', 'timestamps': True,
-        # guest 显式可读模型（read:[] 时 guest 默认禁止），但 role 字段仍 admin 专属 → T8 验证列级过滤
+        # 显式列出 user/guest（core 已统一 read:[] = 显式不允许，不再按「未配置」处理），
+        # 但 role 字段仍 admin 专属 → T8 验证列级过滤
         'read': ['user', 'guest'],
         'fields': {
             '_id': 'string',
@@ -61,7 +62,9 @@ _AK_SCHEMAS = [
     },
     {
         'name': 'AkOrder', 'collection': 'ak_orders', 'idPrefix': 'ako', 'timestamps': True,
-        'read': [],
+        # 本用例组只验问数编排，不验 schema 级读限制：未配置（None = 缺省 Open）；
+        # 不得写 read:[]（core 语义为「显式不允许」）
+        'read': None,
         'fields': {'_id': 'string', 'code': 'string', 'amount': 'float'},
         'relations': {'items': {'model': 'AkOrderItem', 'type': 'many',
                                 'localField': '_id', 'foreignField': 'orderId'}},
@@ -69,21 +72,21 @@ _AK_SCHEMAS = [
     },
     {
         'name': 'AkOrderItem', 'collection': 'ak_order_items', 'idPrefix': 'aki',
-        'timestamps': False, 'read': [],
+        'timestamps': False, 'read': None,
         'fields': {'_id': 'string', 'sku': 'string', 'qty': 'int'},
         'relations': {'stock': {'model': 'AkStock', 'type': 'one',
                                 'localField': 'sku', 'foreignField': 'sku'}},
     },
     {
         'name': 'AkStock', 'collection': 'ak_stocks', 'idPrefix': 'aks',
-        'timestamps': False, 'read': [],
+        'timestamps': False, 'read': None,
         'fields': {'_id': 'string', 'sku': 'string', 'qty': 'int'},
         'relations': {'owner': {'model': 'AkUser', 'type': 'one',
                                 'localField': 'ownerId', 'foreignField': '_id'}},
     },
     {
         'name': 'AkPost', 'collection': 'ak_posts', 'idPrefix': 'akp',
-        'timestamps': False, 'read': [],
+        'timestamps': False, 'read': None,
         'fields': {'_id': 'string', 'title': 'string'},
     },
 ]

@@ -404,12 +404,12 @@ def test_schema_register_rejects_invalid_timestamps():
 
 
 def test_schema_owner_key_mirror_and_default():
-    # 漉金Core 接入扩展 01：ownerKey 自定义键回显镜像；缺省 None（零破坏）
+    # ownerKey 自定义键回显镜像（core N1：不得为 "_id"，须独立归属字段）；缺省 None（零破坏）
     _sc.register({
-        'name': 'OwnDoc', 'collection': 'own_docs', 'ownerKey': '_id',
-        'fields': {'title': 'string'}, 'relations': {},
+        'name': 'OwnDoc', 'collection': 'own_docs', 'ownerKey': 'ownerId',
+        'fields': {'title': 'string', 'ownerId': 'string'}, 'relations': {},
     })
-    assert _sc.get('OwnDoc')['ownerKey'] == '_id'
+    assert _sc.get('OwnDoc')['ownerKey'] == 'ownerId'
     _sc.register({
         'name': 'DefaultOwn', 'collection': 'default_own',
         'fields': {'title': 'string'}, 'relations': {},
