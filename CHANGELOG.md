@@ -18,6 +18,17 @@
   `IN (___claimed_ids___)`，旧实现回填成 `IN (('a','b'))`，MySQL 视作单个行构造器报 1241。
 - **A3 `execute_native` 识别 `$merge`/`$out` 写管道并按写路径解析连接**（主库 / 事务），
   不再一律按读路径。
+- **`_to_core_defn` 剔除落点键 `database`/`schema`**：core 01 起不再解析定义内落点
+  （白名单不含 `database`），旧写法注册期会被 reject（「含未知顶层键」）。落点仍由
+  `_loc_of` 显式注入，行为不变；定义持久化不再携带落点键。
+
+### Changed（破坏性：workflow 定义级白名单口径与 core 对齐）
+
+- `workflow` 的 `read`/`write`/`run` 三级白名单改按 core `permission.rs::evaluate` 判定：
+  显式 `[]` = 显式不允许；`run: []` 不再回退 `write`；移除 `admin`/`super_admin`
+  硬编码与 `guest` 读拒特例（须写进名单才放行）；未配置（键缺省）仍为缺省 Open。
+  **升级提示**：此前依赖「空名单=放行」或「admin 自动放行」的 workflow 定义，需把
+  角色名显式写进名单。
 
 ### Changed（契约：defn hash 的数值序列化）
 

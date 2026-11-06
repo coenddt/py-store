@@ -116,21 +116,23 @@ class _StepFailure(Exception):
 # ─── 权限：三级白名单判定（§0.6；core permission.rs::evaluate 同构，doc=Missing 语义） ──
 
 def _evaluate(role_list, ctx):
-    """角色白名单评估（与 core evaluate 同构；新建 run 无属主文档 → creator 按 Missing 通过）"""
-    if not role_list:
-        # 空白名单 = 无权限配置 → 默认行为（ctx 缺失放行；internal 放行；guest 拒绝）
-        if ctx is None:
-            return True
-        if ctx.get('internal'):
-            return True
-        return 'guest' not in (ctx.get('roles') or [])
+    """角色白名单评估（与 core permission.rs::evaluate 同构；doc=Missing 语义）
+
+    - ctx 缺失 / internal：直通放行（与 core 一致，先于名单判定）；
+    - 未配置（``None``）：缺省姿态 Open → 放行（core 默认 ``UnconfiguredPolicy::Open``）；
+    - 显式空名单（``[]``）：显式声明「不允许任何角色」→ 拒绝（对齐 core 2026-11 变更：
+      ``[]`` 不再并入「未配置」，与 schema ``read``/``write`` 语义对称）；
+    - 无内置角色硬编码：``admin``/``super_admin`` 必须写进名单才放行（core 已清单化）。
+    """
     if ctx is None:
         return True
     if ctx.get('internal'):
         return True
-    roles = ctx.get('roles') or []
-    if any(r in ('super_admin', 'admin') for r in roles):
+    if role_list is None:
         return True
+    if not role_list:
+        return False
+    roles = ctx.get('roles') or []
     effective = roles if roles else [ctx.get('role')]
     if any(r in role_list for r in effective):
         return True
@@ -138,8 +140,12 @@ def _evaluate(role_list, ctx):
 
 
 def _run_whitelist(defn):
-    """run 白名单：显式声明优先；缺省回退 write（§0.6，falsy 统一回退）"""
-    return defn.get('run') or defn.get('write') or None
+    """run 白名单：显式声明优先；缺省回退 write（§0.6）
+
+    显式 ``[]`` 不得回退为「未配置」——否则「显式不允许」会被 falsy 判断吞成放行。
+    """
+    run = defn.get('run')
+    return run if run is not None else defn.get('write')
 
 
 # ─── 校验器（注册即静态检查；纯函数，错误全量收集） ──────────────
