@@ -628,7 +628,7 @@ class _TwoStepCore:
     def dialect_translate(self, kind, cmd):
         return {'stmts': [
             {'text': 'SELECT _id FROM claim_jobs WHERE status = 0 LIMIT 2'},
-            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN ___claimed_ids___'},
+            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN (___claimed_ids___)'},
         ]}
 
 
