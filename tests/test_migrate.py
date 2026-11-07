@@ -247,6 +247,108 @@ def test_default_timestamps_and_creator_columns_not_treated_as_dropped():
     _run_in_sqlite(body)
 
 
+def _legacy_note_defn():
+    """camelCase 时代的表：默认 timestamps + read/write creator（隐含 created_by），
+    物理列只有 _id/title/status/createdAt/updatedAt，没有 __present / created_at 等。"""
+    return {
+        'name': 'LegacyNote', 'collection': 'legacy_notes', 'idPrefix': 'ln',
+        'read': ['creator'], 'write': ['creator'],
+        'fields': {
+            '_id': {'type': 'string'}, 'title': {'type': 'string'}, 'status': {'type': 'string'},
+        },
+    }
+
+
+async def _create_legacy_table(db):
+    await db.execute("""CREATE TABLE legacy_notes (
+        _id TEXT PRIMARY KEY,
+        title TEXT,
+        status TEXT,
+        createdAt INTEGER,
+        updatedAt INTEGER
+    )""")
+    await db.commit()
+
+
+def test_legacy_table_missing_builtin_columns_fails_fast():
+    """⓪ 老表缺内建列（camelCase 时代）：introspect 迁移显式失败、不隐式补列、无孤儿版本行
+
+    改前：migrate 静默 applied 并写版本行，随后查询报 `no such column: t.__present`、
+    插入报 `no column named created_by`（creator 条件与软删除过滤全表不可见）。
+    改后：迁移前显式抛 MigrationUnsupported，列出全部缺失内建列与补列指引。
+    """
+
+    async def body(store, db):
+        await _create_legacy_table(db)
+        with pytest.raises(MigrationUnsupported) as ei:
+            await store.migrate(backend='sqlite', source='default',
+                                defs={'LegacyNote': _legacy_note_defn()}, driver=db)
+        e = ei.value
+        assert '缺内建列' in str(e), f'消息应含「缺内建列」（got: {e}）'
+        for col in ('__present', 'created_at', 'updated_at', 'created_by'):
+            assert col in str(e), f'消息应列出缺失列 {col}（got: {e}）'
+        assert _UNSUPPORTED_HINT in str(e), '应携带固定分步建议'
+        cols = await _cols(db, 'legacy_notes')
+        for col in ('__present', 'created_at', 'updated_at', 'created_by'):
+            assert col not in cols, f'不得自动补列 {col}（got {cols}）'
+        rows = await _version_rows(db)
+        assert [r for r in rows if r['name'] == 'LegacyNote'] == [], '被拦后不得写版本行'
+
+    _run_in_sqlite(body)
+
+
+def test_legacy_table_migrates_after_columns_added():
+    """⓪ 边界：按指引补列后同一 defn 可正常迁移（检测不是永久阻断）"""
+
+    async def body(store, db):
+        await _create_legacy_table(db)
+        for ddl in (
+            'ALTER TABLE legacy_notes ADD COLUMN created_at INTEGER',
+            'ALTER TABLE legacy_notes ADD COLUMN updated_at INTEGER',
+            'ALTER TABLE legacy_notes ADD COLUMN created_by TEXT',
+            'ALTER TABLE legacy_notes ADD COLUMN __present TEXT',
+        ):
+            await db.execute(ddl)
+        await db.commit()
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'LegacyNote': _legacy_note_defn()}, driver=db)
+        assert r['applied'] == [{'name': 'LegacyNote', 'from': 0, 'to': 1, 'version': 1}], r
+        rows = await _version_rows(db)
+        assert [x['version'] for x in rows if x['name'] == 'LegacyNote'] == [1]
+
+    _run_in_sqlite(body)
+
+
+def test_owner_column_all_null_fails_fast():
+    """⓪b 归属键漏回填：created_by 全 NULL 时迁移显式失败（禁止静默全表不可见）
+
+    改前：migrate 静默通过；普通用户查询命中 0 行、系统 ctx 命中全部（静默全表不可见）。
+    改后：迁移前 SELECT 1 ... WHERE created_by IS NULL LIMIT 1，命中即抛 MigrationUnsupported。
+    """
+
+    async def body(store, db):
+        await db.execute("""CREATE TABLE null_owner (
+            _id TEXT PRIMARY KEY, title TEXT,
+            created_at INTEGER, updated_at INTEGER, created_by TEXT, __present TEXT
+        )""")
+        await db.execute("INSERT INTO null_owner (_id, title, created_by) VALUES ('no_1', 'a', NULL)")
+        await db.commit()
+        v1 = {
+            'name': 'NullOwner', 'collection': 'null_owner', 'idPrefix': 'no',
+            'read': ['creator'], 'write': ['creator'],
+            'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+        }
+        with pytest.raises(MigrationUnsupported) as ei:
+            await store.migrate(backend='sqlite', source='default',
+                                defs={'NullOwner': v1}, driver=db)
+        assert '归属键 created_by 存在未回填行' in str(ei.value)
+        assert '不可见' in str(ei.value)
+        rows = await _version_rows(db)
+        assert [r for r in rows if r['name'] == 'NullOwner'] == [], '被拦后不得写版本行'
+
+    _run_in_sqlite(body)
+
+
 def test_declared_builtin_like_fields_are_not_stripped():
     """D1/D2 边界：用户显式声明 createdAt / createdBy ⇒ 不剔除（否则会误判新增列重复 ADD）"""
 
