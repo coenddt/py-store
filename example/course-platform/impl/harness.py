@@ -190,9 +190,20 @@ async def reset(kind, driver):
 
 async def seed(kind, driver):
     for batch in load_seed():
-        permission.set_context(batch.get('ctx'))
-        for row in batch['rows']:
-            await store.insert(batch['schema'], row)
+        ctx = batch.get('ctx')
+
+        async def _insert_rows(_batch=batch):
+            for row in _batch['rows']:
+                await store.insert(_batch['schema'], row)
+
+        # ctx 三态与 node harness 的 withCtx 同构：{internal:true} → 内部上下文；
+        # set_context 已收口可信标记（禁止请求侧注入 internal），内部批次必须走
+        # run_as_internal，否则 PermissionError。
+        if isinstance(ctx, dict) and ctx.get('internal'):
+            await store.run_as_internal(_insert_rows)
+        else:
+            permission.set_context(ctx)
+            await _insert_rows()
 
 
 # ──────────────────────────────────────────────────────────── 断言 ──
