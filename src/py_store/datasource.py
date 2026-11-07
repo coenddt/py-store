@@ -57,7 +57,7 @@ _CLAIMED_IDS = '___claimed_ids___'
 
 def _render_claimed_ids(ids) -> str:
     """_id 列表 → SQL IN 字面量（单引号转义；_id 为框架生成值，转义为防御）"""
-    return '(' + ','.join("'" + str(v).replace("'", "''") + "'" for v in ids) + ')'
+    return ','.join("'" + str(v).replace("'", "''") + "'" for v in ids)
 
 
 _MISSING = object()
@@ -633,6 +633,18 @@ class NativeCommandError(RuntimeError):
     """原生 Mongo 命令入口的显式错误（非 Mongo 源 / 非 Mongo 形态）"""
 
 
+def pipeline_writes(pipeline):
+    """聚合管道是否为写管道：任一阶段含 ``$merge`` / ``$out``（Mongo 的写出口）。
+
+    写管道必须按写路径解析连接（主库 / 事务连接）——按读路径解析会在主从分离或
+    只读连接上报错或落到错误节点（A3）。
+    """
+    for stage in pipeline or []:
+        if isinstance(stage, Mapping) and ('$merge' in stage or '$out' in stage):
+            return True
+    return False
+
+
 async def execute_native(source, collection, pipeline, options=None):
     """
     在指定 Mongo 源上执行原生聚合管道（Host 层逃生口，对标 SQL 侧 ``execute_raw``）
@@ -649,7 +661,7 @@ async def execute_native(source, collection, pipeline, options=None):
         MongoClient 形态须经 schema 声明 database（``mongo_db`` 既有校验，缺名即报错）；
       - 返回 ``{'rows': list}``。
     """
-    conn = await resolve_connection(source, is_write=False)
+    conn = await resolve_connection(source, is_write=pipeline_writes(pipeline))
     if is_embedded(conn):
         # 嵌入式载体（local / memory；描述符或事务视图）：db = handle；session 已绑定在 handle 上，不另传
         db = conn['handle']

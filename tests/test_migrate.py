@@ -181,3 +181,65 @@ def test_missing_driver_with_old_defs_none_raises():
                                 defs={'Note': _note_v1()})
 
     _run_in_sqlite(body)
+
+
+def test_legacy_archive_table_missing_timestamps_is_backfilled():
+    """⓪d 存量归档表缺 timestamps 列（旧版 DDL 建出）：迁移补列后 remove 可用"""
+
+    async def body(store, db):
+        await db.executescript("""
+            CREATE TABLE legacy_arch (
+              _id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, updated_at INTEGER,
+              created_by TEXT, __present TEXT
+            );
+            CREATE TABLE legacy_arch_deleted (
+              _id TEXT PRIMARY KEY, title TEXT, created_by TEXT, __present TEXT,
+              deleted_at INTEGER
+            );
+            INSERT INTO legacy_arch VALUES ('la_1', '待删', 0, 0, 'u1', ',_id,title,');
+        """)
+        await db.commit()
+        defn = {
+            'name': 'LegacyArch', 'collection': 'legacy_arch', 'idPrefix': 'la',
+            'fields': {
+                '_id': {'type': 'string'}, 'title': {'type': 'string'},
+                'createdBy': {'type': 'string'},
+            },
+        }
+        store.register(defn)
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'LegacyArch': defn}, driver=db)
+        assert r['applied'] == [{'name': 'LegacyArch', 'from': 0, 'to': 1, 'version': 1}]
+        cols = await _cols(db, 'legacy_arch_deleted')
+        for c in ('created_at', 'updated_at', 'created_by', '__present'):
+            assert c in cols, f'归档表应补齐 {c}（got {cols}）'
+        rd = await store.remove('LegacyArch', {'_id': 'la_1'})
+        assert rd == {'deletedCount': 1, 'archivedCount': 1}
+
+    _run_in_sqlite(body)
+
+
+def test_missing_archive_table_is_created_on_migrate():
+    """⓪c 主表存在但归档表缺失：迁移补建后 remove 可用"""
+
+    async def body(store, db):
+        await db.executescript("""
+            CREATE TABLE noarch (
+              _id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, updated_at INTEGER,
+              __present TEXT
+            );
+            INSERT INTO noarch VALUES ('na_1', '待删', 0, 0, ',_id,title,');
+        """)
+        await db.commit()
+        defn = {
+            'name': 'NoArch', 'collection': 'noarch', 'idPrefix': 'na',
+            'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+        }
+        store.register(defn)
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'NoArch': defn}, driver=db)
+        assert r['applied'] == [{'name': 'NoArch', 'from': 0, 'to': 1, 'version': 1}]
+        rd = await store.remove('NoArch', {'_id': 'na_1'})
+        assert rd == {'deletedCount': 1, 'archivedCount': 1}
+
+    _run_in_sqlite(body)

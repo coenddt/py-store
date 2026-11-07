@@ -62,15 +62,18 @@ def _hash_of(defn):
     return hashlib.sha1(stable_stringify(defn).encode('utf-8')).hexdigest()
 
 
-def _strip_builtin_fields(old_defn, new_defn):
-    """内建物理列剔除：introspect→schema_from_rows 的 defn 带 ``__present`` 哨兵与 timestamps
-    物理列（宿主 DDL 的 snake_case：``created_at``/``updated_at``；兼容 camelCase）——不剔则
-    diff 误报「删除字段不支持」。schema_from_rows 推断 ``timestamps: False``，剔除条件看用户侧声明。"""
+def _strip_builtin_fields(backend, old_defn, new_defn):
+    """内建物理列剔除：introspect→schema_from_rows 的 defn 带 ``__present`` 哨兵与
+    宿主自动补齐的 timestamps / 归属键物理列（snake_case；兼容 camelCase）——不剔则
+    diff 误报「删除字段不支持」。
+
+    剔除清单**不在本文件自设**，一律取 ``_ddl.builtin_field_names``（与 DDL 生成共用
+    同一份内建列定义）：此前用 ``new_defn['timestamps']`` 真值判断 + 固定两列，与 DDL
+    的 ``is not False`` 口径分叉（D1），且漏掉归属键（D2）。
+    """
     if not old_defn or not isinstance(old_defn, dict):
         return old_defn
-    drop = ['__present']
-    if new_defn and new_defn.get('timestamps'):
-        drop += ['created_at', 'updated_at', 'createdAt', 'updatedAt']
+    drop = _ddl.builtin_field_names(new_defn, backend) if new_defn else ['__present']
     fields = dict(old_defn.get('fields') or {})
     for k in drop:
         fields.pop(k, None)
@@ -173,6 +176,7 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
     skipped = []
     for name, defn in defs.items():
         old_defn = _strip_builtin_fields(
+            backend,
             old.get(name) or (old.get(defn.get('collection')) if defn.get('collection') else None), defn)
         # ⑤ 幂等闸（先于 diff）：hash 相同 → skipped unchanged，不 diff（反推粒度不齐防误报）
         hash_ = _hash_of(defn)
@@ -193,6 +197,23 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
                 f'MIGRATION_UNSUPPORTED: {"；".join(plan["errors"])}（{_UNSUPPORTED_HINT}）', skipped)
         # ④ 方言 SQL（纯文本）
         stmts = _ddl.generate_migration(backend, old_defn, phys_new)
+        # ⓪c 归档表补建（仅 introspect 模式）：主表已存在时 addTable 分支不触发，老库常缺
+        # ``<table>_deleted`` 附表 → remove 的归档写入报 no such table（删除功能不可用）。
+        # 此处按当前 def 补建；archive=False 无归档表，跳过。
+        if probe is not None and old_defs is None and defn.get('archive') is not False:
+            arch_defn = _ddl._archive_defn_of(defn)
+            main_table = _ddl._pname(backend, defn.get('collection') or defn.get('name'))
+            arch_table = _ddl._pname(backend, arch_defn.get('collection') or arch_defn.get('name'))
+            existing = {t.get('name') for t in probe.get('tables') or []}
+            if main_table in existing:
+                if arch_table not in existing:
+                    stmts = _ddl.archive_ddl(backend, defn) + stmts
+                else:
+                    # 内建列补齐（旧版归档表缺 created_at/updated_at/__present；声明字段差异
+                    # 由 generate_migration 主表分支同步处理，此处不重复 diff）
+                    arch_have = {c.get('name') for c in probe.get('columns') or []
+                                 if c.get('table') == arch_table}
+                    stmts = _ddl.implicit_column_ddl(backend, arch_defn, arch_have) + stmts
         # version = 该 name 历史最大 version+1（复用 metadef next_version 语义）
         version = (max(r['version'] for r in rows) if rows else 0) + 1
         # ⑥ SQL 与版本行同事务：失败整体回滚、无孤儿版本行

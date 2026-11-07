@@ -216,6 +216,45 @@ def _owner_field(defn):
     return None if name == '_id' else name
 
 
+def implicit_columns(defn, backend):
+    """宿主自动补齐的内建列清单（**DDL 生成与迁移补列共用的唯一来源**）。
+
+    返回 ``[(逻辑名, sql_type)]``，顺序：timestamps → 归属键（owner 行控隐含）。
+    ``__present`` 与声明字段不在此列（分别由 ``_columns`` / 调用方处理）。
+    timestamps 判定与 DDL 同口径：**未声明即建**（``is not False``）。
+    """
+    i = _idx(backend)
+    out = []
+    if defn.get('timestamps') is not False:
+        for ts in _TIMESTAMP_FIELDS:
+            out.append((ts, _TYPES['number'][i]))
+    owner = _owner_field(defn)
+    if owner is not None:
+        out.append((owner, _TYPES['string'][i]))
+    return out
+
+
+def builtin_field_names(defn, backend):
+    """内建物理列名清单（迁移剔除用；与 ``implicit_columns`` 同源）。
+
+    「内建」= 宿主按 schema 声明自动建、但用户未显式声明的列：``__present`` 哨兵 +
+    timestamps + 归属键。用户显式声明了同名字段时**不剔除**（该列已参与字段 diff，
+    误剔会被当成「新增列」重复 ADD COLUMN）。同时返回物理名与逻辑名，兼容显式传入
+    camelCase 形式的 old_defs。
+    """
+    declared = defn.get('fields') or {}
+    declared_phys = {_pname(backend, k) for k in declared}
+    names = ['__present']
+    for logical, _sql_type in implicit_columns(defn, backend):
+        phys = _pname(backend, logical)
+        if phys in declared_phys or logical in declared:
+            continue
+        names.append(phys)
+        if phys != logical:
+            names.append(logical)
+    return names
+
+
 def _columns(defn, backend):
     """返回 [(name, sql_type, pk, auto)]，顺序：声明的字段（标量 / object·array JSON 列）→
     timestamps → 归属键（owner 行控隐含）→ __present；name 为该后端物理列名（snake_case）。"""
@@ -422,9 +461,44 @@ def _archive_defn_of(defn):
     arch['name'] = defn['name'] + 'Deleted'
     arch['collection'] = (defn.get('collection') or defn['name']) + '_deleted'
     arch['fields'] = fields
-    arch['timestamps'] = False
+    # 归档表列 = 主表列 + deletedAt。不得改 timestamps：归档文档由 core 按主表 schema
+    # 生成（含 created_at / updated_at），置 False 会让归档 INSERT 报
+    # ``no column named created_at``（默认 timestamps 的表 remove 直接失败）。
     arch['_isArchive'] = True
     return arch
+
+
+def archive_ddl(backend, defn):
+    """归档表建表语句（列/索引与主表同源）：供迁移补建「主表已存在但 ``_deleted`` 缺失」的老库。
+
+    ``archive=False`` 无归档表 → 返回空列表（与 addTable 分支同口径）。
+    """
+    if defn.get('archive') is False:
+        return []
+    arch = _archive_defn_of(defn)
+    return [_create_table(arch, backend), *_index_stmts(arch, backend)]
+
+
+def implicit_column_ddl(backend, defn, existing):
+    """补齐缺失内建列的 ALTER 语句（供迁移修复旧版归档表）。
+
+    旧版 ``_archive_defn_of`` 固定 ``timestamps=False``，历史上建出的
+    ``<table>_deleted`` 缺 ``created_at`` / ``updated_at``（归档 INSERT 报
+    ``no column named created_at``）。内建列不在 diff_defs 的比较范围（只比声明字段），
+    故单独补齐。
+    """
+    i = _idx(backend)
+    table = _pname(backend, defn.get('collection') or defn.get('name'))
+    out = []
+    if '__present' not in existing:
+        out.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN '
+                   f'{_q(backend, "__present")} {_PRESENT_TYPE[i]}')
+    for name, sql_type in implicit_columns(defn, backend):
+        phys = _pname(backend, name)
+        if phys not in existing:
+            out.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN '
+                       f'{_q(backend, phys)} {sql_type}')
+    return out
 
 
 def diff_defs(old_defn, new_defn):
