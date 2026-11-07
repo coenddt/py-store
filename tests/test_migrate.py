@@ -390,6 +390,44 @@ def test_legacy_table_archived_table_is_backfilled():
     _run_in_sqlite(body)
 
 
+def test_legacy_archive_table_missing_timestamps_is_backfilled():
+    """⓪d 存量归档表缺 timestamps 列（旧版 DDL 建出）：迁移补列后 remove 可用
+
+    改前：归档表由 ``timestamps=False`` 时代建出，缺 created_at / updated_at → 归档
+    INSERT 报 ``table legacy_arch_deleted has no column named created_at``，删除直接失败。
+    """
+
+    async def body(store, db):
+        from py_store import schema as _sc
+        await db.execute("""CREATE TABLE legacy_arch (
+            _id TEXT PRIMARY KEY, title TEXT,
+            created_at INTEGER, updated_at INTEGER, created_by TEXT, __present TEXT
+        )""")
+        await db.execute("""CREATE TABLE legacy_arch_deleted (
+            _id TEXT PRIMARY KEY, title TEXT, created_by TEXT, __present TEXT, deleted_at INTEGER
+        )""")
+        await db.execute(
+            "INSERT INTO legacy_arch (_id, title, created_at, updated_at, created_by, __present) "
+            "VALUES ('la_1', '待删', 1, 1, 'u1', ',_id,title,')")
+        await db.commit()
+        v1 = {
+            'name': 'LegacyArch', 'collection': 'legacy_arch', 'idPrefix': 'la',
+            'write': ['creator'],
+            'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+        }
+        _sc.register(v1)
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'LegacyArch': v1}, driver=db)
+        assert r['applied'] == [{'name': 'LegacyArch', 'from': 0, 'to': 1, 'version': 1}], r
+        cols = await _cols(db, 'legacy_arch_deleted')
+        for col in ('created_at', 'updated_at', 'created_by', '__present'):
+            assert col in cols, f'归档表应补齐 {col}（got {cols}）'
+        rd = await store.remove('LegacyArch', {'_id': 'la_1'})
+        assert rd == {'deletedCount': 1, 'archivedCount': 1}, rd
+
+    _run_in_sqlite(body)
+
+
 def test_declared_builtin_like_fields_are_not_stripped():
     """D1/D2 边界：用户显式声明 createdAt / createdBy ⇒ 不剔除（否则会误判新增列重复 ADD）"""
 
