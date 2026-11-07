@@ -32,6 +32,16 @@
   （白名单不含 `database`），旧写法注册期会被 reject（「含未知顶层键」）。落点仍由
   `_loc_of` 显式注入，行为不变；定义持久化不再携带落点键。
 
+### Fixed（update 返回值与 node 宿主逐字节一致）
+
+- **写路径 returns 的键序与缺失列对齐 core 出口**：此前 `_write_returns` 在无计算列时
+  直接返回落库 doc，core 出口携带、但本次未写入的默认值列（如 `age: 0`）从出参中缺失，
+  与 node 宿主（`bacde3b` 后）不一致，双端对拍失败。现键序取 `apply_write_defaults` 出口、
+  值以落库 doc 为基（显式 `null` / 已有值保持，对齐 `DefaultFill::Insert`）、计算列取 core
+  计算结果，落库 doc 中不在出口内的键追加在后。
+- 取证：改前 `python -m pytest tests/test_parity_local.py -q` → `..F`，py 返回
+  `{"_id":"pu_2","name":"Bob","score":15,"tag":"z"}`、node 返回含 `"age":0`；改后 `...`（3 passed）。
+
 ### Changed（破坏性：workflow 定义级白名单口径与 core 对齐）
 
 - `workflow` 的 `read`/`write`/`run` 三级白名单改按 core `permission.rs::evaluate` 判定：
