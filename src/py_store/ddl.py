@@ -472,6 +472,28 @@ def archive_ddl(backend, defn):
     return [_create_table(arch, backend), *_index_stmts(arch, backend)]
 
 
+def implicit_column_ddl(backend, defn, existing):
+    """补齐缺失内建列的 ALTER 语句（供迁移修复旧版归档表）。
+
+    旧版 ``_archive_defn_of`` 固定 ``timestamps=False``，历史上建出的
+    ``<table>_deleted`` 缺 ``created_at`` / ``updated_at``（归档 INSERT 报
+    ``no column named created_at``）。内建列不在 diff_defs 的比较范围（只比声明字段），
+    故单独补齐。
+    """
+    i = _idx(backend)
+    table = _pname(backend, defn.get('collection') or defn.get('name'))
+    out = []
+    if '__present' not in existing:
+        out.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN '
+                   f'{_q(backend, "__present")} {_PRESENT_TYPE[i]}')
+    for name, sql_type in implicit_columns(defn, backend):
+        phys = _pname(backend, name)
+        if phys not in existing:
+            out.append(f'ALTER TABLE {_q(backend, table)} ADD COLUMN '
+                       f'{_q(backend, phys)} {sql_type}')
+    return out
+
+
 def diff_defs(old_defn, new_defn):
     """新旧 schema def 对比 → {'changes': [...], 'errors': [...]}（后端无关，纯函数）。
 

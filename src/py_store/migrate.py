@@ -234,11 +234,19 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
         # ``<table>_deleted`` 附表 → remove 的归档写入报 no such table（删除功能不可用）。
         # 此处按当前 def 补建；archive=False 无归档表，跳过。
         if probe is not None and old_defs is None and defn.get('archive') is not False:
+            arch_defn = _ddl._archive_defn_of(defn)
             main_table = _ddl._pname(backend, defn.get('collection') or defn.get('name'))
-            arch_table = f'{main_table}_deleted'
+            arch_table = _ddl._pname(backend, arch_defn.get('collection') or arch_defn.get('name'))
             existing = {t.get('name') for t in probe.get('tables') or []}
-            if main_table in existing and arch_table not in existing:
-                stmts = _ddl.archive_ddl(backend, defn) + stmts
+            if main_table in existing:
+                if arch_table not in existing:
+                    stmts = _ddl.archive_ddl(backend, defn) + stmts
+                else:
+                    # 内建列补齐（旧版归档表缺 created_at/updated_at/__present；声明字段差异
+                    # 由 generate_migration 主表分支同步处理，此处不重复 diff）
+                    arch_have = {c.get('name') for c in probe.get('columns') or []
+                                 if c.get('table') == arch_table}
+                    stmts = _ddl.implicit_column_ddl(backend, arch_defn, arch_have) + stmts
         # version = 该 name 历史最大 version+1（复用 metadef next_version 语义）
         version = (max(r['version'] for r in rows) if rows else 0) + 1
         # ⑥ SQL 与版本行同事务：失败整体回滚、无孤儿版本行
