@@ -91,9 +91,17 @@ def _core_fn_key(key, comp):
 # 内部标记：表示「该键需剔除」（对齐 JS JSON round-trip 中函数型 default 被移除）
 _DROP = object()
 
+# 落点键：由 `_loc_of` 显式注入 Location，不进 core 定义（01 起定义零落点）
+_LOCATION_KEYS = ('database', 'schema')
+
 
 def _to_core_defn(defn):
-    """生成可跨 FFI 的 schema 定义：fn/asyncFn → True 占位；函数型值剔除"""
+    """生成可跨 FFI 的 schema 定义：fn/asyncFn → True 占位；函数型值剔除
+
+    落点键（``database``/``schema``）不属 core 白名单（01 起「定义零落点」）：
+    由 :func:`_loc_of` 显式注入 Location 后从定义中剔除，否则 core 注册期会以
+    「含未知顶层键」拒绝（既有 defn 兼容由本层承担，core 不再放行）。
+    """
 
     def walk(value, key=None):
         if callable(value):
@@ -115,7 +123,10 @@ def _to_core_defn(defn):
             return out_arr
         return value
 
-    return walk(defn)
+    core_defn = walk(defn)
+    for k in _LOCATION_KEYS:
+        core_defn.pop(k, None)
+    return core_defn
 
 
 def _loc_of(defn):

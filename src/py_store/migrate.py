@@ -41,6 +41,10 @@ from .schema import core as _core
 _UNSUPPORTED_HINT = '白名单外变更请分两版走：先加新列并回填，确认切换后再于下一版删除旧列'
 
 _NUMBERS = {'int', 'long', 'float', 'double', 'number'}
+#: 内省反推 ``number`` 的物理族：SQLite ``INTEGER`` 承载 int/long/float/double/date/datetime/bool；
+#: MySQL ``BIGINT`` 承载 long/number/datetime/date，``TINYINT(1)``（bool）也反推为 number。
+#: old 侧反推为 number 时，new 声明落在同族内不得判「非放宽变更」（D3）。
+_NUMBER_FAMILY = _NUMBERS | {'date', 'datetime', 'bool', 'boolean'}
 
 
 class MigrationUnsupported(MetaDefError):
@@ -111,16 +115,16 @@ def _physical_defn(backend, defn):
 
 def _align_types(backend, old_defn, phys_new):
     """反推粒度对齐：introspect 反推类型粒度可粗于用户声明（SQLite 动态类型 → ``number``，
-    承载 int/long/float/double 全域）——old 侧字段为 ``number`` 时把 new 侧同名数值字段归一为
-    ``number`` 比对（物理层确无差异；MySQL/PG 反推保真不受影响）。仅同名两侧都有时归一；
-    新加列保留用户类型（DDL 仍按声明产列型）。"""
+    承载 int/long/float/double/date/datetime/bool 全域）——old 侧字段为 ``number`` 时把 new 侧
+    同名同族字段归一为 ``number`` 比对（物理层确无差异；MySQL/PG 反推保真不受影响）。
+    仅同名两侧都有时归一；新加列保留用户类型（DDL 仍按声明产列型）。"""
     old_fields = (old_defn or {}).get('fields') or {}
     fields = dict(phys_new.get('fields') or {})
     for k, v in fields.items():
         o = old_fields.get(k)
         ot = (o.get('type') if isinstance(o, dict) else o) if o is not None else None
         nt = v.get('type') if isinstance(v, dict) else v
-        if ot == 'number' and nt in _NUMBERS:
+        if ot == 'number' and nt in _NUMBER_FAMILY:
             fields[k] = {**v, 'type': 'number'} if isinstance(v, dict) else 'number'
     return {**phys_new, 'fields': fields}
 

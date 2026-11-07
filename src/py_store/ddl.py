@@ -534,7 +534,6 @@ def diff_defs(old_defn, new_defn):
                 continue
             changes.append({
                 'op': 'addColumn', 'name': name,
-                'sqlType': None,  # generate 侧按 backend 解析（保持 diff 后端无关）
                 'field': nf if isinstance(nf, dict) else {'type': nf},
             })
             continue
@@ -566,6 +565,10 @@ def diff_defs(old_defn, new_defn):
             errors.append(f'删除字段 "{name}" 不支持（破坏性变更；请显式走数据迁移脚本）')
 
     # ── 索引：new 有 old 无 → addIndex ──
+    # 相等判定用稳定序列化（键序无关 + JS 数字语义），对齐 node diffDefs 的 _stableStringify：
+    # 直接 dict 相等（py `1 == True`）与 node `JSON.stringify` 键序敏感会得出不同结论（P9）。
+    from .metadef import stable_stringify as _canon
+
     def _index_keys(defn):
         out = []
         for idx in defn.get('indexes') or []:
@@ -573,9 +576,9 @@ def diff_defs(old_defn, new_defn):
                 out.append(idx)
         return out
 
-    old_idx = _index_keys(old_defn)
+    old_idx = {_canon(i) for i in _index_keys(old_defn)}
     for idx in _index_keys(new_defn):
-        if idx not in old_idx:
+        if _canon(idx) not in old_idx:
             changes.append({'op': 'addIndex', 'index': idx})
 
     # collection 改名 = 建新表丢旧表（破坏性）→ Err
