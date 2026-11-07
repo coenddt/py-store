@@ -216,18 +216,13 @@ async def remove(schema_name, condition, route_override=None, options=None):
 
 
 async def exists(schema_name, condition, route_override=None):
-    """判断是否存在（读权限可见性由 core 裁决）。
+    """判断是否存在（读权限由 core 按当前 ctx 裁决：
 
-    core 尚未导出带 ctx 的 ``plan_exists_with_ctx`` 时回落旧调用——此时会绕过
-    ``read: []`` / 字段白名单 / RBAC enforce（第二轮自检 P1，跨方向未修）；
-    绑定导出后本函数自动切换，调用方无需改动。
-    """
+    ``read: []`` / 字段白名单 / RBAC enforce 均经 ``plan_exists_with_ctx`` 生效，
+    被拒时抛 ``PermissionError``）。"""
     core = get_core()
-    fn = getattr(core, 'plan_exists_with_ctx', None)
-    if fn is not None:
-        cmd = _call(lambda: fn(schema_name, condition, _ctx(), route_override))
-    else:
-        cmd = _call(lambda: core.plan_exists(schema_name, condition, route_override))
+    cmd = _call(lambda: core.plan_exists_with_ctx(
+        schema_name, condition, _ctx(), route_override))
     doc = await _exec(cmd)
     return doc is not None
 
