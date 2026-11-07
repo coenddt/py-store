@@ -454,7 +454,9 @@ def _archive_defn_of(defn):
     arch['name'] = defn['name'] + 'Deleted'
     arch['collection'] = (defn.get('collection') or defn['name']) + '_deleted'
     arch['fields'] = fields
-    arch['timestamps'] = False
+    # 归档表列 = 主表列 + deletedAt。不得改 timestamps：归档文档由 core 按主表 schema
+    # 生成（含 created_at / updated_at），置 False 会让归档 INSERT 报
+    # ``no column named created_at``（默认 timestamps 的表 remove 直接失败）。
     arch['_isArchive'] = True
     return arch
 
