@@ -181,6 +181,36 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
         old_defn = _strip_builtin_fields(
             backend,
             old.get(name) or (old.get(defn.get('collection')) if defn.get('collection') else None), defn)
+        # ⓪ 物理内建列完整性（仅 introspect 模式）：camelCase 时代的老表缺 ``__present`` /
+        # ``created_by`` / ``created_at`` 等内建列。迁移不隐式补列——补空列会让 creator 条件与
+        # 软删除过滤静默命中零行（全表不可见），故必须显式失败并给出补列指引。
+        if probe is not None and old_defs is None:
+            table = _ddl._pname(backend, defn.get('collection') or defn.get('name'))
+            if any(t.get('name') == table for t in probe.get('tables') or []):
+                have = {c.get('name') for c in probe.get('columns') or [] if c.get('table') == table}
+                missing = sorted({_ddl._pname(backend, n)
+                                  for n in _ddl.builtin_field_names(defn, backend)} - have)
+                if missing:
+                    reason = (f'物理表 {table} 缺内建列 [{", ".join(missing)}]（旧表非当前 DDL 口径；'
+                              '迁移不隐式补列，需先补列并回填或按当前 DDL 重建表）')
+                    skipped.append({'name': name, 'reason': reason})
+                    raise MigrationUnsupported(
+                        f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
+                # ⓪b 归属键回填完整性（仅 introspect 模式）：列已存在但值为 NULL ⇒ creator
+                # 行控下这些行对非 bypass 用户永久不可见（静默全表不可见）。迁移层不猜业务
+                # 归属，只做 fail-fast 检测并要求先回填（允许被拦截、禁止静默失守）。
+                owner = _ddl._owner_field(defn)
+                if owner is not None:
+                    col = _ddl._pname(backend, owner)
+                    hit = await execute_raw(
+                        source, f'SELECT 1 FROM {table} WHERE {col} IS NULL LIMIT 1', None, False)
+                    if hit.get('rows'):
+                        reason = (f'物理表 {table} 的归属键 {col} 存在未回填行（值为 NULL）：'
+                                  'creator 行控下这些行对非 bypass 用户不可见（静默），'
+                                  '需先按业务回填后重跑迁移')
+                        skipped.append({'name': name, 'reason': reason})
+                        raise MigrationUnsupported(
+                            f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
         # ⑤ 幂等闸（先于 diff）：hash 相同 → skipped unchanged，不 diff（反推粒度不齐防误报）
         hash_ = _hash_of(defn)
         seg = {'tenant': '' if tenant is None else tenant,
@@ -200,6 +230,15 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
                 f'MIGRATION_UNSUPPORTED: {"；".join(plan["errors"])}（{_UNSUPPORTED_HINT}）', skipped)
         # ④ 方言 SQL（纯文本）
         stmts = _ddl.generate_migration(backend, old_defn, phys_new)
+        # ⓪c 归档表补建（仅 introspect 模式）：主表已存在时 addTable 分支不触发，老库常缺
+        # ``<table>_deleted`` 附表 → remove 的归档写入报 no such table（删除功能不可用）。
+        # 此处按当前 def 补建；archive=False 无归档表，跳过。
+        if probe is not None and old_defs is None and defn.get('archive') is not False:
+            main_table = _ddl._pname(backend, defn.get('collection') or defn.get('name'))
+            arch_table = f'{main_table}_deleted'
+            existing = {t.get('name') for t in probe.get('tables') or []}
+            if main_table in existing and arch_table not in existing:
+                stmts = _ddl.archive_ddl(backend, defn) + stmts
         # version = 该 name 历史最大 version+1（复用 metadef next_version 语义）
         version = (max(r['version'] for r in rows) if rows else 0) + 1
         # ⑥ SQL 与版本行同事务：失败整体回滚、无孤儿版本行

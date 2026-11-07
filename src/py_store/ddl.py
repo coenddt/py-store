@@ -459,6 +459,17 @@ def _archive_defn_of(defn):
     return arch
 
 
+def archive_ddl(backend, defn):
+    """归档表建表语句（列/索引与主表同源）：供迁移补建「主表已存在但 ``_deleted`` 缺失」的老库。
+
+    ``archive=False`` 无归档表 → 返回空列表（与 addTable 分支同口径）。
+    """
+    if defn.get('archive') is False:
+        return []
+    arch = _archive_defn_of(defn)
+    return [_create_table(arch, backend), *_index_stmts(arch, backend)]
+
+
 def diff_defs(old_defn, new_defn):
     """新旧 schema def 对比 → {'changes': [...], 'errors': [...]}（后端无关，纯函数）。
 
