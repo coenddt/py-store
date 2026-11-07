@@ -443,6 +443,10 @@ class Store:
     # ── 其余 API 显式绑定（staticmethod：避免实例化后 self 注入）──
     # Schema 管理
     register = staticmethod(schema.register)
+    # 批量注册门面（插件 bootstrap 接入）：items = [{'defn', 'location'?}]，原子语义由 core 定
+    register_batch = staticmethod(schema.register_batch)
+    # 注销门面（补偿整份 attempted 清单；未知 schema 幂等成功）
+    unregister = staticmethod(schema.unregister)
     # 运行期目录装载（读 store.config.json → 收集定义 → core 纯规划 → 带定位批量注册）
     load_defs = staticmethod(load.load_defs)
     # 公开回调注入与启动期缺实现校验（对齐 nodejs-store store.set_fn / assert_fns_covered）
