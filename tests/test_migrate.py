@@ -349,6 +349,47 @@ def test_owner_column_all_null_fails_fast():
     _run_in_sqlite(body)
 
 
+def test_legacy_table_archived_table_is_backfilled():
+    """⓪c 老表已存在但归档表缺失：迁移补建 ``<table>_deleted``，remove 可用
+
+    改前：主表已存在走 diff 分支，addTable 分支不触发 → 不建归档表；remove 报
+    ``no such table: arch_notes_deleted``（删除功能不可用）。
+    """
+
+    async def body(store, db):
+        from py_store import schema as _sc
+        await db.execute("""CREATE TABLE arch_notes (
+            _id TEXT PRIMARY KEY, title TEXT,
+            created_at INTEGER, updated_at INTEGER, created_by TEXT, __present TEXT
+        )""")
+        await db.execute(
+            "INSERT INTO arch_notes (_id, title, created_at, updated_at, created_by, __present) "
+            "VALUES ('an_1', '待删', 1, 1, 'u1', ',_id,title,')")
+        await db.commit()
+        v1 = {
+            'name': 'ArchNote', 'collection': 'arch_notes', 'idPrefix': 'an',
+            'write': ['creator'],
+            'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+        }
+        _sc.register(v1)
+        r = await store.migrate(backend='sqlite', source='default',
+                                defs={'ArchNote': v1}, driver=db)
+        assert r['applied'] == [{'name': 'ArchNote', 'from': 0, 'to': 1, 'version': 1}], r
+        tables = await _tables(db)
+        assert 'arch_notes_deleted' in tables, f'归档表应补建（got {tables}）'
+        rd = await store.remove('ArchNote', {'_id': 'an_1'})
+        assert rd == {'deletedCount': 1, 'archivedCount': 1}, rd
+        assert (await _cols(db, 'arch_notes'))  # 表仍在
+        cur = await db.execute('SELECT count(*) FROM arch_notes')
+        assert (await cur.fetchone())[0] == 0
+        await cur.close()
+        cur = await db.execute('SELECT count(*) FROM arch_notes_deleted')
+        assert (await cur.fetchone())[0] == 1
+        await cur.close()
+
+    _run_in_sqlite(body)
+
+
 def test_declared_builtin_like_fields_are_not_stripped():
     """D1/D2 边界：用户显式声明 createdAt / createdBy ⇒ 不剔除（否则会误判新增列重复 ADD）"""
 
