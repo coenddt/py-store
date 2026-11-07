@@ -114,7 +114,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
         if out.get('triggers') and result:
             await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
                                executed=set())
-        return _call(lambda: get_core().apply_write_defaults(schema_name, result)) if result else None
+        return await _write_returns(schema_name, result) if result else None
 
     return await run_atomic(sources, _do)
 
@@ -216,10 +216,44 @@ async def remove(schema_name, condition, route_override=None, options=None):
 
 
 async def exists(schema_name, condition, route_override=None):
-    """判断是否存在"""
-    cmd = _call(lambda: get_core().plan_exists(schema_name, condition, route_override))
+    """判断是否存在（读权限可见性由 core 裁决）。
+
+    core 尚未导出带 ctx 的 ``plan_exists_with_ctx`` 时回落旧调用——此时会绕过
+    ``read: []`` / 字段白名单 / RBAC enforce（第二轮自检 P1，跨方向未修）；
+    绑定导出后本函数自动切换，调用方无需改动。
+    """
+    core = get_core()
+    fn = getattr(core, 'plan_exists_with_ctx', None)
+    if fn is not None:
+        cmd = _call(lambda: fn(schema_name, condition, _ctx(), route_override))
+    else:
+        cmd = _call(lambda: core.plan_exists(schema_name, condition, route_override))
     doc = await _exec(cmd)
     return doc is not None
+
+
+async def _write_returns(schema_name, doc):
+    """写路径结果回喂：以**落库 doc** 为基，只叠加计算列（对齐 core ``DefaultFill::Insert``）。
+
+    绑定尚未导出 computes-only 出口时，用 Return 版算出计算列、但只取 schema 声明的
+    ``computes`` 键，其余字段一律取落库 doc —— 否则显式 null 会被默认值替换，
+    同一行出现「落库 / returns / 读回」三种取值。
+    """
+    if not doc:
+        return doc
+    core = get_core()
+    fn = getattr(core, 'apply_write_computes', None)
+    if fn is not None:
+        return _call(lambda: fn(schema_name, doc))
+    filled = _call(lambda: core.apply_write_defaults(schema_name, doc))
+    keys = list(((_get_schema(schema_name) or {}).get('computes') or {}).keys())
+    if not keys:
+        return doc
+    out = dict(doc)
+    for k in keys:
+        if isinstance(filled, dict) and k in filled:
+            out[k] = filled[k]
+    return out
 
 
 async def count(schema_name, filter=None, route_override=None):

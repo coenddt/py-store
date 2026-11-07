@@ -28,9 +28,23 @@ from .schema import get_core
 
 _ctx: contextvars.ContextVar = contextvars.ContextVar('py_store_ctx', default=None)
 
+#: 可信标记：仅允许由 run_as_internal 等内部机制写入，禁止经请求上下文注入
+#: （core 读 ``ctx.internal`` 即放行，用户可控输入带上它 = 越权）。
+_TRUSTED_KEYS = ('internal',)
+
+
+def _assert_no_trusted_keys(ctx, where):
+    if not isinstance(ctx, dict):
+        return
+    for k in _TRUSTED_KEYS:
+        if k in ctx:
+            raise PermissionError(
+                f'{where}: ctx.{k} 属可信标记，禁止由请求上下文注入（内部调用请用 run_as_internal）')
+
 
 def set_context(ctx):
     """设置当前请求的上下文，每次请求开始时调用一次"""
+    _assert_no_trusted_keys(ctx, 'set_context')
     _ctx.set(ctx)
 
 
@@ -62,6 +76,7 @@ def scoped_context(ctx):
     供 AI 问数（``ask``）等把服务端构造的用户上下文显式注入执行面的场景——
     不用「set_context + finally 清空」写法（嵌套时误清外层，静默失守方向）。
     """
+    _assert_no_trusted_keys(ctx, 'scoped_context')
     token = _ctx.set(ctx)
     try:
         yield
