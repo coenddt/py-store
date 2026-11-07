@@ -147,3 +147,58 @@ def test_callback_bridge_fn_and_asyncfn():
 
     out = _run(_crud_mod.query(c['gql']))
     assert out == c['expected'], f"回调桥结果不一致: {c['name']}"
+
+
+# ─── 5. 批量注册 / 注销门面（插件 bootstrap 接入） ─────────────
+
+def _batch_defn(name):
+    return {
+        'name': name, 'collection': name.lower(), 'idPrefix': 'bx',
+        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+    }
+
+
+def _core_unregister():
+    from py_store.schema import get_core
+    fn = getattr(get_core(), 'unregister', None)
+    return fn if callable(fn) else None
+
+
+def test_register_batch_atomic_and_visible():
+    """批量注册一次落库：两张表同时可见；批内同名冲突 ⇒ 零副作用。"""
+    import uuid
+
+    from py_store import store as _store
+
+    u = uuid.uuid4().hex[:8]
+    a, b = f'BatchA{u}', f'BatchB{u}'
+    _store.register_batch([{'defn': _batch_defn(a), 'location': None},
+                           {'defn': _batch_defn(b)}])
+    assert _store.has(a) and _store.has(b), '批量注册后两张表都应可见'
+
+    c = f'BatchC{u}'
+    with pytest.raises(Exception):
+        _store.register_batch([{'defn': _batch_defn(c)}, {'defn': _batch_defn(c)}])
+    assert not _store.has(c), '批内冲突应零副作用（不得留下半注册）'
+
+
+def test_unregister_unknown_schema_is_idempotent():
+    """注销未知 schema 幂等成功（补偿清单可整份重放）。"""
+    if _core_unregister() is None:
+        pytest.skip('当前 rust-store-py 绑定未导出 Registry.unregister'
+                    '（core 源码已实现，待重建绑定后生效）')
+    from py_store import store as _store
+    _store.unregister('NotRegisteredAnywhere')
+    _store.unregister('NotRegisteredAnywhere')
+
+
+def test_unregister_without_binding_method_reports_explicitly(monkeypatch):
+    """绑定缺 unregister 时必须显式报错（不静默、不改 Host 镜像）。"""
+    from py_store import schema as _schema
+
+    class _NoUnregisterCore:
+        pass
+
+    monkeypatch.setattr(_schema, 'get_core', lambda: _NoUnregisterCore())
+    with pytest.raises(RuntimeError, match='未导出 Registry.unregister'):
+        _schema.unregister('AnySchema')

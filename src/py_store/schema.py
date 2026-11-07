@@ -246,13 +246,32 @@ def register_batch(items, ctx=None):
     落点**不进 defn**（定义文件零落点）。
     """
     get_core().register_batch(
-        [{'defn': _to_core_defn(it['defn']), 'location': it['location']} for it in items],
+        [{'defn': _to_core_defn(it['defn']),
+          'location': it.get('location') or _loc_of(it['defn'])} for it in items],
         ctx,
     )
     for it in items:
         defn = it.get('defn')
         if defn and not defn.get('replica'):
             _mirror(defn)
+
+
+def unregister(name):
+    """注销一个 schema（core 幂等：未知 schema 返回成功，回滚清单可整份重放）。
+
+    判决唯一在 core（``Registry::unregister``）：主项与其归档派生物
+    ``<Name>Deleted`` 一并清理，版本号不保留。Host 镜像同步移除同名项与
+    派生项，使 ``has`` / ``list`` 与 core 一致。
+    """
+    core = get_core()
+    fn = getattr(core, 'unregister', None)
+    if fn is None:
+        raise RuntimeError(
+            '当前 rust-store-py 绑定未导出 Registry.unregister（core 源码已实现，'
+            '需重建绑定后生效）；无法执行注销，未做任何 Host 镜像改动')
+    fn(name)
+    _schemas.pop(name, None)
+    _schemas.pop(f'{name}Deleted', None)
 
 
 def get(name):
