@@ -11,8 +11,16 @@ from .claim import claim, compare_and_set, renew_lease
 from .exec import ProfileViolation, _get_db, set_connections, set_db
 from .mutation import mutation, upsert
 from .query import query, query_federated, query_one, query_with_count
-from .write import (apply_write_computes, count, exists, insert, insert_many, remove,
-                    update, update_many)
+from .write import (
+                    apply_write_computes,
+                    count,
+                    exists,
+                    insert,
+                    insert_many,
+                    remove,
+                    update,
+                    update_many,
+)
 
 __all__ = [
     'ProfileViolation',

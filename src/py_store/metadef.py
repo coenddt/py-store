@@ -171,8 +171,8 @@ def _shortest_digits(value):
     ``repr`` 给出最短往返十进制位（与 JS ``String`` 同源同长），此处只拆位并去掉尾零；
     ``n`` 是「小数点在 digits 中的位置 + 1」的 JS 记法（ECMAScript ToString 的 ``n``）。
     """
-    mantissa, _, exp = repr(value).partition('e')
-    exp = int(exp) if exp else 0
+    mantissa, _, exp_s = repr(value).partition('e')
+    exp = int(exp_s) if exp_s else 0
     ip, _, fp = mantissa.partition('.')
     digits = (ip + fp).lstrip('0').rstrip('0')
     if ip.strip('0'):

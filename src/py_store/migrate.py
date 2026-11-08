@@ -201,7 +201,7 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
                                   '请按当前 DDL 手工补列或重建表后重跑迁移')
                         skipped.append({'name': name, 'reason': reason})
                         raise MigrationUnsupported(
-                            f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
+                            f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped) from e
                     _emit_feedback({
                         'type': 'warning',
                         'code': 'migrationAutoAddBuiltinColumns',
