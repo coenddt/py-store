@@ -14,8 +14,8 @@ authors:
 repository-code: "https://github.com/coenddt/py-store"
 url: "https://pypi.org/project/storepy/"
 license: MIT
-version: "5.3.2"
-date-released: "2026-10-25"
+version: "5.3.3"
+date-released: "2026-11-08"
 keywords:
   - multi-backend
   - mongodb
