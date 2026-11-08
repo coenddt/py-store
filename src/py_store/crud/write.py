@@ -114,9 +114,36 @@ async def update(schema_name, condition, data, options=None, route_override=None
         if out.get('triggers') and result:
             await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
                                executed=set())
-        return _call(lambda: get_core().apply_write_defaults(schema_name, result)) if result else None
+        return await _write_returns(schema_name, result) if result else None
 
     return await run_atomic(sources, _do)
+
+
+async def _write_returns(schema_name, doc):
+    """写路径结果回喂：**键序取 core 出口**，值以**落库 doc** 为基（对齐 ``DefaultFill::Insert``）。
+
+    绑定尚未导出 computes-only 出口时，用 Return 版（``apply_write_defaults``）算出完整
+    出口形状：键序按 core 出口（补齐本次未写、但有默认值的列，如 ``age: 0``），值以落库
+    doc 为基（显式 null / 已有值保持），计算列取 core 计算结果；落库 doc 中不在 core
+    出口内的键追加在后。与 node 宿主 ``writeReturns`` 逐字节同构。
+    """
+    if not doc:
+        return doc
+    core = get_core()
+    fn = getattr(core, 'apply_write_computes', None)
+    if fn is not None:
+        return _call(lambda: fn(schema_name, doc))
+    filled = _call(lambda: core.apply_write_defaults(schema_name, doc))
+    if not isinstance(filled, dict):
+        return doc
+    keys = list(((_get_schema(schema_name) or {}).get('computes') or {}).keys())
+    out = {}
+    for k in filled:
+        out[k] = filled[k] if k in keys else (doc[k] if k in doc else filled[k])
+    for k in doc:
+        if k not in out:
+            out[k] = doc[k]
+    return out
 
 
 async def _exec_with_pre(command):

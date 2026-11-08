@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 5.3.3 (2026-11-08)
+
+> **维护分支（`maintenance/5.x`）只收非破坏修复**：无破坏性变更、无迁移步骤，
+> 不改任何既有调用方的行为与签名，升级即用。破坏性项（`internal` 上下文收口、
+> `exists()` 带 ctx、`toNumber` 超界、`denyRead` 显式拒绝读等）一律只进主干 6.0.0。
 
 ### Added（新增宿主门面：批量注册 / 注销，供插件 bootstrap 接入）
 
@@ -42,6 +46,23 @@
   失效。**影响**：历史版本行记录的 hash 与新算 hash 不同，升级后首次 `migrate` 会对这些
   defn 重新走一次 diff（通常为空变更 `sqls: []`，新增一个版本行）；数据与列型不变。
   跨端对拍语料见 `tests/fixtures/stable-stringify-parity.json`（两仓同内容）。
+
+### Fixed（workflow 空名单回归「未配置」+ 迁移自动补内建列 + update 返回值补列）
+
+- **workflow 白名单空名单恢复「未配置」旧义**：`read` / `write` / `run` 写 `[]` 不再判为
+  「谁都不许」，按未配置放行（旧语义，避免升级即 403）；注册期发
+  `workflowWhitelistEmptyAsUnconfigured` 告警（含 workflow 名与字段名）。
+  要显式拒绝读，改用顶层 `denyRead: true`（布尔，注册期校验，非布尔报错），
+  与 core 的 `read: []` / `denyRead` 完全同口径。
+- **迁移自动补内建列**：老库缺内建列时先按 `ddl.implicit_column_ddl` 自动补齐，
+  再发 `migrationAutoAddBuiltinColumns` 告警（含表名与全部列）；只有补列失败才
+  `MigrationUnsupported` 中断。归属键列存在全 NULL 行时发
+  `migrationOwnerKeyNullRows` 告警后继续（不再阻断升级）。
+- **`update` 返回值补内建列**：返回文档的键集合取 core 出口（`_write_returns`），
+  值以落库 doc 为基、有 `apply_write_computes` 时优先计算列，读取期默认值不再缺键。
+- 测试：`tests/test_workflow.py`（空名单放行 + 告警 + `denyRead` 拒绝）、
+  `tests/test_migrate.py`（自动补列 + 归属键 NULL 告警）、
+  `tests/test_session.py`（update 返回补列）。
 
 ## 5.3.0 (2026-11-05)
 

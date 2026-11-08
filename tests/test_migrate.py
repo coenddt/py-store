@@ -243,3 +243,77 @@ def test_missing_archive_table_is_created_on_migrate():
         assert rd == {'deletedCount': 1, 'archivedCount': 1}
 
     _run_in_sqlite(body)
+
+
+def test_legacy_table_missing_builtin_columns_autofilled_with_warning():
+    """⓪ 老表缺内建列：迁移先自动补列再继续，并发出可定位告警
+
+    改前（上一版）：显式抛 MigrationUnsupported，老库必须人工补列才能迁。
+    改后：按当前 DDL 自动补列 → 老库照样迁得过去；补列动作必须告警（表名 + 全部缺失列），
+    只有补列失败才中断（不吞成静默通过）。
+    """
+    from py_store import feedback
+
+    seen = []
+    feedback.set_sink(seen.append)
+    try:
+        async def body(store, db):
+            await db.execute("""CREATE TABLE legacy_notes (
+                _id TEXT PRIMARY KEY, title TEXT, status TEXT,
+                createdAt INTEGER, updatedAt INTEGER
+            )""")
+            await db.commit()
+            defn = {
+                'name': 'LegacyNote', 'collection': 'legacy_notes', 'idPrefix': 'ln',
+                'read': ['creator'], 'write': ['creator'],
+                'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'},
+                           'status': {'type': 'string'}},
+            }
+            r = await store.migrate(backend='sqlite', source='default',
+                                    defs={'LegacyNote': defn}, driver=db)
+            assert r['applied'] == [{'name': 'LegacyNote', 'from': 0, 'to': 1, 'version': 1}], r
+            cols = await _cols(db, 'legacy_notes')
+            for col in ('__present', 'created_at', 'updated_at', 'created_by'):
+                assert col in cols, f'应自动补列 {col}（got {cols}）'
+
+        _run_in_sqlite(body)
+    finally:
+        feedback.set_sink(None)
+    hit = [e for e in seen if e.get('code') == 'migrationAutoAddBuiltinColumns']
+    assert hit, f'必须发出自动补列告警（got {seen}）'
+    assert 'legacy_notes' in hit[0]['message']
+    for col in ('__present', 'created_at', 'updated_at', 'created_by'):
+        assert col in hit[0]['message'], f'告警应列出 {col}（got {hit[0]["message"]}）'
+
+
+def test_owner_column_all_null_warns_and_continues():
+    """⓪b 归属键漏回填：created_by 全 NULL 时迁移继续，但必须告警（禁止静默全表不可见）"""
+    from py_store import feedback
+
+    seen = []
+    feedback.set_sink(seen.append)
+    try:
+        async def body(store, db):
+            await db.execute("""CREATE TABLE null_owner (
+                _id TEXT PRIMARY KEY, title TEXT,
+                created_at INTEGER, updated_at INTEGER, created_by TEXT, __present TEXT
+            )""")
+            await db.execute("INSERT INTO null_owner (_id, title, created_by) VALUES ('no_1', 'a', NULL)")
+            await db.commit()
+            v1 = {
+                'name': 'NullOwner', 'collection': 'null_owner', 'idPrefix': 'no',
+                'read': ['creator'], 'write': ['creator'],
+                'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+            }
+            r = await store.migrate(backend='sqlite', source='default',
+                                    defs={'NullOwner': v1}, driver=db)
+            assert r['applied'] == [{'name': 'NullOwner', 'from': 0, 'to': 1, 'version': 1}], r
+            rows = await _version_rows(db)
+            assert [x['version'] for x in rows if x['name'] == 'NullOwner'] == [1]
+
+        _run_in_sqlite(body)
+    finally:
+        feedback.set_sink(None)
+    hit = [e for e in seen if e.get('code') == 'migrationOwnerKeyNullRows']
+    assert hit, f'必须发出归属键 NULL 告警（got {seen}）'
+    assert 'null_owner' in hit[0]['message'] and 'created_by' in hit[0]['message']

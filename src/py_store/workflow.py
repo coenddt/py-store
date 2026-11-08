@@ -43,7 +43,7 @@ _OPS = ('query', 'mutation', 'fail')
 _WHEN_PARAM = {'exists': 'is', 'is': 'than', 'eq': 'than',
                'ne': 'than', 'lt': 'than', 'lte': 'than', 'gt': 'than', 'gte': 'than'}
 # defn 顶层字段白名单（§4.1）
-_TOP_FIELDS = frozenset({'name', 'steps', 'read', 'write', 'run', 'description'})
+_TOP_FIELDS = frozenset({'name', 'steps', 'read', 'write', 'run', 'denyRead', 'description'})
 # 步骤字段白名单（按 op；as 语义见 §4.2——query 必填，mutation 可选，fail 无）
 _STEP_FIELDS = {
     'query': frozenset({'op', 'as', 'gql', 'params', 'when'}),
@@ -116,17 +116,17 @@ class _StepFailure(Exception):
 # ─── 权限：三级白名单判定（§0.6；core permission.rs::evaluate 同构，doc=Missing 语义） ──
 
 def _evaluate(role_list, ctx):
-    """角色白名单评估（与 core evaluate 同构；新建 run 无属主文档 → creator 按 Missing 通过）"""
-    if not role_list:
-        # 空白名单 = 无权限配置 → 默认行为（ctx 缺失放行；internal 放行；guest 拒绝）
-        if ctx is None:
-            return True
-        if ctx.get('internal'):
-            return True
-        return 'guest' not in (ctx.get('roles') or [])
+    """角色白名单评估（与 core evaluate 同构；新建 run 无属主文档 → creator 按 Missing 通过）。
+
+    空名单（``[]``）按「未配置」处理 —— 旧定义照常放行，注册期已发
+    ``workflowWhitelistEmptyAsUnconfigured`` 告警；显式拒绝读的唯一入口是顶层
+    ``denyRead``（core 新增开关，口径以其为准）。
+    """
     if ctx is None:
         return True
     if ctx.get('internal'):
+        return True
+    if not role_list:
         return True
     roles = ctx.get('roles') or []
     if any(r in ('super_admin', 'admin') for r in roles):
@@ -224,6 +224,18 @@ def validate_defn(defn):
         if v is not None and (not isinstance(v, _LIST_TYPES)
                 or not all(isinstance(r, str) for r in v)):
             errors.append(f'{k} 白名单须为字符串数组')
+        elif v is not None and not v:
+            # 空名单按「未配置」放行（旧语义），必须可定位告警，禁止悄悄放宽
+            _emit_feedback({
+                'type': 'warning',
+                'code': 'workflowWhitelistEmptyAsUnconfigured',
+                'layer': 'workflow',
+                'message': (f'workflow "{defn.get("name")}" 的 {k} 是空名单，'
+                            '按「未配置」放行（旧语义，避免升级即 403）'),
+                'hint': '如需显式拒绝读，请改用顶层 denyRead',
+            })
+    if defn.get('denyRead') and not isinstance(defn.get('denyRead'), bool):
+        errors.append('denyRead 须为布尔值（显式拒绝读开关，口径以 core 为准）')
 
     steps = defn.get('steps')
     if not isinstance(steps, _LIST_TYPES) or not steps:
@@ -395,7 +407,7 @@ def get(name, ctx=None):
     if d is None:
         raise KeyError(f'Workflow 未注册: {name}')
     c = get_context() if ctx is None else ctx
-    if not _evaluate(d.get('read'), c):
+    if d.get('denyRead') is True or not _evaluate(d.get('read'), c):
         raise KeyError(f'Workflow 未注册: {name}')
     return d
 
@@ -403,7 +415,8 @@ def get(name, ctx=None):
 def list(ctx=None):
     """全部可见工作流名（read 白名单过滤）"""
     c = get_context() if ctx is None else ctx
-    return [d['name'] for d in _workflows.values() if _evaluate(d.get('read'), c)]
+    return [d['name'] for d in _workflows.values()
+            if d.get('denyRead') is not True and _evaluate(d.get('read'), c)]
 
 
 def clear_workflows():

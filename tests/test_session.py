@@ -384,6 +384,30 @@ def test_update_probe_and_write_same_tx(monkeypatch):
     assert state['committed'] == 0 and state['rolled_back'] == 1
 
 
+def test_update_returns_fills_defaulted_columns(monkeypatch):
+    """returns 补列：键序取 core 出口（补齐未写但有默认值的列），值以落库 doc 为基"""
+    from py_store.crud import write as write_mod
+
+    _sc.register({
+        'name': 'RetItem', 'collection': 'ret_items', 'timestamps': False,
+        'fields': {'v': {'type': 'string'}, 'n': {'type': 'int'}}, 'relations': {},
+    })
+
+    class _Stub:
+        @staticmethod
+        def apply_write_defaults(_name, doc):
+            return {'_id': doc['_id'], 'v': doc['v'], 'n': 0}
+
+    monkeypatch.setattr(write_mod, 'get_core', lambda: _Stub())
+
+    async def scenario():
+        return await write_mod._write_returns('RetItem', {'_id': 'r1', 'v': 'a'})
+
+    out = _run(scenario())
+    assert list(out) == ['_id', 'v', 'n'], out
+    assert out['n'] == 0, out
+
+
 # ─── #10 Mongo 源直通（不告警） ──────────────────────────────
 
 def test_session_mongo_passthrough():
