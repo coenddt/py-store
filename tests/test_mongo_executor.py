@@ -12,11 +12,14 @@
 """
 
 import asyncio
+from datetime import datetime, timezone
 from importlib import import_module
+
+from bson import ObjectId
 
 from py_store import feedback
 from py_store import schema as _sc
-from py_store.executors.mongo import _explicit_null, exec_mongo
+from py_store.executors.mongo import _explicit_null, _json_safe, exec_mongo
 
 # 注意：`py_store.crud` 把 `mutation` 函数重导出为同名属性，`from ... import mutation`
 # 拿到的是函数而非模块 —— 需用 importlib 取真实子模块才能 monkeypatch 内部 `get_core`。
@@ -95,6 +98,40 @@ def test_exec_mongo_aggregate_rewrites_match():
         'pipeline': [{'$match': {'f': None}}],
     }))
     assert db.coll.last_pipeline == [{'$match': {'f': {'$eq': None, '$exists': True}}}]
+
+
+# ─── 2b. BSON 归一（历史 ObjectId / BSON Date，批次20） ─────
+
+def test_json_safe_objectid_and_datetime():
+    oid = ObjectId()
+    dt = datetime(2026, 1, 2, 3, 4, 5, 678000, tzinfo=timezone.utc)
+    naive = datetime(2026, 1, 2, 3, 4, 5, 678000)  # 驱动默认读出 naive UTC
+    out = _json_safe({'_id': oid, 'updatedAt': dt, 'createdAt': naive,
+                      'ids': [oid], 's': 'x', 'n': 1, 'none': None})
+    assert out['_id'] == str(oid)
+    assert out['updatedAt'] == int(dt.timestamp() * 1000)
+    assert out['createdAt'] == out['updatedAt'], 'naive datetime 按 UTC 解析'
+    assert out['ids'] == [str(oid)]
+    assert out['s'] == 'x' and out['n'] == 1 and out['none'] is None
+
+
+def test_exec_mongo_normalizes_bson_result():
+    oid = ObjectId()
+    dt = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    class _BsonColl(_Coll):
+        def find(self, query=None, projection=None):
+            return _Cursor([{'_id': oid, 'updatedAt': dt}])
+
+    class _BsonDb:
+        coll = _BsonColl()
+
+        def __getitem__(self, name):
+            return self.coll
+
+    rows = _run(exec_mongo(_BsonDb(), {
+        'collection': 'c', 'kind': 'find', 'filter': {}}))
+    assert rows == [{'_id': str(oid), 'updatedAt': int(dt.timestamp() * 1000)}]
 
 
 # ─── 3. mutation_degraded 反馈发射 ──────────────────────────

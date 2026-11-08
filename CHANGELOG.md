@@ -1,6 +1,40 @@
 # Changelog
 
-## Unreleased
+## 6.0.0 (2026-11-08)
+
+### Breaking（主干破坏性变更，升级必读）
+
+- **`internal` 上下文收口**：`set_context(...)` 不再采信普通上下文里自带的 `internal` 标记
+  （用户可控输入带 `internal: true` 即越权）。内部 / 定时任务统一改用 `run_as_internal()`
+  上下文管理器。**迁移**：`set_context({"internal": True, ...})` → `with run_as_internal():`。
+- **`exists()` 改调带 ctx 的 `plan_exists_with_ctx`**：读权限统一由 core 裁决，宿主不再绕过
+  读白名单。**迁移**：若业务依赖「能 `exists` 但无 `read`」，需在 schema 的 `read` 名单里显式
+  放行；其余调用行为不变。
+- **workflow 白名单去硬编码**：`admin` / `super_admin` 不再自动放行，必须写进 `read` / `write` /
+  `run` 名单。**迁移**：把内部管理员角色显式加入对应名单。
+- **依赖下限抬升（发版时生效）**：`rust-store-py` 须含 core `273bc11` 及 `register_batch` /
+  `plan_exists_with_ctx`；旧绑定缺方法时显式报错（不静默降级）。
+
+### Migration（6.0.0 升级步骤）
+
+1. 升级 `rust-store-py` 绑定到随 6.0.0 发布的版本（旧绑定缺新 core 能力会显式报错）。
+2. 内部调用从 `set_context({"internal": True})` 改为 `with run_as_internal():`。
+3. 需要「拒绝读」的 workflow 定义改用顶层 `denyRead: true`；`read: []` 现在按「未配置」处理
+   （见下方 workflow 条目，非破坏）。
+4. 升级后首次 `store.migrate` 会因 hash 规范化对既有 defn 重跑一次 diff（通常为空变更，新增一条
+   版本行），数据与列型不变（见 hash 条目）。
+
+### Fixed（Mongo 读路径 BSON 标量归一）
+
+- **`executors/mongo.py` 新增 `_json_safe` 并在 `exec_mongo` 出口统一归一**：驱动读出的
+  `ObjectId`（历史/手工写入的 `_id`）与 `datetime`（BSON Date）不是 JSON 类型，直接交给
+  core 会在 `prepare_query` / `restore_sort_order` 抛「不支持的 Python 类型」。
+  - `ObjectId` → 24 位 hex 字符串（与字符串 `_id` 契约一致，可逆可回滚）；
+  - `datetime` → 毫秒时间戳 int（naive 视为 UTC，项目全链路时间口径为毫秒）；
+  - 其余 BSON 类型（Decimal128/Binary/Timestamp 等）原样返回，仍在 core 边界显式报错
+    （不静默改写未知语义）。
+- 覆盖全部读/写回执路径（find / aggregate / findOne / findOneAndUpdate 等），无需调用方改动；
+  rust-store core 不需要变更（归一是 Host 驱动适配层职责）。
 
 ### Added（新增宿主门面：批量注册 / 注销，供插件 bootstrap 接入）
 
@@ -32,6 +66,18 @@
   （白名单不含 `database`），旧写法注册期会被 reject（「含未知顶层键」）。落点仍由
   `_loc_of` 显式注入，行为不变；定义持久化不再携带落点键。
 
+### Fixed（迁移：老库缺内建列先自动补齐再告警，不再阻断升级）
+
+- 迁移 ⓪ 段由「缺内建列即 `MigrationUnsupported`」改为**先自动补列、再告警**：按
+  `ddl.implicit_column_ddl` 对物理表执行 `ALTER TABLE ... ADD COLUMN`，补齐
+  `created_at` / `updated_at` / `created_by` / `__present` 等缺失列后继续迁移；成功后发
+  `migrationAutoAddBuiltinColumns` 告警，消息含表名与全部补齐的列，可定位到具体表。
+- 只有补列语句本身失败时才中断并抛 `MigrationUnsupported`（附手工补列 / 重建表指引）——
+  真报错保留，不吞成静默通过。
+- ⓪b 归属键为 NULL 的存量行改为发 `migrationOwnerKeyNullRows` 告警后继续（老库照常迁过去，
+  不再整表阻断）。
+- **非破坏**：老库升级不再因缺内建列直接失败；行为变化仅是多两条可定位告警。
+
 ### Fixed（update 返回值与 node 宿主逐字节一致）
 
 - **写路径 returns 的键序与缺失列对齐 core 出口**：此前 `_write_returns` 在无计算列时
@@ -42,13 +88,15 @@
 - 取证：改前 `python -m pytest tests/test_parity_local.py -q` → `..F`，py 返回
   `{"_id":"pu_2","name":"Bob","score":15,"tag":"z"}`、node 返回含 `"age":0`；改后 `...`（3 passed）。
 
-### Changed（破坏性：workflow 定义级白名单口径与 core 对齐）
+### Changed（workflow 定义级白名单：空名单回归「未配置」，显式拒绝走 `denyRead`）
 
-- `workflow` 的 `read`/`write`/`run` 三级白名单改按 core `permission.rs::evaluate` 判定：
-  显式 `[]` = 显式不允许；`run: []` 不再回退 `write`；移除 `admin`/`super_admin`
-  硬编码与 `guest` 读拒特例（须写进名单才放行）；未配置（键缺省）仍为缺省 Open。
-  **升级提示**：此前依赖「空名单=放行」或「admin 自动放行」的 workflow 定义，需把
-  角色名显式写进名单。
+- `read` / `write` / `run` 的显式空名单（`[]`）按 core 口径回到「未配置」旧语义 —— 照常放行，
+  避免旧定义升级即 403。注册期发 `workflowWhitelistEmptyAsUnconfigured` 告警，告警含 workflow
+  名与被判空的字段，可定位到具体定义（不静默放宽）。
+- 显式拒绝读统一由顶层 `denyRead: true` 表达（core 新增开关，宿主透传，口径以 core 为准）；
+  `run: []` 按未配置回退 `write`。
+- **非破坏**：旧定义（含空名单）照常可用，仅新增一条告警。需要拒绝语义的定义把 `read: []`
+  改为 `denyRead: true` 即可。
 
 ### Changed（契约：defn hash 的数值序列化改为项目规范格式）
 

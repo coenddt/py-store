@@ -14,7 +14,36 @@ Mongo session 事务：本模块只提供原语 `open_transaction`（`start_sess
 降级声明）由 datasource 层负责。Mongo **无** `SAVEPOINT` 原语，故不提供保存点系列。
 """
 
+from datetime import datetime, timezone
+
+from bson import ObjectId
 from pymongo import ReturnDocument
+
+
+def _json_safe(value):
+    """驱动返回值 BSON 标量 → JSON 标量（core-py 绑定只接受 JSON 类型）
+
+    Host 适配层的边界归一（铁律 1/3：驱动 IO 归 Host）：Mongo 驱动读出的
+    ``ObjectId`` / ``datetime`` 不是 JSON 类型，直接交给 core 会抛
+    「不支持的 Python 类型」。此处在唯一 IO 边界统一转换：
+
+      - ``ObjectId`` → 24 位 hex 字符串（与 ``_id`` 的字符串契约一致，可逆可回滚）
+      - ``datetime`` → 毫秒时间戳 int（naive 视为 UTC；项目全链路时间口径为毫秒）
+
+    仅覆盖上述两类；其余 BSON 类型（Decimal128/Binary/Timestamp 等）原样返回，
+    在 core 边界继续显式报错——不静默改写未知语义（禁兜底）。
+    """
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int(value.timestamp() * 1000)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _explicit_null(v):
@@ -107,7 +136,17 @@ async def open_transaction(connection):
 
 
 async def exec_mongo(db, cmd, session=None):
-    """Command JSON → PyMongo 驱动调用（session 非 None 时全部操作携带该 session）"""
+    """Command JSON → PyMongo 驱动调用（session 非 None 时全部操作携带该 session）
+
+    返回前经 ``_json_safe`` 归一：所有读/写回执中的 BSON 标量（ObjectId / datetime）
+    在进入 core 之前转为 JSON 类型。历史数据与手工写入的 ObjectId ``_id``、BSON Date
+    字段由此可被正常读取，不再在 ``prepare_query`` 边界抛「不支持的 Python 类型」。
+    """
+    return _json_safe(await _exec_mongo_raw(db, cmd, session=session))
+
+
+async def _exec_mongo_raw(db, cmd, session=None):
+    """原生驱动调用（不做结果归一；唯一调用方是 ``exec_mongo`` 包装层）"""
     coll = db[cmd['collection']]
     kind = cmd['kind']
 

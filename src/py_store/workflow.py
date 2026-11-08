@@ -43,7 +43,7 @@ _OPS = ('query', 'mutation', 'fail')
 _WHEN_PARAM = {'exists': 'is', 'is': 'than', 'eq': 'than',
                'ne': 'than', 'lt': 'than', 'lte': 'than', 'gt': 'than', 'gte': 'than'}
 # defn 顶层字段白名单（§4.1）
-_TOP_FIELDS = frozenset({'name', 'steps', 'read', 'write', 'run', 'description'})
+_TOP_FIELDS = frozenset({'name', 'steps', 'read', 'write', 'run', 'denyRead', 'description'})
 # 步骤字段白名单（按 op；as 语义见 §4.2——query 必填，mutation 可选，fail 无）
 _STEP_FIELDS = {
     'query': frozenset({'op', 'as', 'gql', 'params', 'when'}),
@@ -120,8 +120,9 @@ def _evaluate(role_list, ctx):
 
     - ctx 缺失 / internal：直通放行（与 core 一致，先于名单判定）；
     - 未配置（``None``）：缺省姿态 Open → 放行（core 默认 ``UnconfiguredPolicy::Open``）；
-    - 显式空名单（``[]``）：显式声明「不允许任何角色」→ 拒绝（对齐 core 2026-11 变更：
-      ``[]`` 不再并入「未配置」，与 schema ``read``/``write`` 语义对称）；
+    - 显式空名单（``[]``）：按「未配置」处理 → 放行（旧语义；注册期已告警，
+      ``workflowWhitelistEmptyAsUnconfigured``），避免旧定义升级即 403；
+    - 显式拒绝唯一入口是 ``denyRead``（core 新增开关，口径以其为准）；
     - 无内置角色硬编码：``admin``/``super_admin`` 必须写进名单才放行（core 已清单化）。
     """
     if ctx is None:
@@ -131,7 +132,7 @@ def _evaluate(role_list, ctx):
     if role_list is None:
         return True
     if not role_list:
-        return False
+        return True
     roles = ctx.get('roles') or []
     effective = roles if roles else [ctx.get('role')]
     if any(r in role_list for r in effective):
@@ -140,12 +141,9 @@ def _evaluate(role_list, ctx):
 
 
 def _run_whitelist(defn):
-    """run 白名单：显式声明优先；缺省回退 write（§0.6）
-
-    显式 ``[]`` 不得回退为「未配置」——否则「显式不允许」会被 falsy 判断吞成放行。
-    """
+    """run 白名单：显式声明优先，否则回退 write（§0.6 旧语义：空名单按未配置处理）"""
     run = defn.get('run')
-    return run if run is not None else defn.get('write')
+    return run if run else defn.get('write')
 
 
 # ─── 校验器（注册即静态检查；纯函数，错误全量收集） ──────────────
@@ -230,6 +228,19 @@ def validate_defn(defn):
         if v is not None and (not isinstance(v, _LIST_TYPES)
                 or not all(isinstance(r, str) for r in v)):
             errors.append(f'{k} 白名单须为字符串数组')
+        elif isinstance(v, _LIST_TYPES) and not v:
+            # 空名单按「未配置」放行（旧语义），必须可定位告警，禁止悄悄放宽
+            _emit_feedback({
+                'type': 'warning',
+                'code': 'workflowWhitelistEmptyAsUnconfigured',
+                'layer': 'workflow',
+                'message': (f'workflow "{defn.get("name")}" 的 {k} 是空名单，'
+                            '按「未配置」放行（旧语义，避免升级即 403）'),
+                'hint': '如需显式拒绝读，请改用顶层 denyRead',
+            })
+    if reason := defn.get('denyRead'):
+        if not isinstance(reason, bool):
+            errors.append('denyRead 须为布尔值（显式拒绝读开关，口径以 core 为准）')
 
     steps = defn.get('steps')
     if not isinstance(steps, _LIST_TYPES) or not steps:
@@ -401,15 +412,16 @@ def get(name, ctx=None):
     if d is None:
         raise KeyError(f'Workflow 未注册: {name}')
     c = get_context() if ctx is None else ctx
-    if not _evaluate(d.get('read'), c):
+    if not _evaluate(d.get('read'), c) or d.get('denyRead') is True:
         raise KeyError(f'Workflow 未注册: {name}')
     return d
 
 
 def list(ctx=None):
-    """全部可见工作流名（read 白名单过滤）"""
+    """全部可见工作流名（read 白名单过滤；``denyRead`` 显式拒绝优先）"""
     c = get_context() if ctx is None else ctx
-    return [d['name'] for d in _workflows.values() if _evaluate(d.get('read'), c)]
+    return [d['name'] for d in _workflows.values()
+            if _evaluate(d.get('read'), c) and d.get('denyRead') is not True]
 
 
 def clear_workflows():

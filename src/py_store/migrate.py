@@ -29,6 +29,7 @@ from . import crud as _crud
 from . import ddl as _ddl
 from . import introspect as _introspect
 from .datasource import execute_raw, run_in_transaction
+from .feedback import emit as _emit_feedback
 from .metadef import (
     _MIGRATION,
     MetaDefError,
@@ -182,8 +183,8 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
             backend,
             old.get(name) or (old.get(defn.get('collection')) if defn.get('collection') else None), defn)
         # ⓪ 物理内建列完整性（仅 introspect 模式）：camelCase 时代的老表缺 ``__present`` /
-        # ``created_by`` / ``created_at`` 等内建列。迁移不隐式补列——补空列会让 creator 条件与
-        # 软删除过滤静默命中零行（全表不可见），故必须显式失败并给出补列指引。
+        # ``created_by`` / ``created_at`` 等内建列。先按当前 DDL 自动补列（老库照样迁得过去），
+        # 同时发出可定位告警；**只有补列失败才中断**（保留真报错，不吞成静默通过）。
         if probe is not None and old_defs is None:
             table = _ddl._pname(backend, defn.get('collection') or defn.get('name'))
             if any(t.get('name') == table for t in probe.get('tables') or []):
@@ -191,26 +192,41 @@ async def migrate(*, backend, source, defs, old_defs=None, driver=None,
                 missing = sorted({_ddl._pname(backend, n)
                                   for n in _ddl.builtin_field_names(defn, backend)} - have)
                 if missing:
-                    reason = (f'物理表 {table} 缺内建列 [{", ".join(missing)}]（旧表非当前 DDL 口径；'
-                              '迁移不隐式补列，需先补列并回填或按当前 DDL 重建表）')
-                    skipped.append({'name': name, 'reason': reason})
-                    raise MigrationUnsupported(
-                        f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
+                    try:
+                        for stmt in _ddl.implicit_column_ddl(backend, defn, have):
+                            await execute_raw(source, stmt, None, True)
+                    except Exception as e:
+                        reason = (f'物理表 {table} 缺内建列 [{", ".join(missing)}]，自动补列失败：{e}；'
+                                  '请按当前 DDL 手工补列或重建表后重跑迁移')
+                        skipped.append({'name': name, 'reason': reason})
+                        raise MigrationUnsupported(
+                            f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
+                    _emit_feedback({
+                        'type': 'warning',
+                        'code': 'migrationAutoAddBuiltinColumns',
+                        'layer': 'migrate',
+                        'message': (f'物理表 {table} 缺内建列 [{", ".join(missing)}]，'
+                                    '已按当前 DDL 自动补列后继续迁移'),
+                        'hint': '新补列的存量行为 NULL；归属键列需按业务回填后 creator 行控才可见',
+                    })
+                    have |= set(missing)
                 # ⓪b 归属键回填完整性（仅 introspect 模式）：列已存在但值为 NULL ⇒ creator
-                # 行控下这些行对非 bypass 用户永久不可见（静默全表不可见）。迁移层不猜业务
-                # 归属，只做 fail-fast 检测并要求先回填（允许被拦截、禁止静默失守）。
+                # 行控下这些行对非 bypass 用户不可见。迁移层不猜业务归属，放行但必须告警
+                # （允许通过、禁止静默失守）。
                 owner = _ddl._owner_field(defn)
                 if owner is not None:
                     col = _ddl._pname(backend, owner)
                     hit = await execute_raw(
                         source, f'SELECT 1 FROM {table} WHERE {col} IS NULL LIMIT 1', None, False)
                     if hit.get('rows'):
-                        reason = (f'物理表 {table} 的归属键 {col} 存在未回填行（值为 NULL）：'
-                                  'creator 行控下这些行对非 bypass 用户不可见（静默），'
-                                  '需先按业务回填后重跑迁移')
-                        skipped.append({'name': name, 'reason': reason})
-                        raise MigrationUnsupported(
-                            f'MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）', skipped)
+                        _emit_feedback({
+                            'type': 'warning',
+                            'code': 'migrationOwnerKeyNullRows',
+                            'layer': 'migrate',
+                            'message': (f'物理表 {table} 的归属键 {col} 存在 NULL 行：'
+                                        'creator 行控下这些行对非 bypass 用户不可见'),
+                            'hint': '请按业务回填归属键；迁移已继续，未静默拦截',
+                        })
         # ⑤ 幂等闸（先于 diff）：hash 相同 → skipped unchanged，不 diff（反推粒度不齐防误报）
         hash_ = _hash_of(defn)
         seg = {'tenant': '' if tenant is None else tenant,

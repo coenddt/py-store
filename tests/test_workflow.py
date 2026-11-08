@@ -102,7 +102,7 @@ _BAD_ERRORS = {
     'B7_when_shape': ['steps[0].when: lt 算子缺少右值键 "than"'],
     'B8_dunder_name': ['name "__mine" 以 __ 开头（前缀保留给内建 schema，禁止用于工作流）'],
     'B9_unknown_top': [
-        '未知顶层字段 "retry"（白名单: ["description","name","read","run","steps","write"]）'],
+        '未知顶层字段 "retry"（白名单: ["denyRead","description","name","read","run","steps","write"]）'],
     'B10_dup_as': ['steps[1]: as "inv" 重复（引用歧义，禁止覆盖）'],
     'B11_index_path': [
         'steps[0]: 占位符 {{input.items.0.id}} 路径非法'
@@ -249,10 +249,10 @@ _PERM_CASES = [
     # 未配置（None）= 缺省姿态 Open：core 清单化后不再对 guest 硬拒（对齐 permission.rs）
     (None, {'roles': ['guest']}, True),
     (None, {'roles': ['user']}, True),
-    # 显式空名单（[]）= 显式不允许；ctx 缺失 / internal 直通先于名单判定
+    # 显式空名单（[]）= 按「未配置」放行（旧语义，注册期告警）；ctx 缺失 / internal 直通先行
     ([], None, True),
-    ([], {'roles': ['user']}, False),
-    ([], {'roles': ['admin']}, False),
+    ([], {'roles': ['user']}, True),
+    ([], {'roles': ['admin']}, True),
     ([], {'internal': True}, True),
     (['ops'], None, True),
     (['ops'], {'roles': ['ops']}, True),
@@ -290,15 +290,49 @@ def test_builtin_schema_registered():
 
 
 def test_run_whitelist_fallback():
-    """run 缺省回退 write；显式 run 优先；显式 [] 不得回退（§0.6）"""
+    """run 缺省回退 write；空名单按「未配置」处理 → 同样回退 write（旧语义）"""
     assert wf._run_whitelist({'write': ['w1']}) == ['w1']
     assert wf._run_whitelist({'run': ['r1'], 'write': ['w1']}) == ['r1']
     assert wf._run_whitelist({}) is None
-    # 显式空名单 = 显式不允许：不得被 falsy 判断吞成「未配置」
-    assert wf._run_whitelist({'run': []}) == []
+    # 空名单 = 未配置（旧语义）：回退 write，而不是当作「显式不允许」
+    assert wf._run_whitelist({'run': []}) is None
     assert wf._run_whitelist({'write': []}) == []
-    assert wf._run_whitelist({'run': [], 'write': ['w1']}) == []
+    assert wf._run_whitelist({'run': [], 'write': ['w1']}) == ['w1']
     assert wf._run_whitelist({'run': None, 'write': []}) == []
+
+
+def test_empty_whitelist_warns_and_passes():
+    """空名单按「未配置」放行，但注册期必须告警且能定位到 workflow 名与字段"""
+    from py_store import feedback
+
+    seen = []
+    feedback.set_sink(seen.append)
+    try:
+        defn = dict(GOOD, name='wfEmpty', read=[], write=[], run=[])
+        assert wf.validate_defn(defn) == []
+    finally:
+        feedback.set_sink(None)
+    hit = [e for e in seen if e.get('code') == 'workflowWhitelistEmptyAsUnconfigured']
+    assert len(hit) == 3, hit
+    assert all('wfEmpty' in e['message'] for e in hit)
+    assert {k for e in hit for k in ('read', 'write', 'run') if k in e['message']} == {'read', 'write', 'run'}
+    assert wf._evaluate([], {'roles': ['user']}) is True
+    assert wf._run_whitelist({'run': [], 'write': ['w1']}) == ['w1']
+
+
+def test_deny_read_rejects():
+    """显式拒绝唯一入口：denyRead=true（空名单不再承担拒绝语义）"""
+    defn = dict(GOOD, name='wfDeny', denyRead=True)
+    assert wf.validate_defn(defn) == []
+    try:
+        wf.register(defn)
+        with pytest.raises(KeyError):
+            wf.get('wfDeny', {'roles': ['admin']})
+        assert wf.list({'roles': ['admin']}) == []
+    finally:
+        wf._workflows.pop('wfDeny', None)
+    assert wf.validate_defn(dict(GOOD, denyRead='yes')) == [
+        'denyRead 须为布尔值（显式拒绝读开关，口径以 core 为准）']
 
 
 # ─── parity 锚：run 文档与步骤迹形状（双宿主逐字段一致） ─────────
