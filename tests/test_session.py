@@ -367,7 +367,7 @@ def test_update_probe_and_write_same_tx(monkeypatch):
             return {'command': write_cmd}
 
         @staticmethod
-        def apply_write_defaults(_name, result):
+        def apply_write_computes(_name, result):
             return result
 
     stub = _ProbeStub()
@@ -384,28 +384,86 @@ def test_update_probe_and_write_same_tx(monkeypatch):
     assert state['committed'] == 0 and state['rolled_back'] == 1
 
 
-def test_update_returns_fills_defaulted_columns(monkeypatch):
-    """returns 补列：键序取 core 出口（补齐未写但有默认值的列），值以落库 doc 为基"""
-    from py_store.crud import write as write_mod
+def test_update_returns_applies_sync_computes(tmp_path):
+    """update 返回值叠同步 ``fn`` 计算列（入参 = AFTER 落库文档）"""
+    from py_store.local import connect
 
-    _sc.register({
-        'name': 'RetItem', 'collection': 'ret_items', 'timestamps': False,
-        'fields': {'v': {'type': 'string'}, 'n': {'type': 'int'}}, 'relations': {},
-    })
-
-    class _Stub:
-        @staticmethod
-        def apply_write_defaults(_name, doc):
-            return {'_id': doc['_id'], 'v': doc['v'], 'n': 0}
-
-    monkeypatch.setattr(write_mod, 'get_core', lambda: _Stub())
+    _sc.set_fn('ret_item_total', lambda it, ctx=None: (it.get('a') or 0) + (it.get('b') or 0))
+    defn = {
+        'name': 'RetItem', 'collection': 'ret_items', 'idPrefix': 'ri', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'a': {'type': 'int'}, 'b': {'type': 'int'}},
+        'computes': {'total': {'type': 'int', 'fn': True, 'depends': ['a', 'b']}},
+    }
+    _sc.register(defn)
+    _sc.assert_fns_covered([defn])
 
     async def scenario():
-        return await write_mod._write_returns('RetItem', {'_id': 'r1', 'v': 'a'})
+        await init(connect({'dir': str(tmp_path)}))
+        ins = await store.insert('RetItem', {'a': 1, 'b': 2})
+        return await store.update('RetItem', {'_id': ins['_id']}, {'a': 10})
 
     out = _run(scenario())
-    assert list(out) == ['_id', 'v', 'n'], out
-    assert out['n'] == 0, out
+    assert out['total'] == 12, out
+
+
+def test_update_returns_matches_reread(tmp_path):
+    """returns 与再次读回一致（不得出现「落库 / returns / 读回」三个值）"""
+    from py_store.local import connect
+
+    _sc.set_fn('ret_sum_total', lambda it, ctx=None: (it.get('a') or 0) + (it.get('b') or 0))
+    defn = {
+        'name': 'RetSum', 'collection': 'ret_sums', 'idPrefix': 'rs', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'a': {'type': 'int'}, 'b': {'type': 'int'},
+                   'n': {'type': 'int', 'default': 7}},
+        'computes': {'total': {'type': 'int', 'fn': True, 'depends': ['a', 'b']}},
+    }
+    _sc.register(defn)
+    _sc.assert_fns_covered([defn])
+
+    async def scenario():
+        await init(connect({'dir': str(tmp_path)}))
+        ins = await store.insert('RetSum', {'a': 2, 'b': 3})
+        out = await store.update('RetSum', {'_id': ins['_id']}, {'b': 5})
+        rows = await store.query('RetSum{ _id, a, b, n, total }')
+        return out, rows
+
+    out, rows = _run(scenario())
+    doc = rows[0]
+    assert out['total'] == doc['total'] == 7, (out, doc)
+    assert out['n'] == doc['n'] == 7, (out, doc)      # 默认值只在 insert 物化，不被重复填充
+
+
+def test_write_returns_passthrough_without_fn_declaration(tmp_path):
+    """无 ``fn`` 声明（也无计算列）⇒ 原样返回，不补默认值"""
+    from py_store.local import connect
+
+    _sc.register({
+        'name': 'RetPlain', 'collection': 'ret_plains', 'idPrefix': 'rp', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'v': {'type': 'string'},
+                   'n': {'type': 'int', 'default': 9}},
+    })
+
+    async def scenario():
+        await init(connect({'dir': str(tmp_path)}))
+        return await write_mod._write_returns('RetPlain', {'_id': 'rp1', 'v': 'a'})
+
+    out = _run(scenario())
+    assert out == {'_id': 'rp1', 'v': 'a'}, out            # 不补 n=9
+
+
+def test_write_returns_missing_fn_impl_raises():
+    """声明 ``fn: true`` 却未注册实现 ⇒ 显式报错（不静默跳过）"""
+    _sc.register({
+        'name': 'RetNoFn', 'collection': 'ret_nofns', 'idPrefix': 'rn', 'timestamps': False,
+        'fields': {'_id': {'type': 'string'}, 'a': {'type': 'int'}},
+        'computes': {'orphan': {'type': 'int', 'fn': True, 'depends': ['a']}},
+    })
+
+    async def scenario():
+        return await write_mod._write_returns('RetNoFn', {'_id': 'rn1', 'a': 1})
+
+    with pytest.raises(RuntimeError, match='未注册同步实现'):
+        _run(scenario())
 
 
 # ─── #10 Mongo 源直通（不告警） ──────────────────────────────
