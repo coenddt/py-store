@@ -158,12 +158,6 @@ def _batch_defn(name):
     }
 
 
-def _core_unregister():
-    from py_store.schema import get_core
-    fn = getattr(get_core(), 'unregister', None)
-    return fn if callable(fn) else None
-
-
 def test_register_batch_atomic_and_visible():
     """批量注册一次落库：两张表同时可见；批内同名冲突 ⇒ 零副作用。"""
     import uuid
@@ -182,14 +176,24 @@ def test_register_batch_atomic_and_visible():
     assert not _store.has(c), '批内冲突应零副作用（不得留下半注册）'
 
 
-def test_unregister_unknown_schema_is_idempotent():
-    """注销未知 schema 幂等成功（补偿清单可整份重放）。"""
-    if _core_unregister() is None:
-        pytest.skip('当前 rust-store-py 绑定未导出 Registry.unregister'
-                    '（core 源码已实现，待重建绑定后生效）')
+def test_unregister_real_schema_removes_derived_archive():
+    """注册 → 注销：主项与派生归档（``<Name>Deleted``）一并移除；重复 / 未知注销幂等。"""
+    import uuid
+
     from py_store import store as _store
-    _store.unregister('NotRegisteredAnywhere')
-    _store.unregister('NotRegisteredAnywhere')
+
+    u = uuid.uuid4().hex[:8]
+    a = f'UndoA{u}'
+    _store.register_batch([{'defn': _batch_defn(a)}])
+    assert _store.has(a), '注册后主项应可见'
+    assert _store.has(f'{a}Deleted'), '注册期派生的归档表应可见'
+
+    _store.unregister(a)
+    assert not _store.has(a), '注销后主项应从 Host 镜像移除'
+    assert not _store.has(f'{a}Deleted'), '派生归档应一并清理'
+
+    _store.unregister(a)                       # 重复注销幂等
+    _store.unregister('NotRegisteredAnywhere')  # 未知 schema 幂等（补偿清单可整份重放）
 
 
 def test_unregister_without_binding_method_reports_explicitly(monkeypatch):
