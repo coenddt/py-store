@@ -467,6 +467,9 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
 - 角色判决统一由 core 执行：命中豁免清单（`set_exempt_roles`，默认为空——无 `admin`/`super_admin` 硬编码）或 `{"internal": true}` 上下文放行；其他角色按 schema 级与字段级 `read`/`write` 白名单检查；`guest` 永远不能写。
 - 白名单的空值语义：**不配置（`None`/缺省）= 未配置，不限制**；**空名单 `[]` 同样按「未配置」处理**（5.x 旧义，升级不会因空名单立刻 403）。空名单会在注册期发 `workflowWhitelistEmptyAsUnconfigured` 类告警（workflow 层），提醒你显式表达意图。
 - **拒绝读必须显式**：要表达「谁都不许读」，用顶层 `denyRead: true`（布尔，缺省 `false`，非布尔注册期报错）。它优先于一切角色（含 `internal` 与豁免清单），`ctx=None` 的系统内部调用仍保持 fail-open；与 `read: []` 并存时 `denyRead` 生效。
+- `creator` 是伪角色，由 `doc.<归属键> == ctx.userId` 解析（归属键由 schema `ownerKey` 声明，缺省 `createdBy`，可自定义如 `"creatorId"`；不得为 `"_id"` —— 主键由系统管理，注册期即拒绝）；授予它的 schema 会自动在查询上注入属主条件，并在 update/remove 时做归属校验。
+- 未设置上下文 → 权限检查禁用（向后兼容）。
+- 拒绝访问会抛出 `store.PermissionError`（带 `status = 403`）。
 
 ```python
 store.register({
@@ -475,9 +478,6 @@ store.register({
     "denyRead": True,          # 显式拒绝读：query / count / exists / lookup 全部读路径统一拒绝
 })
 ```
-- `creator` 是伪角色，由 `doc.<归属键> == ctx.userId` 解析（归属键由 schema `ownerKey` 声明，缺省 `createdBy`，可自定义如 `"creatorId"`；不得为 `"_id"` —— 主键由系统管理，注册期即拒绝）；授予它的 schema 会自动在查询上注入属主条件，并在 update/remove 时做归属校验。
-- 未设置上下文 → 权限检查禁用（向后兼容）。
-- 拒绝访问会抛出 `store.PermissionError`（带 `status = 403`）。
 
 ### 失败安全模式（可选启用）
 
