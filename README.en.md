@@ -32,7 +32,7 @@ A model is a JSON dict: `fields`, `relations`, `computes`, `indexes`, `read` / `
 | Writes | `insert`, `insert_many`, `update`, `update_many`, `upsert`, `mutation`, `remove`; defaults; triggers |
 | Access | schema- and field-level whitelists, `creator` ownership, owner-condition injection, fail-secure context |
 | Runtime | MongoDB, MySQL, PostgreSQL, SQLite, local disk; transactions, sessions, opt-in raw SQL / native pipeline |
-| Not here | model classes, a general migration engine, distributed transactions, a raw-pipeline escape hatch |
+| Not here | model classes, a general-purpose migration engine (only an additive whitelist), distributed transactions, a raw-pipeline escape hatch |
 
 ## How it works
 
@@ -145,6 +145,12 @@ asyncio.run(main())
 ```
 
 Output: `draft u1 2 ['Ownership', 'Traits']`. The status came from the schema default, `createdBy` from the context, `lessonCount` from the pushed-down relation aggregate, and the two lessons from the nested relation — all in one query.
+
+Registration facades for bootstrap plugins: `store.register_batch([{"defn": d1}, {"defn": d2}])` registers in one atomic step (any failure leaves zero side effects; `location` defaults to what the definition implies), and `store.unregister("Lesson")` is idempotent (unknown names succeed) and also clears the derived `LessonDeleted` archive metadata.
+
+Blank permission lists mean *unconfigured*, not *nobody*: `read: []` behaves exactly like an omitted `read` (5.x semantics), and workflow white lists emit a `workflowWhitelistEmptyAsUnconfigured` warning at registration time. To deny reads you must say so explicitly with the top-level boolean `denyRead: true` (validated at registration, non-boolean is an error); it wins over every role and exemption list, while `ctx=None` internal calls stay fail-open.
+
+`store.migrate(backend=..., source=..., defs=..., driver=...)` executes only a whitelist of non-destructive changes (add table / column / index, widen types) inside per-table transactions and records a version row; anything outside that whitelist (dropping a column, narrowing a type) raises `MigrationUnsupported` with a step-by-step recommendation instead of being executed or rolled back silently. When a legacy table is missing built-in columns, they are added first and a `migrationAutoAddBuiltinColumns` warning is emitted; only a failed column add aborts the upgrade.
 
 To run the full eight-model matrix, use the repo's scenario harness. MongoDB runs first and records the oracle; the SQL backends then replay it row by row:
 

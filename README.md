@@ -115,7 +115,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 
 把边界说清楚能帮你省时间：
 
-- **你想要带迁移引擎的完整 ORM（Alembic、Django migrations）。** `py-store` 是*数据层*，不是迁移工具。它能**读取** SQL 后端的物理结构（`sync_schema` → 内省），但从不回写 DDL。另有一个可选的 `generate_ddl()`，可从已注册 schema 渲染出 `CREATE TABLE` 文本 —— 纯文本，绝不连接或写入数据库。
+- **你想要带完整版本图的 ORM 迁移（Alembic、Django migrations）。** `py-store` 是*数据层*：提供白名单制的**声明式迁移**（`store.migrate`：加表 / 加列 / 加索引 / 类型放宽，逐表事务 + 版本行），但删列、改窄类型等破坏性变更仍交给你的迁移工具，它只给分步建议、绝不静默执行。它也能**读取** SQL 后端的物理结构（`sync_schema` → 内省）；只想拿建表文本时用 `generate_ddl()` —— 纯文本，绝不连接或写入数据库。
 - **你想要以 Pydantic 模型为中心的 ORM。** 这里的 schema 是运行时 JSON dict，带来的是跨语言一致性（同一 schema 可在 Python 与 Node.js 中运行），而非 Pydantic 类型校验。
 - **你只用一种数据库，且很少做关联。** 直接用驱动（或单库 ODM/ORM）会更简单。
 - **你需要裸聚合的逃生通道。** 用户 `$pipeline` 透传已移除 —— 含 `$pipeline` 的 GQL 一律在解析期显式失败。原生逃生口只保留显式入口：`store.aggregate()`（严格 **opt-in**，默认关闭，需 `init(connections, {"allowNativeAggregate": True})` 显式开启）、`execute_native()`（Mongo 原生聚合）与 `execute_raw()`（原生 SQL）。日常查询请使用 `$condition` / `$group` / `$having` / relations；任何无法被安全翻译的东西都会**显式失败**，而不是静默处理。
@@ -133,7 +133,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 | 内置角色 / 字段级 RBAC + 属主注入 | ✅ | ➖ | ➖ | ➖ | ➖ | ➖（权限在应用层） |
 | 读取时计算列（同步 / 异步 / 关系聚合） | ✅ | ➖（hybrid property） | ➖ | ➖ | ➖ | ➖ |
 | 自动开通软删除归档表 | ✅ | ➖ | ➖ | ➖ | ➖ | ➖ |
-| 迁移 / DDL 引擎 | ➖（内省只读；可选 `generate_ddl` 文本） | ✅（Alembic） | ➖ | ✅（Aerich） | ✅（Alembic） | ✅ |
+| 迁移 / DDL 引擎 | ✅（白名单制声明式迁移 + `generate_ddl` 文本） | ✅（Alembic） | ➖ | ✅（Aerich） | ✅（Alembic） | ✅ |
 | 框架耦合 | 无（asyncio） | 无 | 无 | 无 | 无 | Django |
 | Python 与 Node 共享原生核心 | ✅（Rust `rust-store`） | ➖ | ➖ | ➖ | ➖ | ➖ |
 
@@ -143,7 +143,7 @@ MongoDB 是*主方言*：查询用 MongoDB 风格的 GQL 编写，其余三个�
 
 - **对比 SQLAlchemy / SQLModel / Django ORM** —— 它们都只支持 SQL 并以模型类为中心：不面向 MongoDB，也都不提供 schema 声明的角色/字段级访问控制或读取时计算列。`py-store` 把同一段 GQL 编译为原生 MongoDB 聚合或参数化 SQL。
 - **对比 Beanie / Motor** —— 仅支持 MongoDB。`py-store` 采用相同的 MongoDB 风格查询写法，但同一条查询也能在 MySQL、SQLite 与 PostgreSQL 上运行。
-- **对比 Tortoise ORM / pyloquent** —— 基于 SQL 后端的异步 Python ORM，使用模型类，并且（就 Tortoise 而言）带有迁移工具。`py-store` 没有迁移引擎 —— 内省只读取物理结构，`generate_ddl()` 也只*渲染* `CREATE TABLE` 文本而不触碰数据库 —— 且把模型描述为普通 dict，这恰恰是 schema 能移植到 Node.js 宿主的原因。
+- **对比 Tortoise ORM / pyloquent** —— 基于 SQL 后端的异步 Python ORM，使用模型类，并且（就 Tortoise 而言）带有迁移工具。`py-store` 只做白名单制非破坏迁移（加表 / 加列 / 加索引 / 类型放宽），不做 Alembic 式版本图与破坏性变更；内省只读取物理结构，`generate_ddl()` 也只*渲染* `CREATE TABLE` 文本而不触碰数据库 —— 且把模型描述为普通 dict，这恰恰是 schema 能移植到 Node.js 宿主的原因。
 - **对比 `nodejs-store`** —— 同一套引擎、同一套 GQL，只不过用 JavaScript。选择与你服务相匹配的宿主即可；schema 与查询语义可互换。
 
 一句话：想要**模型类、Pydantic 校验和迁移**就用 ORM；想要**一份运行时 schema + 一套横跨 MongoDB 与 SQL 的查询方言**，并且内置 RBAC 与计算列，就用 `py-store`。
@@ -335,6 +335,10 @@ await store.update_many("Post", {"type": t}, {"status": "live"})
 r      = await store.remove("Post", {"_id": pid})    # 先归档到 <collection>_deleted
 await store.mutation("Post", {...})                  # 智能 upsert + 递归关系子文档
 await store.upsert("Post", {"code": "A1"}, {...})    # 显式条件 upsert（不做关系处理）
+
+# 注册门面：批量 / 注销（供插件 bootstrap 的接入与回滚）
+store.register_batch([{"defn": d1}, {"defn": d2}])   # 落点缺省时按 defn 推导；原子语义由 core 定
+store.unregister("Post")                             # 幂等：未知 schema 也成功；连带清理 PostDeleted
 ```
 
 说明：
@@ -396,6 +400,24 @@ sql = store.generate_ddl("postgres", ["Course", "CourseDeleted"])
 - 不生成 `CREATE INDEX` —— SQL 后端仅把索引保留为元数据。
 - MySQL 的 `__present` 为 `VARCHAR(255)`；若某 schema 的 present 令牌串会超限，则发出 `ddlPresentOverflow` 反馈事件，而非静默失败。
 
+### 声明式迁移（`store.migrate`）
+
+`store.migrate()` 是 DDL 生成之外的**可执行**迁移入口：对比「已注册 def」与数据库内省结果，
+产出并执行白名单内的变更（加表 / 加列 / 加索引 / 类型放宽）；白名单外显式抛
+`MigrationUnsupported`，绝不静默跳过。幂等闸按 defn hash 记录版本行，无变更时不重复执行。
+
+```python
+report = await store.migrate(
+    backend="postgres", source="default", defs={"Post": post_defn}, driver=pg_pool,
+)
+print(report["applied"], report["skipped"])   # 已生效的表 / 跳过原因（如 unchanged）
+```
+
+老库升级到新版本时，缺的内建列（`__present`、`createdAt` / `updatedAt`、归属键）会**先自动补列**
+再发出 `migrationAutoAddBuiltinColumns` 告警（含表名与列名清单）；归属键列存在全 NULL 行时发出
+`migrationOwnerKeyNullRows` 告警后继续。只有补列本身失败才中断（`MigrationUnsupported`），
+不会因为「缺列」阻断整个升级。
+
 ## 多数据源连接
 
 每个 schema 通过 `(source, database, schema（仅 PostgreSQL）, collection)` 定位 —— 该元组在注册表中必须全局唯一（重复注册会报错，而不是静默错误路由）。定义文件本身不携带落点；`source` / `database` / `schema` 由定义目录结构 + 连接配置解析。
@@ -443,7 +465,16 @@ await store.run_as_internal(lambda: store.remove("Post", {"_id": pid}))
 ```
 
 - 角色判决统一由 core 执行：命中豁免清单（`set_exempt_roles`，默认为空——无 `admin`/`super_admin` 硬编码）或 `{"internal": true}` 上下文放行；其他角色按 schema 级与字段级 `read`/`write` 白名单检查；`guest` 永远不能写。
-- 白名单的空值语义：**不配置（`None`/缺省）= 缺省 Open**；**显式 `[]` = 显式不允许**（不命中任何角色，只有豁免清单与 internal 直通）。
+- 白名单的空值语义：**不配置（`None`/缺省）= 未配置，不限制**；**空名单 `[]` 同样按「未配置」处理**（5.x 旧义，升级不会因空名单立刻 403）。空名单会在注册期发 `workflowWhitelistEmptyAsUnconfigured` 类告警（workflow 层），提醒你显式表达意图。
+- **拒绝读必须显式**：要表达「谁都不许读」，用顶层 `denyRead: true`（布尔，缺省 `false`，非布尔注册期报错）。它优先于一切角色（含 `internal` 与豁免清单），`ctx=None` 的系统内部调用仍保持 fail-open；与 `read: []` 并存时 `denyRead` 生效。
+
+```python
+store.register({
+    "name": "AuditLog",
+    "fields": {"action": "string"},
+    "denyRead": True,          # 显式拒绝读：query / count / exists / lookup 全部读路径统一拒绝
+})
+```
 - `creator` 是伪角色，由 `doc.<归属键> == ctx.userId` 解析（归属键由 schema `ownerKey` 声明，缺省 `createdBy`，可自定义如 `"creatorId"`；不得为 `"_id"` —— 主键由系统管理，注册期即拒绝）；授予它的 schema 会自动在查询上注入属主条件，并在 update/remove 时做归属校验。
 - 未设置上下文 → 权限检查禁用（向后兼容）。
 - 拒绝访问会抛出 `store.PermissionError`（带 `status = 403`）。
@@ -1298,7 +1329,7 @@ async def delete_article(article_id: str, user: dict = Depends(current_user)):
 可以。通过 `(source, database, schema, collection)` 定位 schema，并按请求传入 `{"source", "database", "schema"}` 路由覆盖。只把 `route_override` 当作受信的服务端输入。
 
 **它会执行迁移吗？**
-不会。`sync_schema()` 只通过内省*读取*物理结构（introspect → 合并 overlay → 注册）。schema 变更 / DDL 是你迁移工具的职责（如 Alembic）。若想要一个起点，`store.generate_ddl(backend)` 可从已注册 schema 渲染 `CREATE TABLE` 文本 —— 但它只是纯文本生成：绝不执行、也不写入 DDL。
+会，但只执行白名单内的**非破坏**变更。`store.migrate(backend=..., source=..., defs=..., driver=...)` 对比内省结构与 def，执行加表 / 加列 / 加索引 / 类型放宽，并在 `__schemaMigration` 写入版本行；白名单外（删列、改窄类型等）显式抛 `MigrationUnsupported` 并给分步建议，绝不静默执行或自动回滚。`sync_schema()` 仍只*读取*物理结构（introspect → 合并 overlay → 注册）；只想拿 DDL 文本时用 `store.generate_ddl(backend)`（纯文本，绝不执行）。老库缺内建列会先自动补列再告警，不阻断升级。
 
 **能在不执行的情况下查看生成的查询吗？**
 可以 —— `store.build_pipeline(gql, params)` 返回编译后的计划，不执行、也不应用权限/计算列。
