@@ -130,6 +130,11 @@ class Store:
                      route_override: dict | None = None) -> dict[str, Any] | None:
         return await crud.update(schema_name, condition, data, options, route_override)
 
+    async def apply_write_computes(self, schema_name: str,
+                                   doc: dict[str, Any]) -> dict[str, Any]:
+        """写后仅叠同步 ``fn`` 计算列（入参须为 ``returnDocument: AFTER`` 落库文档；不补默认值）"""
+        return await crud.apply_write_computes(schema_name, doc)
+
     async def update_many(self, schema_name: str, condition: dict, data: dict,
                           route_override: dict | None = None) -> dict[str, Any]:
         return await crud.update_many(schema_name, condition, data, route_override)
