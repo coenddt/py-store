@@ -228,30 +228,15 @@ async def exists(schema_name, condition, route_override=None):
 
 
 async def _write_returns(schema_name, doc):
-    """写路径结果回喂：**键序取 core 出口**，值以**落库 doc** 为基（对齐 ``DefaultFill::Insert``）。
+    """写路径结果回喂：只叠 **同步计算列**（``fn``），**不补任何默认值**。
 
-    绑定尚未导出 computes-only 出口时，用 Return 版（``apply_write_defaults``）算出完整
-    出口形状：键序按 core 出口（补齐本次未写、但有默认值的列，如 ``age: 0``），值以落库
-    doc 为基（显式 null / 已有值保持），计算列取 core 计算结果；落库 doc 中不在 core
-    出口内的键追加在后。与 node 宿主 ``writeReturns`` 逐字节同构。
+    入参必须是 ``returnDocument: AFTER`` 的落库文档。默认值只在 insert 物化一次，
+    重复填充会让「落库 / returns / 读回」出现不同取值（D1）。无 ``fn`` 声明原样返回；
+    声明 ``fn: true`` 却未注册实现，由 core 显式报错（不静默跳过）。
     """
     if not doc:
         return doc
-    core = get_core()
-    fn = getattr(core, 'apply_write_computes', None)
-    if fn is not None:
-        return _call(lambda: fn(schema_name, doc))
-    filled = _call(lambda: core.apply_write_defaults(schema_name, doc))
-    if not isinstance(filled, dict):
-        return doc
-    keys = list(((_get_schema(schema_name) or {}).get('computes') or {}).keys())
-    out = {}
-    for k in filled:
-        out[k] = filled[k] if k in keys else (doc[k] if k in doc else filled[k])
-    for k in doc:
-        if k not in out:
-            out[k] = doc[k]
-    return out
+    return _call(lambda: get_core().apply_write_computes(schema_name, doc))
 
 
 async def count(schema_name, filter=None, route_override=None):
