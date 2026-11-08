@@ -171,7 +171,7 @@ def test_register_batch_atomic_and_visible():
     assert _store.has(a) and _store.has(b), '批量注册后两张表都应可见'
 
     c = f'BatchC{u}'
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         _store.register_batch([{'defn': _batch_defn(c)}, {'defn': _batch_defn(c)}])
     assert not _store.has(c), '批内冲突应零副作用（不得留下半注册）'
 
@@ -204,5 +204,5 @@ def test_unregister_without_binding_method_reports_explicitly(monkeypatch):
         pass
 
     monkeypatch.setattr(_schema, 'get_core', lambda: _NoUnregisterCore())
-    with pytest.raises(RuntimeError, match='未导出 Registry.unregister'):
+    with pytest.raises(RuntimeError, match=r'未导出 Registry\.unregister'):
         _schema.unregister('AnySchema')
