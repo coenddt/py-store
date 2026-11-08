@@ -52,8 +52,10 @@ def _run_in_sqlite(body):
                 'nick': {'type': 'string', 'default': 'anon'},
             },
         })
-        # E1 用：read: [] 显式拒绝 / RBAC 无授权 / 有权通过 / 字段白名单
-        _sc.register({'name': 'R2Deny', 'collection': 'r2_deny', 'timestamps': False, 'read': [],
+        # E1 用：denyRead 显式拒绝 / RBAC 无授权 / 有权通过 / 字段白名单
+        # 6.0.0 语义：``read: []`` 表示「未配置」（不限制），显式拒绝读必须写 ``denyRead: True``。
+        _sc.register({'name': 'R2Deny', 'collection': 'r2_deny', 'timestamps': False,
+                      'denyRead': True,
                       'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}}})
         _sc.register({'name': 'R2Rbac', 'collection': 'r2_rbac', 'timestamps': False,
                       'read': ['viewer'],
@@ -95,7 +97,7 @@ def test_update_returns_preserve_explicit_null():
     _run_in_sqlite(body)
 
 
-def test_exists_read_empty_denied():
+def test_exists_deny_read_denied():
     async def body(store, db):
         perm.set_context({'userId': 'u1', 'roles': ['viewer']})
         try:
