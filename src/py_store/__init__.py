@@ -147,6 +147,11 @@ class Store:
                     route_override: dict | None = None) -> int:
         return await crud.count(schema_name, filter, route_override)
 
+    async def apply_write_computes(self, schema_name: str,
+                                   doc: dict[str, Any]) -> dict[str, Any]:
+        """写后仅叠同步 ``fn`` 计算列（入参须为 ``returnDocument: AFTER`` 落库文档；不补默认值）"""
+        return await crud.apply_write_computes(schema_name, doc)
+
     async def mutation(self, schema_name: str, data: dict | list[dict],
                        route_override: dict | None = None) -> Any:
         return await crud.mutation(schema_name, data, route_override)

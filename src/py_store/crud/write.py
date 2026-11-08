@@ -114,12 +114,12 @@ async def update(schema_name, condition, data, options=None, route_override=None
         if out.get('triggers') and result:
             await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
                                executed=set())
-        return await _write_returns(schema_name, result) if result else None
+        return await apply_write_computes(schema_name, result) if result else None
 
     return await run_atomic(sources, _do)
 
 
-async def _write_returns(schema_name, doc):
+async def apply_write_computes(schema_name, doc):
     """写路径结果回喂：只叠 **同步计算列**（``fn``），**不补任何默认值**。
 
     入参必须是 ``returnDocument: AFTER`` 的落库文档。默认值只在 insert 物化一次，

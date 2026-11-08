@@ -445,7 +445,7 @@ def test_write_returns_passthrough_without_fn_declaration(tmp_path):
 
     async def scenario():
         await init(connect({'dir': str(tmp_path)}))
-        return await write_mod._write_returns('RetPlain', {'_id': 'rp1', 'v': 'a'})
+        return await store.apply_write_computes('RetPlain', {'_id': 'rp1', 'v': 'a'})
 
     out = _run(scenario())
     assert out == {'_id': 'rp1', 'v': 'a'}, out            # 不补 n=9
@@ -460,7 +460,7 @@ def test_write_returns_missing_fn_impl_raises():
     })
 
     async def scenario():
-        return await write_mod._write_returns('RetNoFn', {'_id': 'rn1', 'a': 1})
+        return await store.apply_write_computes('RetNoFn', {'_id': 'rn1', 'a': 1})
 
     with pytest.raises(RuntimeError, match='未注册同步实现'):
         _run(scenario())

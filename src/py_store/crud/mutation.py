@@ -13,6 +13,7 @@ from .exec import (
     run_atomic,
 )
 from .id import _generate_id, _new_id_pool
+from .write import apply_write_computes
 
 
 async def _mutation_one(schema_name, data, now, route_override=None):
@@ -36,7 +37,7 @@ async def _mutation_one(schema_name, data, now, route_override=None):
 
         if not root_result:
             return None
-        return _call(lambda: get_core().apply_write_defaults(schema_name, root_result))
+        return await apply_write_computes(schema_name, root_result)
 
     # 单一 SQL 源 → 步骤序列整体事务化（同连接同事务，任一步失败整体回滚）；
     # Mongo 源 / 跨源步骤按原样顺序执行（非原子边界见 README「事务边界」）
@@ -79,4 +80,4 @@ async def upsert(schema_name, condition, data, options=None, route_override=None
         schema_name, condition, data, options, _now_for(schema_name),
         _generate_id(s) if s['idPrefix'] else '', _ctx(), route_override))
     result = await _exec(plan['command'])
-    return _call(lambda: get_core().apply_write_defaults(schema_name, result)) if result else None
+    return await apply_write_computes(schema_name, result) if result else None
