@@ -86,6 +86,13 @@ def _register_test_schemas():
         'relations': {},
         'indexes': [{'options': {'unique': True}}],  # 缺 keys → 应跳过，不报错
     })
+    # init 建索引：嵌套点号路径必须逐段物理化（signers.userId，不得整串拼成 signersUserId）
+    _sc.register({
+        'name': 'HpNestedIndexed', 'collection': 'hp_nested_indexed', 'timestamps': False,
+        'fields': {'signers': {'type': 'array'}},
+        'relations': {},
+        'indexes': [{'keys': {'signers.userId': 1}}],
+    })
 
 
 @pytest.fixture(autouse=True)
@@ -394,6 +401,14 @@ def test_init_creates_index_and_skips_existing():
     db2 = _IndexDb(lambda: _IndexColl(existing=[{'name': 'title_1'}]))
     _run(init({'default': db2}))
     assert db2['hpIndexed'].created == [], '同名索引已存在时不得重复创建'
+
+
+def test_init_nested_index_key_keeps_dotted_path():
+    """嵌套路径索引键按段物理化并保留点号结构（不得整串拼成 signersUserId）"""
+    db = _IndexDb(_IndexColl)
+    _run(init({'default': db}))
+    assert db['hpNestedIndexed'].created == [([('signers.userId', 1)], {})], \
+        db['hpNestedIndexed'].created
 
 
 def test_index_create_failure_emits_feedback_and_does_not_block_init():

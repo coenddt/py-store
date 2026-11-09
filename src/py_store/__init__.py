@@ -562,8 +562,9 @@ async def _create_indexes_if_needed():
                 final_options = {k: v for k, v in idx.items() if k not in ('keys', 'options')}
                 final_options.update(explicit_options)
 
-                # 检查是否已有同 key 模式的索引（忽略选项差异）；键按目标介质翻译为物理名
-                phys_keys = [(naming.physical(k), v) for k, v in keys.items()]
+                # 检查是否已有同 key 模式的索引（忽略选项差异）；键按目标介质逐段翻译为
+                # 物理名（点号路径保留层级结构，不得整串拼接）
+                phys_keys = [(naming.physical_path(k), v) for k, v in keys.items()]
                 name_from_keys = '_'.join(f'{k}_{v}' for k, v in phys_keys)
                 if any(ei.get('name') == name_from_keys for ei in existing_indexes):
                     continue

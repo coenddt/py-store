@@ -57,6 +57,15 @@ def _tr_seg(seg, rels):
     return seg if seg in rels else physical(seg)
 
 
+def physical_path(logical):
+    """逻辑字段路径 → Mongo 物理路径（点号分段逐段翻译，保留层级结构）
+
+    索引键等「路径型标识符」必须逐段物理化：整串交给 ``translate_name`` 会把
+    ``signers.userId`` 拼成 ``signersUserId``，与文档真实嵌套路径不符（索引失效）。
+    """
+    return _tr_key(logical, set())
+
+
 def _tr_ref(value, rels):
     """``$fieldRef`` 字符串值翻译（``$$var`` 系统变量保留）"""
     if not isinstance(value, str) or not value.startswith('$') or value.startswith('$$'):
