@@ -63,6 +63,7 @@ def _group_indexes(rows):
 
 
 async def introspect(driver, options=None):
+    """只读采集当前库（或 ``options['database']`` 指定库）的表/列/外键/索引并归一化。"""
     if driver is None:
         raise TypeError("mysql introspection 需要 asyncmy 的连接或连接池")
 
@@ -77,9 +78,11 @@ async def introspect(driver, options=None):
     params = (database,) if database is not None else ()
 
     def tables_sql(base):
+        """把 SQL 模板中的 ``table_schema = DATABASE()`` 替换为实际 schema 过滤条件。"""
         return base.replace("table_schema = DATABASE()", schema_filter)
 
     async def run(sql, args=()):
+        """从池取连接执行一条只读查询并返回全部行。"""
         async with _acquire(driver) as conn:
             async with conn.cursor(DictCursor) as cur:
                 await cur.execute(sql, args)

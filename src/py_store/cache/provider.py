@@ -35,6 +35,7 @@ def create_link_cache_provider(spec: dict | None = None) -> Callable[[Any], str]
     )
 
     def provider(ctx: Any = None) -> str:
+        """按选中链路判定 x-cache：无 selection/无 cache 链路 → BYPASS；候选序首项为 cache → HIT 否则 MISS"""
         sel = selection_of(ctx)
         if sel is None:
             return "BYPASS"  # 3. 读不到 ⇒ 绝不猜

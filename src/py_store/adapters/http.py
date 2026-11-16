@@ -28,6 +28,7 @@ class HttpAdapterError(Exception):
     """HTTP 适配器错误（携 ``status`` / ``url``）。"""
 
     def __init__(self, message: str, status: int | None = None, url: str | None = None):
+        """携 HTTP ``status``（网络层失败为 None）与请求 ``url`` 供上层矩阵化映射"""
         super().__init__(message)
         self.name = "HttpAdapterError"
         self.status = status
@@ -68,6 +69,7 @@ def create_http_adapter(spec: dict) -> dict:
     fetch = fetch_impl or _default_fetch
 
     async def fetch_docs(params: dict | None = None) -> list:
+        """拉取文档：拼 URL → to_thread 同步 fetch → 状态码/JSON/pick/map 校验，全部显式 Err"""
         params = params or {}
         url = path_fn(params) if path_fn else base_url
         hdrs = dict(headers or {})

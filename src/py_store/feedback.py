@@ -70,6 +70,7 @@ def fail_count():
 
 
 def _fail(msg):
+    """落库失败统一处置：进程级计数 +1 并向 stderr 打印（可观测，不静默）"""
     global _fail_count
     _fail_count += 1
     print(f"[py-store][feedback] {msg}", file=sys.stderr)
@@ -98,6 +99,7 @@ def enable_feedback_table(store):
     prev = get_sink()
 
     def _sink(event):
+        """落库 sink：事件 + 租户/env/时间戳组装成行，运行中事件循环内 create_task 异步写入 __feedback"""
         # fields 键空间完全开放、无字段名保留字：事件类别直接落库为 `type` 字段
         e = event or {}
         row = dict(e)

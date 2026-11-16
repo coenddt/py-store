@@ -105,16 +105,19 @@ class Store:
     async def query(
         self, gql: str, params: dict | None = None, route_override: dict | None = None
     ) -> list[dict[str, Any]]:
+        """查询列表（透传 crud.query；route_override 覆盖多租户路由）"""
         return await crud.query(gql, params, route_override)
 
     async def query_one(
         self, gql: str, params: dict | None = None, route_override: dict | None = None
     ) -> dict[str, Any] | None:
+        """查询单条（透传 crud.query_one；未命中返回 None）"""
         return await crud.query_one(gql, params, route_override)
 
     async def query_with_count(
         self, gql: str, params: dict | None = None, route_override: dict | None = None
     ) -> dict[str, Any]:
+        """查询列表 + 总数（透传 crud.query_with_count；返回 {'rows', 'count'}）"""
         return await crud.query_with_count(gql, params, route_override)
 
     async def query_federated(
@@ -126,11 +129,13 @@ class Store:
     async def insert(
         self, schema_name: str, data: dict, route_override: dict | None = None
     ) -> dict[str, Any]:
+        """插入单条（透传 crud.insert；返回落库文档）"""
         return await crud.insert(schema_name, data, route_override)
 
     async def insert_many(
         self, schema_name: str, docs: list[dict], route_override: dict | None = None
     ) -> list[dict[str, Any]]:
+        """批量插入（透传 crud.insert_many；返回落库文档列表）"""
         return await crud.insert_many(schema_name, docs, route_override)
 
     async def update(
@@ -141,6 +146,7 @@ class Store:
         options: dict | None = None,
         route_override: dict | None = None,
     ) -> dict[str, Any] | None:
+        """条件更新单条（透传 crud.update；options 透传驱动选项如 returnDocument）"""
         return await crud.update(schema_name, condition, data, options, route_override)
 
     async def apply_write_computes(
@@ -156,6 +162,7 @@ class Store:
         data: dict,
         route_override: dict | None = None,
     ) -> dict[str, Any]:
+        """条件批量更新（透传 crud.update_many；返回 {'matched', 'modified'} 计数）"""
         return await crud.update_many(schema_name, condition, data, route_override)
 
     async def remove(
@@ -165,11 +172,13 @@ class Store:
         route_override: dict | None = None,
         options: dict | None = None,
     ) -> dict[str, Any]:
+        """条件删除（透传 crud.remove；options 透传驱动选项）"""
         return await crud.remove(schema_name, condition, route_override, options)
 
     async def exists(
         self, schema_name: str, condition: dict, route_override: dict | None = None
     ) -> bool:
+        """存在性判断（透传 crud.exists；条件命中任一行即为 True）"""
         return await crud.exists(schema_name, condition, route_override)
 
     async def count(
@@ -178,6 +187,7 @@ class Store:
         filter: dict | None = None,
         route_override: dict | None = None,
     ) -> int:
+        """计数（透传 crud.count；filter 缺省计全表）"""
         return await crud.count(schema_name, filter, route_override)
 
     async def mutation(
@@ -186,6 +196,7 @@ class Store:
         data: dict | list[dict],
         route_override: dict | None = None,
     ) -> Any:
+        """命令式 mutation（透传 crud.mutation；data 为单条 dict 或批量 list，按命令规则路由）"""
         return await crud.mutation(schema_name, data, route_override)
 
     async def upsert(
@@ -196,6 +207,7 @@ class Store:
         options: dict | None = None,
         route_override: dict | None = None,
     ) -> dict[str, Any] | None:
+        """存在即更新、不存在即插入（透传 crud.upsert；返回落库文档）"""
         return await crud.upsert(schema_name, condition, data, options, route_override)
 
     async def claim(
@@ -260,6 +272,7 @@ class Store:
         schema: str | None = None,
         register_defs: bool = True,
     ) -> list[dict[str, Any]]:
+        """反向同步 schema（透传 sync_schema：驱动 introspect → overlay 合成 → 注册）"""
         return await sync_schema(
             backend,
             driver,
@@ -272,6 +285,7 @@ class Store:
         )
 
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
+        """解析 GQL 并构建 pipeline（透传 _build_pipeline；返回 tokens/ast/pipeline/projection）"""
         return _build_pipeline(gql, params)
 
     def base_view(self):
@@ -476,18 +490,23 @@ class Store:
         return resource.register_provider(kind, mod)
 
     def configure_resource(self, cfg):
+        """配置资源存储（透传 resource.configure：backend/local/limits 等）"""
         return resource.configure(cfg)
 
     async def resource_put(self, **kw):
+        """上传资源（透传 resource.put；kw 为 provider 契约参数）"""
         return await resource.put(**kw)
 
     async def resource_open(self, rid, **kw):
+        """打开/读取资源（透传 resource.open；返回流或字节，视 provider 而定）"""
         return await resource.open(rid, **kw)
 
     async def resource_remove(self, rid):
+        """删除资源（透传 resource.remove）"""
         return await resource.remove(rid)
 
     async def resource_url(self, ref, **kw):
+        """生成资源访问 URL（透传 resource.url）"""
         return await resource.url(ref, **kw)
 
     # ── 缓存状态注记（B6；见 cache.py）──
@@ -507,6 +526,10 @@ class Store:
     def degraded_status(self) -> dict[str, Any]:
         """当前请求的降级状态（无请求容器 → degraded:False）"""
         return degraded.status()
+
+    def with_degraded_scope(self, fn) -> dict[str, Any]:
+        """请求级降级作用域：返回 ``{result, status}``（协议皮用于 x-store-degraded）"""
+        return degraded.with_request(fn)
 
     # ── 降级容器（协议皮中间件建/销毁；见 degraded.py）──
     degraded = degraded
@@ -589,6 +612,8 @@ class Store:
     run_as_internal = staticmethod(permission.run_as_internal)
     # 自定义权限错误（实例可被 store.PermissionError 捕获）
     PermissionError = permission.PermissionError
+    # 同上类的新名（避让内建 PermissionError；PermissionError 为兼容别名）
+    PermissionDeniedError = permission.PermissionDeniedError
     # 上下文缺失错误（实例可被 store.NoContextError 捕获；fail-secure 下未注入 ctx）
     NoContextError = permission.NoContextError
     # 原生 SQL 入口错误（实例可被 store.RawSqlError 捕获）

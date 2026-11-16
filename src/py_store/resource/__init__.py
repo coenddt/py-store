@@ -192,10 +192,12 @@ def fields():
 
 
 def register_provider(kind, mod):
+    """注册存储后端 provider（透传 ``providers.register_provider``）。"""
     providers.register_provider(kind, mod)
 
 
 def _crud():
+    """取资源落库用的 crud 通道：配置了 ``store`` 用之，否则用全局 ``crud``。"""
     if _cfg["store"] is not None:
         return _cfg["store"]
     from .. import crud
@@ -204,6 +206,7 @@ def _crud():
 
 
 async def _call(fn, *a, **kw):
+    """调用 ``fn`` 并 await 其结果（同步/异步 provider 双兼容）。"""
     out = fn(*a, **kw)
     if inspect.isawaitable(out):
         out = await out
@@ -248,6 +251,7 @@ def _meta_gql(schema):
 async def put(
     *, bytes=None, file_name=None, mime=None, kind=None, bind=None, pool=None
 ):
+    """上传资源：按 sha1 寻址写入池内全部后端副本并登记 Resource/Location（可附 binding）。"""
     if bytes is None:
         raise ValueError("resource.put 需要 bytes")
     data = bytes if isinstance(bytes, _BYTES_TYPES) else str(bytes).encode("utf-8")
@@ -341,6 +345,7 @@ async def put(
 
 
 async def open(resource_id, *, order=None, pool=None):
+    """按优先级顺序逐副本读取资源字节，首个成功即返回（含元数据）；全部失败/缺失则响亮报错。"""
     crud = _crud()
     f = _cfg["fields"]
     pool_ = _require_pool(pool)
@@ -352,12 +357,15 @@ async def open(resource_id, *, order=None, pool=None):
     seq = list(order) if order else list(pool_.keys())
 
     def rank(b):
+        """后端在指定顺序 ``seq`` 中的位次（不在序列中的排在最后）。"""
         return seq.index(b) if b in seq else 2**31
 
     def backend_of(r):
+        """从 location 行取后端名（按字段映射列）。"""
         return r[f["location"]["backend"]]
 
     def prio_of(r):
+        """从 location 行取副本优先级（未映射或缺失记 0）。"""
         return (
             (r.get(f["location"]["priority"]) or 0) if f["location"]["priority"] else 0
         )
@@ -441,6 +449,7 @@ async def open(resource_id, *, order=None, pool=None):
 
 
 async def remove(resource_id, *, pool=None):
+    """删除资源：逐后端删副本（失败仅反馈不中断），并清空 Location 与 Resource 行。"""
     crud = _crud()
     f = _cfg["fields"]
     pool_ = _require_pool(pool)
@@ -480,6 +489,7 @@ async def remove(resource_id, *, pool=None):
 
 
 async def url(reference, *, vars=None, pool=None):
+    """按模板与签名配置合成资源访问 URL（``vars`` 可覆盖模板变量）。"""
     _require_pool(
         pool
     )  # 池存在性 fail-fast；URL 模板/签名为全局配置（跨池共享），行为不变

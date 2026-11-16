@@ -93,6 +93,7 @@ async def query(gql, params=None, route_override=None):
     degraded.emit_plan(plan, "plan_degraded")
 
     async def _selected():
+        """单库执行体：跑查询计划后过 _finalize 统一后处理（在链路选中上下文内调用）"""
         return await _finalize(plan, await _run_query_plan(plan))
 
     # 请求级记录本次选中链路（04 §4.4：只读透传 plan.links，不改 plan 语义）
@@ -154,6 +155,7 @@ async def query_federated(gql, params=None):
     degraded.emit_plan(plan, "federation_degraded")
 
     async def _selected():
+        """联邦执行体：并行逐源取数 → core 内存 hash join → _finalize 统一后处理"""
         results = await asyncio.gather(
             *(_run_federated_unit(u) for u in plan.get("sources") or [])
         )

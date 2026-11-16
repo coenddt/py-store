@@ -9,6 +9,7 @@ class _Scope:
     __slots__ = ("meta", "secure", "sink", "view")
 
     def __init__(self, view, sink=None, meta=None, secure=None):
+        """构造作用域快照：view（core 派生视图）、sink（反馈 sinks）、meta、secure（安全域配置）"""
         self.view = view
         self.sink = sink
         self.meta = meta
@@ -19,6 +20,7 @@ _scope_var: contextvars.ContextVar = contextvars.ContextVar("store_scope", defau
 
 
 def current_scope():
+    """当前生效作用域（_Scope 实例）；未进入作用域时返回 None（调用方回退 base）"""
     return _scope_var.get()  # None = 未进入作用域
 
 
@@ -29,6 +31,7 @@ def with_scope(view, sink=None, meta=None, secure=None):
 
 @contextlib.contextmanager
 def _ctx(view, sink, meta, secure):
+    """with_scope 的实现体：set/_Scope 入栈、退出时 token reset（嵌套安全）"""
     token = _scope_var.set(_Scope(view, sink, meta, secure))
     try:
         yield

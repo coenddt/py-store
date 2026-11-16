@@ -52,9 +52,11 @@ def connect(options: dict | None = None) -> dict:
         target = _dir_for(root, db)
 
         def _load():
+            """读取该库落点的整目录快照（``{集合名: [文档…]}``）。"""
             return read_snapshot(root, db)
 
         def _save(changed, collections):
+            """回写变更集合（``changed`` 非空才调用），经目录写锁串行化。"""
             with_dir_lock(
                 target, lambda: write_collections(root, changed, collections, db)
             )
@@ -62,6 +64,7 @@ def connect(options: dict | None = None) -> dict:
         return _load, _save
 
     def handle_for(db):
+        """按库取分区手柄；``db=None`` 时沿用描述符自身 ``database`` 的落点。"""
         load, save = _io_for(db)
         return create_db(load, save, db)
 
@@ -83,12 +86,15 @@ def connect(options: dict | None = None) -> dict:
         state: dict[str, Any] = {"staged": read_snapshot(root, db), "closed": False}
 
         def _tx_load():
+            """取事务期内存快照 ``staged``（不读磁盘）。"""
             return state["staged"]
 
         def _tx_save(_changed, collections):
+            """事务期写操作：仅更新内存快照 ``staged``，不落盘。"""
             state["staged"] = collections
 
         async def commit():
+            """提交事务：整目录落盘（经目录写锁串行化）；重复调用为 no-op。"""
             if state["closed"]:
                 return
             state["closed"] = True
@@ -98,9 +104,11 @@ def connect(options: dict | None = None) -> dict:
             )
 
         async def rollback():
+            """回滚事务：丢弃内存快照 ``staged`` 并关闭事务（不落盘）。"""
             state["closed"] = True
 
         async def release():
+            """释放事务句柄：标记关闭，防止后续 commit 落盘。"""
             state["closed"] = True
 
         return {

@@ -40,6 +40,7 @@ async def insert(schema_name, data, route_override=None):
     )
 
     def _finish(result):
+        """组装插入返回值：autoincrement 主键时把执行器回读的自增值补进 returns._id"""
         returns = plan["returns"]
         # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
         if (
@@ -58,6 +59,7 @@ async def insert(schema_name, data, route_override=None):
     ctx = _ctx()
 
     async def _do():
+        """插入执行体：主写后跑触发链（before=None），与主写同一原子作用域"""
         result = await _exec(plan["command"])
         await run_triggers(
             plan["triggers"], root=result, before=None, now=now, ctx=ctx, executed=set()
@@ -119,6 +121,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
     sources = _sources_of(first)
 
     async def _do():
+        """更新执行体：needsProbe 时先取探针文档作 before 并二次规划，主写命中后跑触发链并回填写计算列"""
         out = first
         before = None
         if out.get("needsProbe"):
@@ -181,6 +184,7 @@ def _fill_pre_ids(command, ids):
     main = {k: v for k, v in command.items() if k != "preCommand"}
 
     def _walk(node):
+        """递归查找 filter 中 ``$in`` 占位（含 $and 数组内）并替换为命中 _id 列表"""
         if isinstance(node, dict):
             for k, v in list(node.items()):
                 if isinstance(v, dict) and v.get("$in") == "__REL_PRED_IDS__":
@@ -231,6 +235,7 @@ async def remove(schema_name, condition, route_override=None, options=None):
     )
 
     async def _do_remove():
+        """删除执行体：先执行 preCommand 取命中 _id（归档与删除共用）→ 归档附表写入 → 物理删除；返回删除/归档计数"""
         archived_count = 0
         docs = []
         # 关系谓词：先执行 deleteCommand.preCommand 取命中 _id（归档 find 与删除共用同一列表）

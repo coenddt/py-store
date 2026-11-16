@@ -106,6 +106,7 @@ def _to_core_defn(defn):
     """
 
     def walk(value, key=None):
+        """递归转 FFI 安全值：callable → fn/asyncFn 记 True 占位、其余剔除（_DROP）；数组内剔除项置 null；dict/list 递归"""
         if callable(value):
             # fn/asyncFn 声明占位（core 按 `fn: True` 识别）；函数型 default 无法跨 FFI，剔除
             return True if key in ("fn", "asyncFn") else _DROP

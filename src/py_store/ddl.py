@@ -183,6 +183,7 @@ _MYSQL_PRESENT_MAX = 255
 
 
 def _idx(backend):
+    """取后端在 _BACKENDS 中的序号（能力矩阵行号）"""
     return _BACKENDS.index(backend)
 
 
@@ -194,6 +195,7 @@ def _q(backend, ident):
 
 
 def _declared_type(field_def):
+    """取字段声明的 type：dict 形态取其 type 键，字符串形态即为类型本身"""
     if isinstance(field_def, dict):
         return field_def.get("type")
     return field_def
@@ -216,6 +218,7 @@ def _has_creator_permission(defn):
     """schema 的 read/write 是否含 creator 伪角色（决定归属键必建）"""
 
     def _has(roles):
+        """角色名单是否非空且含 creator 伪角色"""
         return bool(roles) and _CREATOR_ROLE in roles
 
     return _has(defn.get("read")) or _has(defn.get("write"))
@@ -336,6 +339,7 @@ def _warn_present_overflow(defn, cols):
 
 
 def _create_table(defn, backend):
+    """生成 CREATE TABLE 语句：列类型/主键/自增按后端差异渲染（SQLite AUTOINCREMENT 紧跟 PRIMARY KEY，MySQL 主键 NOT NULL 且 PRIMARY KEY 单列一行），MySQL 先查 VARCHAR(255) 超限告警"""
     table = _pname(backend, defn.get("collection") or defn.get("name"))
     cols = _columns(defn, backend)
     if backend == "mysql":
@@ -535,6 +539,113 @@ def implicit_column_ddl(backend, defn, existing):
     return out
 
 
+def _index_keys_of(defn):
+    """收集 defn.indexes 中 keys 为非空 dict 的索引项（供稳定序列化后做增量比对）"""
+    out = []
+    for idx in defn.get("indexes") or []:
+        if (
+            isinstance(idx, dict)
+            and isinstance(idx.get("keys"), dict)
+            and idx["keys"]
+        ):
+            out.append(idx)
+    return out
+
+
+def _diff_id_pk(of, nf, errors):
+    """_id 主键检查：类型或 strategy 变更均不支持（主键定义变更属破坏性变更）"""
+    if of is not None and _declared_type(of) != _declared_type(nf):
+        errors.append(
+            f"_id 主键类型变更不支持（{_declared_type(of)} → {_declared_type(nf)}）"
+        )
+    o_strat = of.get("strategy") if isinstance(of, dict) else None
+    n_strat = nf.get("strategy") if isinstance(nf, dict) else None
+    if o_strat != n_strat:
+        errors.append(f"_id 主键策略变更不支持（{o_strat!r} → {n_strat!r}）")
+
+
+def _diff_vector_meta(name, of, nf, errors):
+    """vector 字段元数据（dim/metric）变更不支持：需显式重建列与向量索引"""
+    od = of.get("dim") if isinstance(of, dict) else None
+    nd = nf.get("dim") if isinstance(nf, dict) else None
+    om = (of.get("metric") if isinstance(of, dict) else None) or "cosine"
+    nm = (nf.get("metric") if isinstance(nf, dict) else None) or "cosine"
+    if od != nd or om != nm:
+        errors.append(
+            f'字段 "{name}" 的 vector 元数据变更不支持'
+            f"（dim {_js(od)} → {_js(nd)}，metric {_js(om)} → {_js(nm)}）；"
+            "需显式重建列与向量索引"
+        )
+
+
+def _diff_one_field(name, of, nf, changes, errors):
+    """非 _id 字段对比：新增 → addColumn；同型 → 恒等或 vector 元数据检查；放宽 → widenColumn；其余 → errors"""
+    nf_type = _declared_type(nf)
+    if of is None:
+        if (
+            nf_type not in _TYPES
+            and nf_type not in _NON_COLUMN
+            and nf_type != "vector"
+        ):
+            errors.append(f'新列 "{name}" 类型 {nf_type!r} 未知')
+            return
+        changes.append(
+            {
+                "op": "addColumn",
+                "name": name,
+                "field": nf if isinstance(nf, dict) else {"type": nf},
+            }
+        )
+        return
+    of_type = _declared_type(of)
+    if of_type == nf_type:
+        if nf_type == "vector":
+            _diff_vector_meta(name, of, nf, errors)
+        return  # 恒等：不上报（含 object 内嵌定义差异——首批不展开，见 N3）
+    if nf_type in _WIDEN.get(of_type, ()):
+        changes.append(
+            {
+                "op": "widenColumn",
+                "name": name,
+                "from": of_type,
+                "to": nf_type,
+            }
+        )
+    else:
+        errors.append(
+            f'字段 "{name}" 类型 {of_type!r} → {nf_type!r} 非放宽变更'
+            "（首批仅支持单向放宽：int→long/float/double、long→float/double、float→double）"
+        )
+
+
+def _diff_fields(old_fields, new_fields, changes, errors):
+    """字段对比：新增 / 放宽 / 删除（白名单外记入 errors，禁静默）"""
+    for name, nf in new_fields.items():
+        if name == "_id":
+            _diff_id_pk(old_fields.get("_id"), nf, errors)
+            continue
+        _diff_one_field(name, old_fields.get(name), nf, changes, errors)
+    for name in old_fields:
+        if name not in new_fields:
+            errors.append(
+                f'删除字段 "{name}" 不支持（破坏性变更；请显式走数据迁移脚本）'
+            )
+
+
+def _diff_indexes(old_defn, new_defn, changes):
+    """索引增量：new 有 old 无 → addIndex。
+
+    相等判定用稳定序列化（键序无关 + JS 数字语义），对齐 node diffDefs 的 _stableStringify：
+    直接 dict 相等（py `1 == True`）与 node `JSON.stringify` 键序敏感会得出不同结论（P9）。
+    """
+    from .metadef import stable_stringify as _canon
+
+    old_idx = {_canon(i) for i in _index_keys_of(old_defn)}
+    for idx in _index_keys_of(new_defn):
+        if _canon(idx) not in old_idx:
+            changes.append({"op": "addIndex", "index": idx})
+
+
 def diff_defs(old_defn, new_defn):
     """新旧 schema def 对比 → {'changes': [...], 'errors': [...]}（后端无关，纯函数）。
 
@@ -543,97 +654,12 @@ def diff_defs(old_defn, new_defn):
     """
     changes: list = []
     errors: list[str] = []
-    old_fields = (old_defn or {}).get("fields") or {}
-    new_fields = new_defn.get("fields") or {}
 
     if old_defn is None:
         return {"changes": [{"op": "addTable", "defn": new_defn}], "errors": errors}
 
-    # ── 字段：新增 / 放宽 / 删除（白名单外）──
-    for name, nf in new_fields.items():
-        if name == "_id":
-            of = old_fields.get("_id")
-            if of is not None and _declared_type(of) != _declared_type(nf):
-                errors.append(
-                    f"_id 主键类型变更不支持（{_declared_type(of)} → {_declared_type(nf)}）"
-                )
-            o_strat = of.get("strategy") if isinstance(of, dict) else None
-            n_strat = nf.get("strategy") if isinstance(nf, dict) else None
-            if o_strat != n_strat:
-                errors.append(f"_id 主键策略变更不支持（{o_strat!r} → {n_strat!r}）")
-            continue
-        nf_type = _declared_type(nf)
-        if name not in old_fields:
-            if (
-                nf_type not in _TYPES
-                and nf_type not in _NON_COLUMN
-                and nf_type != "vector"
-            ):
-                errors.append(f'新列 "{name}" 类型 {nf_type!r} 未知')
-                continue
-            changes.append(
-                {
-                    "op": "addColumn",
-                    "name": name,
-                    "field": nf if isinstance(nf, dict) else {"type": nf},
-                }
-            )
-            continue
-        of = old_fields[name]
-        of_type = _declared_type(of)
-        if of_type == nf_type:
-            if nf_type == "vector":
-                od = of.get("dim") if isinstance(of, dict) else None
-                nd = nf.get("dim") if isinstance(nf, dict) else None
-                om = (of.get("metric") if isinstance(of, dict) else None) or "cosine"
-                nm = (nf.get("metric") if isinstance(nf, dict) else None) or "cosine"
-                if od != nd or om != nm:
-                    errors.append(
-                        f'字段 "{name}" 的 vector 元数据变更不支持'
-                        f"（dim {_js(od)} → {_js(nd)}，metric {_js(om)} → {_js(nm)}）；"
-                        "需显式重建列与向量索引"
-                    )
-            continue  # 恒等：不上报（含 object 内嵌定义差异——首批不展开，见 N3）
-        if nf_type in _WIDEN.get(of_type, ()):
-            changes.append(
-                {
-                    "op": "widenColumn",
-                    "name": name,
-                    "from": of_type,
-                    "to": nf_type,
-                }
-            )
-        else:
-            errors.append(
-                f'字段 "{name}" 类型 {of_type!r} → {nf_type!r} 非放宽变更'
-                "（首批仅支持单向放宽：int→long/float/double、long→float/double、float→double）"
-            )
-    for name in old_fields:
-        if name not in new_fields:
-            errors.append(
-                f'删除字段 "{name}" 不支持（破坏性变更；请显式走数据迁移脚本）'
-            )
-
-    # ── 索引：new 有 old 无 → addIndex ──
-    # 相等判定用稳定序列化（键序无关 + JS 数字语义），对齐 node diffDefs 的 _stableStringify：
-    # 直接 dict 相等（py `1 == True`）与 node `JSON.stringify` 键序敏感会得出不同结论（P9）。
-    from .metadef import stable_stringify as _canon
-
-    def _index_keys(defn):
-        out = []
-        for idx in defn.get("indexes") or []:
-            if (
-                isinstance(idx, dict)
-                and isinstance(idx.get("keys"), dict)
-                and idx["keys"]
-            ):
-                out.append(idx)
-        return out
-
-    old_idx = {_canon(i) for i in _index_keys(old_defn)}
-    for idx in _index_keys(new_defn):
-        if _canon(idx) not in old_idx:
-            changes.append({"op": "addIndex", "index": idx})
+    _diff_fields((old_defn or {}).get("fields") or {}, new_defn.get("fields") or {}, changes, errors)
+    _diff_indexes(old_defn, new_defn, changes)
 
     # collection 改名 = 建新表丢旧表（破坏性）→ Err
     old_coll = old_defn.get("collection") or old_defn.get("name")

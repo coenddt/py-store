@@ -40,6 +40,7 @@ def _dev_fallback():
 
 
 def _load():
+    """加载 rust_store_py 绑定：LOCAL_CORE=1 时优先相邻调试产物，否则 pip 依赖；两者皆缺给装配指引"""
     # 开发期 LOCAL_CORE=1 时以相邻 rust-store 调试产物为**唯一来源**（优先于 site-packages，
     # 否则已安装的旧绑定会遮蔽新 API，如 register_batch）
     dev = _dev_fallback()

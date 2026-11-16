@@ -23,6 +23,7 @@ async def create_app(
     config: Any = None,
     config_base_dir: str | None = None,
 ):
+    """框架统一装配：注册（或按 config 目录装载）→ init → 绑 fns → 校验覆盖 → 反馈落库接线；返回 {'store'}"""
     from . import init, schema, store  # 延迟导入，规避包内循环导入
 
     if datasource is None:

@@ -46,6 +46,7 @@ def _clone(value: Any) -> Any:
 
 
 def _key(database: str | None, collection: str) -> str:
+    """拼分区键：``database`` 非空 ⇒ ``<database>/<collection>``，否则 ``<collection>``。"""
     return f"{database}/{collection}" if database else collection
 
 
@@ -53,6 +54,7 @@ def _map_io(store: dict) -> dict:
     """默认 io：进程内分区 dict（按 ``<database>/<collection>`` 界定分区）。"""
 
     def load(database):
+        """读该库分区：收集同前缀键并深拷贝返回（不属本库的子分区键剔除）。"""
         prefix = f"{database}/" if database else ""
         out: dict[str, list] = {}
         for k, docs in store.items():
@@ -65,6 +67,7 @@ def _map_io(store: dict) -> dict:
         return out
 
     def save(database, changed, collections) -> None:
+        """回写变更集合：按分区键深拷贝写入 ``store``（``changed`` 非空才被调用）。"""
         for name in list(changed):
             value = collections.get(name)
             store[_key(database, name)] = _clone([] if value is None else value)
@@ -96,6 +99,7 @@ def connect(options: dict | None = None) -> dict:
     database = options.get("database")
 
     def handle_for(db):
+        """按库绑定 io 构造分区手柄。"""
         load, save = _bind_io(io, db)
         return create_db(load, save, db)
 
@@ -116,12 +120,15 @@ def connect(options: dict | None = None) -> dict:
         state: dict[str, Any] = {"staged": load(), "closed": False}
 
         def _tx_load():
+            """取事务期内存快照 ``staged``（不读 io）。"""
             return state["staged"]
 
         def _tx_save(_changed, collections):
+            """事务期写操作：仅更新内存快照 ``staged``，不写回分区。"""
             state["staged"] = collections
 
         async def commit():
+            """提交事务：以 ``staged`` 整体写回该库分区；重复调用为 no-op。"""
             if state["closed"]:
                 return
             state["closed"] = True
@@ -129,9 +136,11 @@ def connect(options: dict | None = None) -> dict:
             save(list(staged.keys()), staged)
 
         async def rollback():
+            """回滚事务：丢弃 ``staged`` 并关闭事务（不写回分区）。"""
             state["closed"] = True
 
         async def release():
+            """释放事务句柄：标记关闭，防止后续 commit 写回。"""
             state["closed"] = True
 
         return {

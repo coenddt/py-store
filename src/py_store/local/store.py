@@ -24,6 +24,7 @@ _LOCKS_GUARD = threading.Lock()
 
 
 def _lock_for(root) -> threading.Lock:
+    """按目录路径取（或惰性创建）进程内互斥锁，同一路径恒返回同一把锁。"""
     key = str(root)
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(key, threading.Lock())

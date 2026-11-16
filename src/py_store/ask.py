@@ -66,6 +66,7 @@ class AskExhausted(Exception):
     """
 
     def __init__(self, attempts, events):
+        """消息内嵌最后一轮结构化错误；完整尝试轨迹挂 .attempts / .events"""
         last_error = (attempts[-1].get("error") if attempts else None) or {
             "code": "unknown"
         }
@@ -94,6 +95,7 @@ def _field_type(fdef):
 
 
 def _emit_compute_skipped(model, compute):
+    """计算列收窄告警（同 (model, compute) 去重只发一次；对齐 _dup_signatures 先例）"""
     sig = (model, compute)
     if sig in _COMPUTE_SKIP_SIGS:
         return
@@ -187,6 +189,7 @@ class _BadLlmOutput(Exception):
     """LLM 输出未通过严格解析（携带结构化 detail 供回喂）——内部控制流，不外穿"""
 
     def __init__(self, detail):
+        """携带结构化 detail（code/message/detail/raw 前缀）供回喂 LLM"""
         super().__init__(detail.get("detail", "badLlmOutput"))
         self.detail = detail
 
@@ -221,6 +224,7 @@ def _parse_llm_output(raw):
     """严格 JSON 解析 + 形状校验（D3）；失败抛 ``_BadLlmOutput``（禁正则容错提取）"""
 
     def fail(detail):
+        """构造带结构化 detail 的 _BadLlmOutput（raw 截 500 字符防超长）"""
         return _BadLlmOutput(
             {
                 "code": "badLlmOutput",
@@ -354,6 +358,7 @@ async def ask(
     round_events: list[dict] = []
 
     def _collect(event):
+        """作用域 sink：事件同时进全程 events 与本轮 round_events"""
         events.append(event)
         round_events.append(event)
 

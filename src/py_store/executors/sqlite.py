@@ -114,34 +114,18 @@ def create(db, options=None):
         """
         await db.commit()
         await db.execute("BEGIN")
-        closed = False
+        from . import (  # 延迟导入：避免与包 __init__ 相互导入
+            idempotent_tx_ops,
+            savepoint_ops,
+        )
 
-        async def commit():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await db.commit()
-
-        async def rollback():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await db.rollback()
+        commit, rollback = idempotent_tx_ops(db.commit, db.rollback)
 
         async def release():
+            """释放事务句柄：单连接无需归还，恒为 no-op。"""
             return None
 
-        async def savepoint(name):
-            """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
-            await db.execute("SAVEPOINT %s" % name)
-
-        async def release_savepoint(name):
-            await db.execute("RELEASE SAVEPOINT %s" % name)
-
-        async def rollback_to_savepoint(name):
-            await db.execute("ROLLBACK TO SAVEPOINT %s" % name)
+        savepoint, release_savepoint, rollback_to_savepoint = savepoint_ops(db.execute)
 
         return {
             "exec": run_stmts,
@@ -153,25 +137,13 @@ def create(db, options=None):
             "rollback_to_savepoint": rollback_to_savepoint,
         }
 
-    async def with_transaction(body):
-        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
-        body(execute_on_tx, tx=None) 的全部 plan 落在同一事务，任一失败整体回滚。
-        第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数。
-        开事务→body→提交/回滚全窗口过锁（防其他协程的事务边界插队互踩）"""
+    from . import (  # 延迟导入：避免与包 __init__ 相互导入
+        make_with_transaction,
+    )
 
-        async def _body():
-            tx = await open_transaction()
-            try:
-                out = await body(tx["exec"], tx)
-                await tx["commit"]()
-                return out
-            except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
-                await tx["rollback"]()
-                raise
-            finally:
-                await tx["release"]()
-
-        return await _with_lock(_body)
+    # 单连接的事务边界（commit/BEGIN/rollback）是连接级共享状态，整窗口过锁由 wrap
+    # 注入（防其他协程的事务边界插队互踩）；body 包装统一走工厂，不另立第二套路径。
+    with_transaction = make_with_transaction(open_transaction, wrap=_with_lock)
 
     return {
         "kind": "sqlite",

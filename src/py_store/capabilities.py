@@ -11,11 +11,13 @@ DEFAULT_SOURCE = datasource.DEFAULT_SOURCE
 
 
 def _backend_of(connection: Any) -> str:
+    """连接对象 → 后端名（未标注 kind 的 Mongo 连接归一为 'mongodb'）"""
     kind = datasource.kind_of(connection)
     return "mongodb" if kind in (None, "mongo") else kind
 
 
 def _atlas_declared(source: str) -> bool:
+    """该源下是否有 schema 声明了 Atlas 具名索引（命名的命名型索引即视为 Atlas 部署）"""
     for name in schema.list():
         meta = schema.get(name)
         if (meta.get("datasource") or DEFAULT_SOURCE) != source:
@@ -29,6 +31,7 @@ def _atlas_declared(source: str) -> bool:
 
 
 async def _pgvector_ready(source: str) -> bool:
+    """探测 pg 源是否装了 pgvector 扩展；探测失败留痕后按「未安装」处理（禁静默改判）"""
     try:
         out = await datasource.execute_raw(
             source,
@@ -53,6 +56,7 @@ async def _pgvector_ready(source: str) -> bool:
 
 
 async def capabilities(source: str | None = None) -> dict[str, Any]:
+    """向量能力探测总入口：返回 {'source','vector':{'supported','native','backend','metrics','maxDim'}}"""
     src = source or DEFAULT_SOURCE
     if not datasource.has_connection(src):
         feedback.emit(

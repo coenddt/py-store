@@ -56,6 +56,7 @@ def _tr_key(key, rels):
 
 
 def _tr_seg(seg, rels):
+    """单段路径翻译：保留名原样；命中关系名集合原样，否则译为物理名"""
     if is_reserved(seg):
         return seg
     return seg if seg in rels else physical(seg)
@@ -150,6 +151,7 @@ def _collect_rels(info, pipeline):
 
 
 def _collect_as(node, rels):
+    """递归收集节点内全部 ``$lookup.as`` 关系名并入 rels（嵌套 pipeline 一并覆盖）"""
     if isinstance(node, list):
         for n in node:
             _collect_as(n, rels)
@@ -221,6 +223,7 @@ def _info_for_collection(collection):
 
 
 def _info_for_name(name):
+    """按 schema 逻辑名取镜像信息；名称非法或未注册返回 None"""
     if not isinstance(name, str) or name == "":
         return None
     try:

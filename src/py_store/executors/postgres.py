@@ -44,6 +44,7 @@ def create(driver, options=None):
         return {"docs": docs, "rows": rows, "affectedRows": affected_rows}
 
     async def exec_(plan):
+        """非事务路径：整个 plan 直接在池取到的连接上执行（autocommit 语义）。"""
         return await run_stmts(driver, plan)
 
     async def open_transaction():
@@ -52,36 +53,20 @@ def create(driver, options=None):
         必须用 ``conn.transaction()`` 的显式 ``start/commit/rollback``；
         asyncpg 不允许手写 BEGIN/COMMIT 与 ``transaction()`` 混用。
         """
-        from . import open_acquire  # 延迟导入：避免与包 __init__ 相互导入
+        from . import (  # 延迟导入：避免与包 __init__ 相互导入
+            idempotent_tx_ops,
+            open_acquire,
+            savepoint_ops,
+        )
 
         conn, release = await open_acquire(driver)
         tx = conn.transaction()
         await tx.start()
-        closed = False
+        commit, rollback = idempotent_tx_ops(tx.commit, tx.rollback)
 
-        async def commit():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await tx.commit()
-
-        async def rollback():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await tx.rollback()
-
-        async def savepoint(name):
-            """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
-            await conn.execute("SAVEPOINT %s" % name)
-
-        async def release_savepoint(name):
-            await conn.execute("RELEASE SAVEPOINT %s" % name)
-
-        async def rollback_to_savepoint(name):
-            await conn.execute("ROLLBACK TO SAVEPOINT %s" % name)
+        savepoint, release_savepoint, rollback_to_savepoint = savepoint_ops(
+            conn.execute
+        )
 
         return {
             "exec": lambda plan: run_stmts(conn, plan),
@@ -93,20 +78,11 @@ def create(driver, options=None):
             "rollback_to_savepoint": rollback_to_savepoint,
         }
 
-    async def with_transaction(body):
-        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
-        body(execute_on_tx, tx=None) 的全部 plan 落在同一事务，任一失败整体回滚。
-        第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数"""
-        tx = await open_transaction()
-        try:
-            out = await body(tx["exec"], tx)
-            await tx["commit"]()
-            return out
-        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
-            await tx["rollback"]()
-            raise
-        finally:
-            await tx["release"]()
+    from . import (  # 延迟导入：避免与包 __init__ 相互导入
+        make_with_transaction,
+    )
+
+    with_transaction = make_with_transaction(open_transaction)
 
     return {
         "kind": "postgres",

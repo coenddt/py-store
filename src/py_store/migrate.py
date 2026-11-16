@@ -54,6 +54,7 @@ class MigrationUnsupported(MetaDefError):
     """白名单外变更（diff errors 非空）：只给分步建议，不自动执行、不自动回滚"""
 
     def __init__(self, message, skipped=None):
+        """构造不支持迁移错误：skipped 记录因不可支持而跳过的 schema 清单"""
         super().__init__(message)
         self.skipped = skipped or []
 
@@ -102,6 +103,7 @@ _PROBE_SQL = {
 
 
 async def _has_migration_table(backend, source):
+    """只读探测迁移版本表是否存在：按后端执行 _PROBE_SQL，有行即存在"""
     out = await execute_raw(source, _PROBE_SQL[backend], None, False)
     return bool(out.get("rows"))
 
@@ -162,202 +164,240 @@ async def migrate(
     # 版本表保障：有 driver 时一次完整 introspect（两用：版本表探测 + old_defs=None 转 defn）；
     # 无 driver 时退化为 execute_raw 只读探测。缺失才建（core 产 DDL；CREATE TABLE 非
     # IF NOT EXISTS，幂等由探测保证）。ddl.generate 返回语句串，按分号空行拆条执行。
-    probe = None
+    probe, has_version_table = await _probe_schema_state(backend, source, driver)
+    if not has_version_table:
+        await _ensure_migration_table(backend, source)
+    # ① 旧版定义：old_defs 显式传入者优先；None → 复用本次探测行转 defn（需 driver）。
+    # schema_from_rows 的 name 是物理表名（如 `notes`），与 defs 的 schema 名（如 `Note`）
+    # 不同键——按 name 与 collection 双索引，查找时以 defs 侧 collection 兜底对齐
+    old = _load_old_defs(old_defs, probe, backend)
+    introspect_mode = probe is not None and old_defs is None
+    applied = []
+    skipped = []
+    for name, defn in defs.items():
+        item = await _migrate_one(
+            backend,
+            source,
+            name,
+            defn,
+            old,
+            probe,
+            introspect_mode,
+            tenant,
+            env,
+            skipped,
+        )
+        if item:
+            applied.append(item)
+    # ⑦ 汇总
+    return {"applied": applied, "skipped": skipped}
+
+
+async def _probe_schema_state(backend, source, driver):
+    """探测物理状态：有 driver 一次完整 introspect（两用：版本表探测 + old_defs 转换）；
+    否则只读探测版本表。返回 ``(probe, has_version_table)``。"""
     if driver is not None:
         probe = await _introspect.run(backend, driver, None)
         has_version_table = any(
             t.get("name") == _MIGRATION for t in probe.get("tables") or []
         )
-    else:
-        has_version_table = await _has_migration_table(backend, source)
-    if not has_version_table:
-        ensure = _ddl.generate(backend, [_MIGRATION])
-        stmts = _split_statements(ensure)
+        return probe, has_version_table
+    return None, await _has_migration_table(backend, source)
 
-        async def _ensure():
-            for sql in stmts:
-                if sql.strip():
-                    await execute_raw(source, sql, None, True)
 
-        await run_in_transaction(source, _ensure)
-    # ① 旧版定义：old_defs 显式传入者优先；None → 复用本次探测行转 defn（需 driver）。
-    # schema_from_rows 的 name 是物理表名（如 `notes`），与 defs 的 schema 名（如 `Note`）
-    # 不同键——按 name 与 collection 双索引，查找时以 defs 侧 collection 兜底对齐
-    old = old_defs
-    if old is None:
-        if probe is None:
-            raise MetaDefError(
-                "migrate: old_defs 为 None 时需传 driver（introspect 需原生驱动实例，同 sync_schema 惯例）；"
-                "或显式传入 old_defs 跳过探测"
-            )
-        old = {}
-        for d in _core.schema_from_rows(probe, backend):
-            old[d["name"]] = d
-            if d.get("collection") and d["collection"] != d["name"]:
-                old[d["collection"]] = d
-    applied = []
-    skipped = []
-    for name, defn in defs.items():
-        old_defn = _strip_builtin_fields(
-            backend,
-            old.get(name)
-            or (old.get(defn.get("collection")) if defn.get("collection") else None),
-            defn,
-        )
-        # ⓪ 物理内建列完整性（仅 introspect 模式）：camelCase 时代的老表缺 ``__present`` /
-        # ``created_by`` / ``created_at`` 等内建列。先按当前 DDL 自动补列（老库照样迁得过去），
-        # 同时发出可定位告警；**只有补列失败才中断**（保留真报错，不吞成静默通过）。
-        if probe is not None and old_defs is None:
-            table = _ddl._pname(backend, defn.get("collection") or defn.get("name"))
-            if any(t.get("name") == table for t in probe.get("tables") or []):
-                have = {
-                    c.get("name")
-                    for c in probe.get("columns") or []
-                    if c.get("table") == table
-                }
-                missing = sorted(
-                    {
-                        _ddl._pname(backend, n)
-                        for n in _ddl.builtin_field_names(defn, backend)
-                    }
-                    - have
-                )
-                if missing:
-                    try:
-                        for stmt in _ddl.implicit_column_ddl(backend, defn, have):
-                            await execute_raw(source, stmt, None, True)
-                    except Exception as e:
-                        reason = (
-                            f"物理表 {table} 缺内建列 [{', '.join(missing)}]，自动补列失败：{e}；"
-                            "请按当前 DDL 手工补列或重建表后重跑迁移"
-                        )
-                        skipped.append({"name": name, "reason": reason})
-                        raise MigrationUnsupported(
-                            f"MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）",
-                            skipped,
-                        ) from e
-                    _emit_feedback(
-                        {
-                            "type": "warning",
-                            "code": "migrationAutoAddBuiltinColumns",
-                            "layer": "migrate",
-                            "message": (
-                                f"物理表 {table} 缺内建列 [{', '.join(missing)}]，"
-                                "已按当前 DDL 自动补列后继续迁移"
-                            ),
-                            "hint": "新补列的存量行为 NULL；归属键列需按业务回填后 creator 行控才可见",
-                        }
-                    )
-                    have |= set(missing)
-                # ⓪b 归属键回填完整性（仅 introspect 模式）：列已存在但值为 NULL ⇒ creator
-                # 行控下这些行对非 bypass 用户不可见。迁移层不猜业务归属，放行但必须告警
-                # （允许通过、禁止静默失守）。
-                owner = _ddl._owner_field(defn)
-                if owner is not None:
-                    col = _ddl._pname(backend, owner)
-                    # 标识符经 dialect 引用（与 ①/④ 的 DDL 拼接同规），消除裸插值
-                    hit = await execute_raw(
-                        source,
-                        f"SELECT 1 FROM {_ddl._q(backend, table)} WHERE {_ddl._q(backend, col)} IS NULL LIMIT 1",
-                        None,
-                        False,
-                    )
-                    if hit.get("rows"):
-                        _emit_feedback(
-                            {
-                                "type": "warning",
-                                "code": "migrationOwnerKeyNullRows",
-                                "layer": "migrate",
-                                "message": (
-                                    f"物理表 {table} 的归属键 {col} 存在 NULL 行："
-                                    "creator 行控下这些行对非 bypass 用户不可见"
-                                ),
-                                "hint": "请按业务回填归属键；迁移已继续，未静默拦截",
-                            }
-                        )
-        # ⑤ 幂等闸（先于 diff）：hash 相同 → skipped unchanged，不 diff（反推粒度不齐防误报）
-        hash_ = _hash_of(defn)
-        seg = {
-            "tenant": "" if tenant is None else tenant,
-            "env": "" if env is None else env,
-            "backend": backend,
-            "name": name,
-        }
-        rows = await _crud.query(
-            f"{_MIGRATION}($condition:@c0, $sort:@s0){{_id, version, hash}}",
-            {"c0": seg, "s0": {"version": -1}},
-            {"source": source},
-        )
-        if rows and rows[0].get("hash") == hash_:
-            skipped.append({"name": name, "reason": "unchanged"})
-            continue
-        # ②③ diff（物理命名空间）：白名单外 → 收集 skipped 并抛 MigrationUnsupported（固定分步建议）
-        phys_new = _align_types(backend, old_defn, _physical_defn(backend, defn))
-        plan = _ddl.diff_defs(old_defn, phys_new)
-        if plan["errors"]:
-            skipped.append({"name": name, "reason": plan["errors"]})
-            raise MigrationUnsupported(
-                f"MIGRATION_UNSUPPORTED: {'；'.join(plan['errors'])}（{_UNSUPPORTED_HINT}）",
-                skipped,
-            )
-        # ④ 方言 SQL（纯文本）
-        stmts = _ddl.generate_migration(backend, old_defn, phys_new)
-        # ⓪c 归档表补建（仅 introspect 模式）：主表已存在时 addTable 分支不触发，老库常缺
-        # ``<table>_deleted`` 附表 → remove 的归档写入报 no such table（删除功能不可用）。
-        # 此处按当前 def 补建；archive=False 无归档表，跳过。
-        if probe is not None and old_defs is None and defn.get("archive") is not False:
-            arch_defn = _ddl._archive_defn_of(defn)
-            main_table = _ddl._pname(
-                backend, defn.get("collection") or defn.get("name")
-            )
-            arch_table = _ddl._pname(
-                backend, arch_defn.get("collection") or arch_defn.get("name")
-            )
-            existing = {t.get("name") for t in probe.get("tables") or []}
-            if main_table in existing:
-                if arch_table not in existing:
-                    stmts = _ddl.archive_ddl(backend, defn) + stmts
-                else:
-                    # 内建列补齐（旧版归档表缺 created_at/updated_at/__present；声明字段差异
-                    # 由 generate_migration 主表分支同步处理，此处不重复 diff）
-                    arch_have = {
-                        c.get("name")
-                        for c in probe.get("columns") or []
-                        if c.get("table") == arch_table
-                    }
-                    stmts = (
-                        _ddl.implicit_column_ddl(backend, arch_defn, arch_have) + stmts
-                    )
-        # version = 该 name 历史最大 version+1（复用 metadef next_version 语义）
-        version = (max(r["version"] for r in rows) if rows else 0) + 1
-        # ⑥ SQL 与版本行同事务：失败整体回滚、无孤儿版本行
-        row = {
-            "_id": migration_id(tenant, env, backend, name, version),
-            **seg,
-            "hash": hash_,
-            "version": version,
-            "appliedAt": int(time.time() * 1000),
-            "sqls": stmts,
-        }
+async def _ensure_migration_table(backend, source):
+    """建版本表：逐条执行 core 产出的 CREATE TABLE 语句（事务内；幂等由探测保证）"""
+    stmts = _split_statements(_ddl.generate(backend, [_MIGRATION]))
 
-        # B023：默认参数显式绑定循环变量（_apply 当轮即被 await，绑定仅为过门禁与防延迟误用）
-        async def _apply(stmts=stmts, row=row):
-            for sql in stmts:
+    async def _ensure():
+        for sql in stmts:
+            if sql.strip():
                 await execute_raw(source, sql, None, True)
-            with _internal_ctx():
-                await _crud.insert(_MIGRATION, row, {"source": source})
 
-        await run_in_transaction(source, _apply)
-        applied.append(
+    await run_in_transaction(source, _ensure)
+
+
+def _load_old_defs(old_defs, probe, backend):
+    """旧版定义装载：显式传入优先；None → 探测行转 defn（name 与 collection 双索引兜底对齐）"""
+    if old_defs is not None:
+        return old_defs
+    if probe is None:
+        raise MetaDefError(
+            "migrate: old_defs 为 None 时需传 driver（introspect 需原生驱动实例，同 sync_schema 惯例）；"
+            "或显式传入 old_defs 跳过探测"
+        )
+    old = {}
+    for d in _core.schema_from_rows(probe, backend):
+        old[d["name"]] = d
+        if d.get("collection") and d["collection"] != d["name"]:
+            old[d["collection"]] = d
+    return old
+
+
+async def _fix_builtin_columns(backend, source, probe, name, defn, skipped):
+    """⓪ 物理内建列完整性（仅 introspect 模式）：缺列按当前 DDL 自动补齐并告警（补列失败才
+    中断，保留真报错）；归属键已存在但值为 NULL 时放行并告警（迁移层不猜业务归属）"""
+    table = _ddl._pname(backend, defn.get("collection") or defn.get("name"))
+    if not any(t.get("name") == table for t in probe.get("tables") or []):
+        return
+    have = {
+        c.get("name")
+        for c in probe.get("columns") or []
+        if c.get("table") == table
+    }
+    missing = sorted(
+        {
+            _ddl._pname(backend, n)
+            for n in _ddl.builtin_field_names(defn, backend)
+        }
+        - have
+    )
+    if missing:
+        try:
+            for stmt in _ddl.implicit_column_ddl(backend, defn, have):
+                await execute_raw(source, stmt, None, True)
+        except Exception as e:
+            reason = (
+                f"物理表 {table} 缺内建列 [{', '.join(missing)}]，自动补列失败：{e}；"
+                "请按当前 DDL 手工补列或重建表后重跑迁移"
+            )
+            skipped.append({"name": name, "reason": reason})
+            raise MigrationUnsupported(
+                f"MIGRATION_UNSUPPORTED: {reason}（{_UNSUPPORTED_HINT}）",
+                skipped,
+            ) from e
+        _emit_feedback(
             {
-                "name": name,
-                "from": rows[0]["version"] if rows else 0,
-                "to": version,
-                "version": version,
+                "type": "warning",
+                "code": "migrationAutoAddBuiltinColumns",
+                "layer": "migrate",
+                "message": (
+                    f"物理表 {table} 缺内建列 [{', '.join(missing)}]，"
+                    "已按当前 DDL 自动补列后继续迁移"
+                ),
+                "hint": "新补列的存量行为 NULL；归属键列需按业务回填后 creator 行控才可见",
             }
         )
-    # ⑦ 汇总
-    return {"applied": applied, "skipped": skipped}
+        have |= set(missing)
+    # ⓪b 归属键回填完整性（仅 introspect 模式）：列已存在但值为 NULL ⇒ creator
+    # 行控下这些行对非 bypass 用户不可见。迁移层不猜业务归属，放行但必须告警
+    # （允许通过、禁止静默失守）。
+    owner = _ddl._owner_field(defn)
+    if owner is not None:
+        col = _ddl._pname(backend, owner)
+        # 标识符经 dialect 引用（与 ①/④ 的 DDL 拼接同规），消除裸插值
+        hit = await execute_raw(
+            source,
+            f"SELECT 1 FROM {_ddl._q(backend, table)} WHERE {_ddl._q(backend, col)} IS NULL LIMIT 1",
+            None,
+            False,
+        )
+        if hit.get("rows"):
+            _emit_feedback(
+                {
+                    "type": "warning",
+                    "code": "migrationOwnerKeyNullRows",
+                    "layer": "migrate",
+                    "message": (
+                        f"物理表 {table} 的归属键 {col} 存在 NULL 行："
+                        "creator 行控下这些行对非 bypass 用户不可见"
+                    ),
+                    "hint": "请按业务回填归属键；迁移已继续，未静默拦截",
+                }
+            )
+
+
+def _archive_ddl_prefix(backend, probe, defn, stmts):
+    """⓪c 归档表补建（仅 introspect 模式）：主表已存在时 addTable 分支不触发，老库常缺
+    ``<table>_deleted`` 附表 → remove 的归档写入报 no such table。按当前 def 补建；归档表在但
+    缺内建列则补齐（声明字段差异由 generate_migration 主表分支同步处理，此处不重复 diff）。
+    archive=False 无归档表。返回（可能前置了 DDL 的）迁移语句串。"""
+    arch_defn = _ddl._archive_defn_of(defn)
+    main_table = _ddl._pname(backend, defn.get("collection") or defn.get("name"))
+    arch_table = _ddl._pname(
+        backend, arch_defn.get("collection") or arch_defn.get("name")
+    )
+    existing = {t.get("name") for t in probe.get("tables") or []}
+    if main_table not in existing:
+        return stmts
+    if arch_table not in existing:
+        return _ddl.archive_ddl(backend, defn) + stmts
+    arch_have = {
+        c.get("name")
+        for c in probe.get("columns") or []
+        if c.get("table") == arch_table
+    }
+    return _ddl.implicit_column_ddl(backend, arch_defn, arch_have) + stmts
+
+
+async def _migrate_one(
+    backend, source, name, defn, old, probe, introspect_mode, tenant, env, skipped
+):
+    """单 schema 迁移全程：幂等闸 → diff → 方言 SQL → 归档补建 → 事务落地；unchanged 返回 None"""
+    old_defn = _strip_builtin_fields(
+        backend,
+        old.get(name)
+        or (old.get(defn.get("collection")) if defn.get("collection") else None),
+        defn,
+    )
+    if introspect_mode:
+        await _fix_builtin_columns(backend, source, probe, name, defn, skipped)
+    # ⑤ 幂等闸（先于 diff）：hash 相同 → skipped unchanged，不 diff（反推粒度不齐防误报）
+    hash_ = _hash_of(defn)
+    seg = {
+        "tenant": "" if tenant is None else tenant,
+        "env": "" if env is None else env,
+        "backend": backend,
+        "name": name,
+    }
+    rows = await _crud.query(
+        f"{_MIGRATION}($condition:@c0, $sort:@s0){{_id, version, hash}}",
+        {"c0": seg, "s0": {"version": -1}},
+        {"source": source},
+    )
+    if rows and rows[0].get("hash") == hash_:
+        skipped.append({"name": name, "reason": "unchanged"})
+        return None
+    # ②③ diff（物理命名空间）：白名单外 → 收集 skipped 并抛 MigrationUnsupported（固定分步建议）
+    phys_new = _align_types(backend, old_defn, _physical_defn(backend, defn))
+    plan = _ddl.diff_defs(old_defn, phys_new)
+    if plan["errors"]:
+        skipped.append({"name": name, "reason": plan["errors"]})
+        raise MigrationUnsupported(
+            f"MIGRATION_UNSUPPORTED: {'；'.join(plan['errors'])}（{_UNSUPPORTED_HINT}）",
+            skipped,
+        )
+    # ④ 方言 SQL（纯文本）
+    stmts = _ddl.generate_migration(backend, old_defn, phys_new)
+    if probe is not None and introspect_mode and defn.get("archive") is not False:
+        stmts = _archive_ddl_prefix(backend, probe, defn, stmts)
+    # version = 该 name 历史最大 version+1（复用 metadef next_version 语义）
+    version = (max(r["version"] for r in rows) if rows else 0) + 1
+    # ⑥ SQL 与版本行同事务：失败整体回滚、无孤儿版本行
+    row = {
+        "_id": migration_id(tenant, env, backend, name, version),
+        **seg,
+        "hash": hash_,
+        "version": version,
+        "appliedAt": int(time.time() * 1000),
+        "sqls": stmts,
+    }
+
+    # B023：默认参数显式绑定循环变量（_apply 当轮即被 await，绑定仅为过门禁与防延迟误用）
+    async def _apply(stmts=stmts, row=row):
+        """单 schema 的迁移落地：逐条执行迁移 SQL 后写版本行（同一事务，失败整体回滚）"""
+        for sql in stmts:
+            await execute_raw(source, sql, None, True)
+        with _internal_ctx():
+            await _crud.insert(_MIGRATION, row, {"source": source})
+
+    await run_in_transaction(source, _apply)
+    return {
+        "name": name,
+        "from": rows[0]["version"] if rows else 0,
+        "to": version,
+        "version": version,
+    }
 
 
 def _split_statements(sql_text):

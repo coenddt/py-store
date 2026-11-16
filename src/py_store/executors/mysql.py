@@ -126,39 +126,23 @@ def create(driver, options=None):
         池形态经 ``open_acquire`` checkout 专用连接后 ``BEGIN``，
         commit/rollback 后由 release 归还连接。
         """
-        from . import open_acquire  # 延迟导入：避免与包 __init__ 相互导入
+        from . import (  # 延迟导入：避免与包 __init__ 相互导入
+            idempotent_tx_ops,
+            open_acquire,
+            savepoint_ops,
+        )
 
         conn, release = await open_acquire(driver)
         async with conn.cursor() as cur:
             await cur.execute("BEGIN")
-        closed = False
+        commit, rollback = idempotent_tx_ops(conn.commit, conn.rollback)
 
-        async def commit():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await conn.commit()
-
-        async def rollback():
-            nonlocal closed
-            if closed:
-                return
-            closed = True
-            await conn.rollback()
-
-        async def savepoint(name):
-            """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
+        async def exec_sql(sql):
+            """单语句执行入口（asyncmy 需经 cursor 执行）"""
             async with conn.cursor() as cur:
-                await cur.execute("SAVEPOINT %s" % name)
+                await cur.execute(sql)
 
-        async def release_savepoint(name):
-            async with conn.cursor() as cur:
-                await cur.execute("RELEASE SAVEPOINT %s" % name)
-
-        async def rollback_to_savepoint(name):
-            async with conn.cursor() as cur:
-                await cur.execute("ROLLBACK TO SAVEPOINT %s" % name)
+        savepoint, release_savepoint, rollback_to_savepoint = savepoint_ops(exec_sql)
 
         return {
             "exec": lambda plan: run_stmts(conn, plan),
@@ -170,20 +154,11 @@ def create(driver, options=None):
             "rollback_to_savepoint": rollback_to_savepoint,
         }
 
-    async def with_transaction(body):
-        """事务执行：基于 ``open_transaction`` 的显式事务句柄（无第二套事务路径）；
-        body(execute_on_tx, tx=None) 的全部 plan 落在同一连接同一事务，任一失败整体回滚。
-        第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数"""
-        tx = await open_transaction()
-        try:
-            out = await body(tx["exec"], tx)
-            await tx["commit"]()
-            return out
-        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
-            await tx["rollback"]()
-            raise
-        finally:
-            await tx["release"]()
+    from . import (  # 延迟导入：避免与包 __init__ 相互导入
+        make_with_transaction,
+    )
+
+    with_transaction = make_with_transaction(open_transaction)
 
     return {
         "kind": "mysql",

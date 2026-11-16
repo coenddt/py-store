@@ -81,6 +81,7 @@ def make_openai_compat(
         )
 
     async def llm(messages: list[dict]) -> str:
+        """协议实现：组装请求体（json_mode 契约预检、effort 注入）经线程池调兼容端点，解析 choices 首条 content；空 content 抛 llmEmptyContent"""
         body: dict = {"model": model, "messages": messages, "max_tokens": max_tokens}
         if json_mode:
             # 契约预检：json_object 要求 prompt 含 "json" 字样（DeepSeek 实测 400 实证）。
@@ -113,6 +114,7 @@ def make_openai_compat(
         )
 
         def _call():
+            """同步阻塞 HTTP 调用（供 asyncio.to_thread）：HTTP 4xx/5xx 抛 llmHttpError（携状态码与响应体片段），网络层失败抛 llmNetworkError"""
             try:
                 with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                     return json.loads(resp.read().decode("utf-8"))

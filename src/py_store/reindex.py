@@ -18,6 +18,7 @@ SEP = "\u001e"
 
 
 def hash_text(source_fields, doc):
+    """按「字段名:字节长度:值」逐字段拼接（字段名排序，None 记空串）后 SHA-256，得到源内容指纹"""
     parts = []
     for f in sorted(source_fields):
         v = doc.get(f)
@@ -27,12 +28,14 @@ def hash_text(source_fields, doc):
 
 
 def _meta(schema_name):
+    """取 schema 定义；不存在则抛 ERR_REINDEX_SCHEMA"""
     if not schema_mod.has(schema_name):
         raise ValueError(f"ERR_REINDEX_SCHEMA:未知 schema {schema_name}")
     return schema_mod.get(schema_name)
 
 
 def _opts(m, opts):
+    """校验并补全回填选项：field 须为 vector 字段、hashField 须为 string、sourceFields 须为非空 string 数组、embed 须可调用、pageSize 限 1..MAX_PAGE；filter/force/dryRun/routeOverride 填默认值"""
     o = dict(opts or {})
     f = m["fields"].get(o.get("field"))
     if not f or f.get("type") != "vector":
@@ -72,12 +75,14 @@ def _opts(m, opts):
 
 
 def _text(source_fields, doc):
+    """把源字段按序以分隔符 SEP 拼成待嵌入文本（None 记空串）"""
     return SEP.join(
         "" if doc.get(f) is None else str(doc.get(f)) for f in source_fields
     )
 
 
 async def _embed_and_write(store, m, o, todo, dim):
+    """对 todo 行调 embed（同步或协程）生成向量，逐条校验维度后 update 写回向量与源 hash；返回写入条数"""
     texts = [_text(o["sourceFields"], r) for r in todo]
     vecs = o["embed"](texts)
     if inspect.isawaitable(vecs):
@@ -117,6 +122,7 @@ async def reindex_vectors(
     dryRun=False,
     routeOverride=None,
 ):
+    """向量回填主入口：按 _id 游标分页扫描目标 schema，hash 与源内容一致的跳过，其余 embed 后写回；force 全量重算、dryRun 只统计不落库、routeOverride 路由覆盖，返回 scanned/embedded/skipped/pending/pages/elapsedMs 统计"""
     started = time.monotonic()
     m = _meta(schema_name)
     o = _opts(
@@ -198,6 +204,7 @@ async def reindex_vectors(
 
 
 async def reindex_one(store, schema_name, rid, opts):
+    """单条回填：按 _id 取行，hash 一致即跳过（返回 embedded=0, skipped=1），否则 embed 写回；记录不存在抛 ERR_REINDEX_NOT_FOUND"""
     m = _meta(schema_name)
     o = _opts(m, opts)
     dim = m["fields"][o["field"]].get("dim")
@@ -216,11 +223,13 @@ async def reindex_one(store, schema_name, rid, opts):
 
 
 def register_vector_reindex(cfg):
+    """把回填注册为触发器函数 ``<schema>.vectorReindex``（校验 cfg 后固定单条回填选项），返回函数引用名"""
     m = _meta(cfg.get("schema"))
     o = _opts(m, cfg)
     fn_ref = f"{m['name']}.vectorReindex"
 
     async def _impl(args, _ctx, host):
+        """触发器实现：取 args._id（缺失抛 ERR_REINDEX_TRIGGER），用注册时固化的选项对该条回填"""
         rid = (args or {}).get("_id")
         if rid is None or rid == "":
             raise ValueError(f"ERR_REINDEX_TRIGGER:{fn_ref} 缺少 args._id")

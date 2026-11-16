@@ -15,6 +15,7 @@ _BASE36_DIGITS = string.digits + string.ascii_lowercase
 
 
 def _to_base36(n):
+    """非负整数 → 小写 base36 字符串（0 返回 "0"）"""
     if n == 0:
         return "0"
     out = []
@@ -53,6 +54,7 @@ def _new_id_pool(schema_name, data):
     pool = []
 
     def walk(name, node):
+        """递归数据树：节点无有效 _id 且 schema 配 idPrefix 则按序入池，关系子文档（含数组）递归"""
         s = _get_schema(name)
         if not _truthy((node or {}).get("_id")) and s["idPrefix"]:
             pool.append(_generate_id(s))

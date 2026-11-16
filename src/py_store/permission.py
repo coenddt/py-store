@@ -4,7 +4,8 @@
 角色评估、字段过滤、所有者条件注入等权限逻辑已全部下沉 Rust core；
 本模块只保留 Host 侧职责：
   - 请求上下文的隐式传递（core 的 ctx 一律显式入参，由本模块取出后传入）
-  - PermissionError（core 返回的权限类错误消息由 crud 映射为本错误类型）
+  - PermissionDeniedError（core 返回的权限类错误消息由 crud 映射为本错误类型；
+    ``PermissionError`` 为兼容别名，避免遮蔽内建异常）
   - 对 core 权限方法的薄包装（保留 schema 字典入参的外部调用形态）
 
 角色清单（共 9 种）:
@@ -34,11 +35,12 @@ _TRUSTED_KEYS = ("internal",)
 
 
 def _assert_no_trusted_keys(ctx, where):
+    """校验 ctx 未携带可信标记（internal 等）：命中即抛 PermissionDeniedError（防越权注入）；非 dict 直接放行"""
     if not isinstance(ctx, dict):
         return
     for k in _TRUSTED_KEYS:
         if k in ctx:
-            raise PermissionError(
+            raise PermissionDeniedError(
                 f"{where}: ctx.{k} 属可信标记，禁止由请求上下文注入（内部调用请用 run_as_internal）"
             )
 
@@ -109,36 +111,44 @@ def _model(schema):
 
 
 def can_read_schema(schema, ctx):
+    """透传 core.can_read：当前上下文对模型是否有读权（schema 可传字典或名称）"""
     return get_core().can_read(_model(schema), ctx)
 
 
 def can_write_schema(schema, ctx):
+    """透传 core.can_write：当前上下文对模型是否有写权"""
     return get_core().can_write(_model(schema), ctx)
 
 
 def should_inject_owner_condition(schema, ctx):
+    """透传 core.should_inject_owner：查询是否需注入所有者条件"""
     return get_core().should_inject_owner(_model(schema), ctx)
 
 
 def merge_owner_condition(schema, ctx, condition):
+    """透传 core.merge_owner_condition 合并所有者条件；core 不注入返回 None 时原样返回入参条件"""
     out = get_core().merge_owner_condition(_model(schema), ctx, condition)
     # core 在「不注入」时返回 null（无法区分原条件为 null）→ 原样返回入参条件
     return condition if out is None else out
 
 
 def get_readable_fields(schema, ctx):
+    """透传 core.readable_fields：当前上下文在模型上的可读字段集"""
     return get_core().readable_fields(_model(schema), ctx)
 
 
 def get_readable_relations(schema, ctx):
+    """透传 core.readable_relations：当前上下文可读的关联集合"""
     return get_core().readable_relations(_model(schema), ctx)
 
 
 def get_writable_fields(schema, ctx):
+    """透传 core.writable_fields：当前上下文在模型上的可写字段集"""
     return get_core().writable_fields(_model(schema), ctx)
 
 
 def filter_writable_data(schema, ctx, data):
+    """透传 core.filter_writable_data：按可写字段集裁剪待写数据"""
     return get_core().filter_writable_data(_model(schema), ctx, data)
 
 
@@ -197,10 +207,23 @@ def set_unconfigured_policy(policy):
 # ─── 自定义错误 ──────────────────────────────────────────────
 
 
-class PermissionError(Exception):
+class PermissionDeniedError(Exception):
+    """权限拒绝（core 权限类错误由 crud 映射为本类型，403）。
+
+    命名避让内建 ``PermissionError``（OSError 族）：以 ``PermissionError`` 作
+    ``except`` 目标的调用方将捕获到本自定义类而非内建，语义易错——故类名收敛为
+    ``PermissionDeniedError``；``PermissionError`` 保留为**兼容别名**（存量
+    ``store.PermissionError`` / ``except permission.PermissionError`` 调用面零破坏）。
+    """
+
     def __init__(self, message, status=403):
+        """构造权限拒绝错误：message 为错误文案，status 默认 403"""
         super().__init__(message)
         self.status = status
+
+
+# 兼容别名：保持历史调用面（store.PermissionError）可用；新代码用 PermissionDeniedError
+PermissionError = PermissionDeniedError
 
 
 class NoContextError(Exception):
@@ -213,6 +236,7 @@ class NoContextError(Exception):
     """
 
     def __init__(self, message, status=403):
+        """构造上下文缺失错误：固定 code=no_context，status 默认 403"""
         super().__init__(message)
         self.code = "no_context"
         self.status = status

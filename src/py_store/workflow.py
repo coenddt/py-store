@@ -36,6 +36,7 @@ _LIST_TYPES = (list, tuple)
 
 # 列表插值统一 JSON 风格（与 node JSON.stringify 逐字节一致——parity 锚要求错误文案一致）
 def _json(x):
+    """JSON 序列化（无空格分隔符，与 node JSON.stringify 逐字节一致，错误文案 parity 锚）"""
     return json.dumps(x, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -126,6 +127,7 @@ class _StepFailure(Exception):
     """步骤失败内部信号：fail 步骤语义失败（message）或步骤执行 Err——fail-fast + 整体回滚"""
 
     def __init__(self, message, index=None):
+        """构造步骤失败信号：index 记失败步骤下标（回写 run 的 stepIndex）"""
         super().__init__(message)
         self.index = index
 
@@ -172,6 +174,7 @@ def _scan_placeholders(value):
     out = []
 
     def walk(v):
+        """递归遍历结构：字符串值上逐个捕获外层占位符（内层内容 + 完整形态），容器递归"""
         if isinstance(v, str):
             for m in _OUTER_PH.finditer(v):
                 out.append((m.group(0)[2:-2], m.group(0)))
@@ -233,16 +236,8 @@ def _check_expr(inner, defined_as, errors, where):
         )
 
 
-def validate_defn(defn):
-    """Workflow defn 静态校验 → 错误列表（空 = 通过）。纯函数，白名单外全量收集。
-
-    检查项：顶层/步骤字段白名单、op 白名单、必填字段、as 唯一、占位符前向引用、
-    when 结构（恰一个白名单算子 + 合法参数键）、upsert 必带 match、gql 禁占位符
-    （参数化走 params 绑定，防注入）。
-    """
-    errors = []
-    if not isinstance(defn, dict):
-        return ["defn 须为 JSON 对象"]
+def _validate_defn_name(defn, errors):
+    """name 必填校验：非空字符串，且不得以 __ 开头（前缀保留给内建 schema）"""
     name = defn.get("name")
     if not name or not isinstance(name, str):
         errors.append("name 必填（非空字符串）")
@@ -250,9 +245,17 @@ def validate_defn(defn):
         errors.append(
             f'name "{name}" 以 __ 开头（前缀保留给内建 schema，禁止用于工作流）'
         )
+
+
+def _validate_top_fields(defn, errors):
+    """顶层字段白名单校验（白名单外逐项报错）"""
     for k in defn:
         if k not in _TOP_FIELDS:
             errors.append(f'未知顶层字段 "{k}"（白名单: {_json(sorted(_TOP_FIELDS))}）')
+
+
+def _validate_access(defn, errors):
+    """read/write/run 白名单（字符串数组）+ denyRead 类型检查"""
     for k in ("read", "write", "run"):
         v = defn.get(k)
         if v is not None and (
@@ -277,11 +280,46 @@ def validate_defn(defn):
         if not isinstance(reason, bool):
             errors.append("denyRead 须为布尔值（显式拒绝读开关，口径以 core 为准）")
 
-    steps = defn.get("steps")
-    if not isinstance(steps, _LIST_TYPES) or not steps:
-        errors.append("steps 必填（非空数组，线性步骤序列）")
-        return errors
 
+def _validate_step_fields(where, step, op, errors):
+    """步骤字段白名单 + 必填字段校验"""
+    for k in step:
+        if k not in _STEP_FIELDS[op]:
+            errors.append(
+                f'{where}: 未知步骤字段 "{k}"（{op} 白名单: {_json(sorted(_STEP_FIELDS[op]))}）'
+            )
+    for k in _STEP_REQUIRED[op]:
+        if step.get(k) in (None, ""):
+            errors.append(f'{where}: {op} 步骤缺少必填字段 "{k}"')
+
+
+def _validate_step_refs(where, step, op, defined_as, errors):
+    """步骤语义校验：upsert 必带 match、gql 禁占位符（注入面）、占位符前向引用、when 结构"""
+    if op == "mutation" and step.get("upsert") and not step.get("match"):
+        errors.append(f"{where}: upsert: true 须提供 match 条件")
+    if (
+        op == "query"
+        and isinstance(step.get("gql"), str)
+        and _GQL_PH.search(step["gql"])
+    ):
+        errors.append(
+            f"{where}: gql 内嵌占位符不支持（注入面）；动态参数请走 params 绑定"
+        )
+    # 占位符前向引用：扫描该步全部占位符字段（gql 除外——已禁）
+    scan_pool = {k: v for k, v in step.items() if k not in ("op", "gql")}
+    for inner, _whole in _scan_placeholders(scan_pool):
+        _check_expr(inner, defined_as, errors, where)
+    # when 结构
+    when = step.get("when")
+    if when is not None:
+        _validate_when(when, errors, f"{where}.when")
+
+
+def _validate_steps(steps, errors):
+    """steps 主循环：逐步骤白名单/必填/语义校验，并维护 as 引用集合。
+
+    前向引用集合：不含当前步骤自身的 as（自引用在执行期必然悬空——结果尚不存在）。
+    """
     defined_as: set[str] = set()
     for i, step in enumerate(steps):
         where = f"steps[{i}]"
@@ -295,39 +333,36 @@ def validate_defn(defn):
                 f"（首批白名单: {_json([*_OPS])}；循环/并行/子工作流/审批节点均不支持）"
             )
             continue
-        for k in step:
-            if k not in _STEP_FIELDS[op]:
-                errors.append(
-                    f'{where}: 未知步骤字段 "{k}"（{op} 白名单: {_json(sorted(_STEP_FIELDS[op]))}）'
-                )
-        for k in _STEP_REQUIRED[op]:
-            if step.get(k) in (None, ""):
-                errors.append(f'{where}: {op} 步骤缺少必填字段 "{k}"')
+        _validate_step_fields(where, step, op, errors)
         as_name = step.get("as")
         if op in ("query", "mutation") and as_name:
             if as_name in defined_as:
                 errors.append(f'{where}: as "{as_name}" 重复（引用歧义，禁止覆盖）')
-        # 前向引用集合：不含当前步骤自身的 as（自引用在执行期必然悬空——结果尚不存在）
-        if op == "mutation" and step.get("upsert") and not step.get("match"):
-            errors.append(f"{where}: upsert: true 须提供 match 条件")
-        if (
-            op == "query"
-            and isinstance(step.get("gql"), str)
-            and _GQL_PH.search(step["gql"])
-        ):
-            errors.append(
-                f"{where}: gql 内嵌占位符不支持（注入面）；动态参数请走 params 绑定"
-            )
-        # 占位符前向引用：扫描该步全部占位符字段（gql 除外——已禁）
-        scan_pool = {k: v for k, v in step.items() if k not in ("op", "gql")}
-        for inner, _whole in _scan_placeholders(scan_pool):
-            _check_expr(inner, defined_as, errors, where)
-        # when 结构
-        when = step.get("when")
-        if when is not None:
-            _validate_when(when, errors, f"{where}.when")
+        _validate_step_refs(where, step, op, defined_as, errors)
         if op in ("query", "mutation") and as_name:
             defined_as.add(as_name)
+
+
+def validate_defn(defn):
+    """Workflow defn 静态校验 → 错误列表（空 = 通过）。纯函数，白名单外全量收集。
+
+    检查项：顶层/步骤字段白名单、op 白名单、必填字段、as 唯一、占位符前向引用、
+    when 结构（恰一个白名单算子 + 合法参数键）、upsert 必带 match、gql 禁占位符
+    （参数化走 params 绑定，防注入）。
+    """
+    errors = []
+    if not isinstance(defn, dict):
+        return ["defn 须为 JSON 对象"]
+    _validate_defn_name(defn, errors)
+    _validate_top_fields(defn, errors)
+    _validate_access(defn, errors)
+
+    steps = defn.get("steps")
+    if not isinstance(steps, _LIST_TYPES) or not steps:
+        errors.append("steps 必填（非空数组，线性步骤序列）")
+        return errors
+
+    _validate_steps(steps, errors)
     return errors
 
 
@@ -763,6 +798,7 @@ async def _persist_write(doc):
     """run 记录写入（internal 上下文——__workflowRun write 显式空名单仅放行 internal/admin）"""
 
     def _do():
+        """internal 上下文内对内建 __workflowRun 执行 mutation（写入 run 记录）"""
         from . import crud
 
         return crud.mutation(_BUILTIN_NAME, doc)
@@ -775,6 +811,7 @@ async def _persist_update(rid, patch):
     """run 记录收尾更新（事务外独立提交：业务事务回滚不影响失败 run 可查——铁律 B）"""
 
     def _do():
+        """internal 上下文内按 _id 更新 __workflowRun 记录"""
         from . import crud
 
         return crud.update(_BUILTIN_NAME, {"_id": rid}, patch)
@@ -845,6 +882,7 @@ async def run(name, input_map=None, *, dry_run=False, route_override=None):
     ctx_map: dict = {}
 
     async def _execute():
+        """步骤循环执行体：交给 _run_steps（供 run_atomic 包裹实现单源整体原子）"""
         await _run_steps(d, inp, ctx_map, trace, dry, route_override)
 
     status, error, step_index = (

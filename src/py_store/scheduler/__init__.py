@@ -34,6 +34,7 @@ _INT = re.compile(r"^\d+$")
 
 
 def _bad(msg):
+    """构造带 ERR_CRON 前缀的 cron 解析错误"""
     return ValueError(f"ERR_CRON:{msg}")
 
 
@@ -143,10 +144,12 @@ _task = None
 
 
 def _ms_to_next_minute():
+    """距下一个整分钟边界的毫秒数（用于循环对齐分钟节拍）"""
     return (60 - datetime.now().second) * 1000 - datetime.now().microsecond // 1000
 
 
 async def _loop():
+    """分钟对齐主循环：每分钟 tick_once 一次，单轮失败发反馈告警后继续（不中断循环）"""
     while True:
         try:
             await tick_once()

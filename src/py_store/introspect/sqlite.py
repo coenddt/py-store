@@ -12,6 +12,7 @@ def _quote(name):
 
 
 async def _all(db, sql):
+    """执行一条 SQL 并取回全部行（用毕关闭游标）。"""
     cur = await db.execute(sql)
     try:
         return await cur.fetchall()
@@ -20,6 +21,7 @@ async def _all(db, sql):
 
 
 async def introspect(db, options=None):
+    """只读采集（``options['database']`` 可选 attached 库）的表/列/外键/索引并归一化。"""
     if db is None or not hasattr(db, "execute"):
         raise TypeError("sqlite introspection 需要 aiosqlite 的 Connection 实例")
 

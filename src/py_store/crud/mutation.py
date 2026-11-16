@@ -34,6 +34,7 @@ async def _mutation_one(schema_name, data, now, route_override=None):
         _emit_feedback(dict(d or {}, type="mutation_degraded"))
 
     async def _run_steps():
+        """按规划顺序执行步骤：占位符用已得结果回填后逐条 _exec，首步结果作为根文档回填计算列"""
         resolved: list = []
         root_result = None
         for i, step in enumerate(plan["steps"]):

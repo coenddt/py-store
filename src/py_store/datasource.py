@@ -83,6 +83,7 @@ class NonAtomicWriteError(RuntimeError):
     """会话内写入了多个数据源：跨源写无法原子（fail-closed，绝不静默提交半截）"""
 
     def __init__(self, sources):
+        """记录肇事数据源列表并组装 fail-closed 错误信息"""
         self.sources = sorted(sources)
         super().__init__(
             "会话内写入了多个数据源（%s）：跨源写无法原子（Phase 1 未提供分布式事务）；"
@@ -103,6 +104,7 @@ class PushdownUnsupportedError(RuntimeError):
     """
 
     def __init__(self, source, kind, codes, warnings):
+        """组装下推不支持错误信息，并保留 source/kind/不可翻译 codes 与警告供 feedback() 转出"""
         msg = f"SQL 下推不支持（{kind}）: {', '.join(codes)}；{' / '.join(warnings)}"
         super().__init__(msg)
         self.source = source
@@ -509,6 +511,7 @@ async def run_in_transaction(source, fn):
         tx_desc = {"kind": conn["kind"], "exec": None, "tx": None}
 
         async def _body(exec_on_tx, tx=None):
+            """事务回包：把连接执行器与事务句柄登记进该源视图，再执行被包裹函数"""
             tx_desc["exec"] = exec_on_tx
             tx_desc["tx"] = tx
             return await fn()
@@ -544,6 +547,7 @@ async def run_in_transaction(source, fn):
 
 
 def _exec_of(connection):
+    """从 SQL 连接描述（Mapping）取 exec 执行器；非 Mapping 连接返回 None"""
     if isinstance(connection, Mapping):
         return connection.get("exec")
     return None
@@ -785,6 +789,7 @@ class Session:
     """
 
     def __init__(self):
+        """初始化会话状态：视图/事务表、开启与写序、嵌套作用域栈与告警去重集"""
         self._views = {}  # source -> {'kind','exec','tx'} | Mongo 视图 | None（None=直通）
         self._txs = {}  # source -> 显式事务句柄
         self._opened = []  # 开启顺序
@@ -800,6 +805,7 @@ class Session:
     # ---------- 生命周期 ----------
 
     async def __aenter__(self):
+        """进入会话：嵌套时在外层上压作用域（保存点隔离）；否则注册为当前会话"""
         parent = _current_session.get()
         if parent is not None:
             self._outer = parent  # 嵌套：生命周期交外层
@@ -809,6 +815,7 @@ class Session:
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        """退出会话：嵌套层只收束本层保存点；外层异常全回滚、跨源写抛 NonAtomicWriteError，否则提交"""
         if self._outer is not None:
             # 嵌套：只收束本层（失败回滚到本层保存点），生命周期仍交外层
             await self._outer.pop_scope(self._scope, rollback=exc_type is not None)
@@ -827,6 +834,7 @@ class Session:
                 _current_session.reset(self._token)
 
     async def _finalize(self, commit):
+        """收尾各源事务：commit=True 逐源提交（失败级联回滚其余源），False 按开启逆序回滚；最后统一释放并清理，失败经 _warn_finalize_failure 反馈后重抛首个异常"""
         # 收尾路径（commit 失败级联回滚 / 显式 rollback / 释放）必须覆盖取消与中断，
         # 故统一捕获 BaseException；失败逐条收集后经 _warn_finalize_failure 反馈，不静默。
         errors = []
@@ -982,6 +990,7 @@ class Session:
             scope["txs"][source] = tx
 
     def _warn_scope_no_savepoint(self, source):
+        """该源在嵌套作用域中无保存点原语 → 发一次降级告警（按源去重）"""
         if source in self._sp_warned:
             return
         self._sp_warned.add(source)
@@ -990,6 +999,7 @@ class Session:
     # ---------- 告警（自动反馈：允许降级、禁止静默） ----------
 
     def _warn_not_atomic(self, source, kind):
+        """该源未实现 open_transaction → 发 session_not_atomic 降级声明（同源只发一次）"""
         if source in self._warned:
             return
         self._warned.add(source)
@@ -1019,6 +1029,7 @@ class Session:
         _warn_mongo_unsupported(source, "standalone" if cap is False else "unknown")
 
     def _warn_finalize_failure(self, source, commit, exc):
+        """会话收尾（commit/rollback）失败 → 发 session_finalize_failed 反馈事件（不静默）"""
         _emit_feedback(
             {
                 "type": "session_finalize_failed",
@@ -1036,64 +1047,77 @@ class Session:
     # ---------- 会话 API（与 Store 同名同形，委托 crud） ----------
 
     async def query(self, *a, **kw):
+        """会话内查询：透传 crud.query（在本会话事务上下文执行，模型/字段语义同 Store）"""
         from . import crud
 
         return await crud.query(*a, **kw)
 
     async def query_one(self, *a, **kw):
+        """会话内查单条：透传 crud.query_one"""
         from . import crud
 
         return await crud.query_one(*a, **kw)
 
     async def query_with_count(self, *a, **kw):
+        """会话内分页查询并附总数：透传 crud.query_with_count"""
         from . import crud
 
         return await crud.query_with_count(*a, **kw)
 
     async def insert(self, *a, **kw):
+        """会话内插入：透传 crud.insert"""
         from . import crud
 
         return await crud.insert(*a, **kw)
 
     async def insert_many(self, *a, **kw):
+        """会话内批量插入：透传 crud.insert_many"""
         from . import crud
 
         return await crud.insert_many(*a, **kw)
 
     async def update(self, *a, **kw):
+        """会话内更新：透传 crud.update"""
         from . import crud
 
         return await crud.update(*a, **kw)
 
     async def update_many(self, *a, **kw):
+        """会话内批量更新：透传 crud.update_many"""
         from . import crud
 
         return await crud.update_many(*a, **kw)
 
     async def upsert(self, *a, **kw):
+        """会话内插入或更新：透传 crud.upsert"""
         from . import crud
 
         return await crud.upsert(*a, **kw)
 
     async def remove(self, *a, **kw):
+        """会话内删除：透传 crud.remove"""
         from . import crud
 
         return await crud.remove(*a, **kw)
 
     async def exists(self, *a, **kw):
+        """会话内存在性判断：透传 crud.exists"""
         from . import crud
 
         return await crud.exists(*a, **kw)
 
     async def count(self, *a, **kw):
+        """会话内计数：透传 crud.count"""
         from . import crud
 
         return await crud.count(*a, **kw)
 
     async def mutation(self, *a, **kw):
+        """会话内多步变更：透传 crud.mutation"""
         from . import crud
 
         return await crud.mutation(*a, **kw)
 
     async def execute_raw(self, *a, **kw):
+        """会话内执行原生命令：透传模块级 execute_raw"""
         return await execute_raw(*a, **kw)

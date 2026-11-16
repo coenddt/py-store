@@ -61,6 +61,7 @@ class ProfileViolation(Exception):
     """
 
     def __init__(self, message, status=400):
+        """``status`` 供上层网关映射响应码（默认 400：调用方合约违反）"""
         super().__init__(message)
         self.status = status
 
@@ -87,6 +88,7 @@ def _now_for(schema_name):
 
 
 def _ctx():
+    """当前用户上下文（绑定层错误映射的取数入口）"""
     return get_context()
 
 
@@ -321,6 +323,7 @@ def resolve_placeholders(command, ids=None, steps=None):
     steps = steps or []
 
     def resolver(s):
+        """单字符串裁决：{{phase1.ids}} 整值替换 / {{step.<N>._id}} 按 steps 下标；未命中原样保留"""
         if _PHASE1_IDS.match(s):
             return ids if ids is not None else s
         m = _STEP_PH.match(s)
@@ -346,6 +349,7 @@ def _fill_claimed(command, ids):
     """
 
     def resolver(s):
+        """单字符串裁决：整体等于 ___claimed_ids___ 才整值替换，否则原样保留"""
         return ids if s == _CLAIMED_IDS else s
 
     return _substitute(command, resolver)
@@ -385,6 +389,7 @@ async def run_atomic_commands(source, plan):
         raise ValueError("atomic_commands plan 缺少 commands（禁静默空执行）")
 
     async def _do():
+        """事务体：首条 claim → 有还原行（docs）直接返回；否则回填 _id 执行取行命令"""
         env = await _exec(commands[0])
         if len(commands) == 1:
             return env

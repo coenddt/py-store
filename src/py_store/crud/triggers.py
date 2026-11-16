@@ -118,6 +118,7 @@ _WHEN_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "and", "or", 
 
 
 def eval_when(when, scope):
+    """触发器 when 条件求值：单算子文法（eq/ne/gt/gte/lt/lte/in/and/or/not），占位符先解析后比较；None 视为成立，未知/多算子显式 ERR_TRIGGER_WHEN"""
     if when is None:
         return True
     keys = list(when.keys())
@@ -129,6 +130,7 @@ def eval_when(when, scope):
     arg = when[op]
 
     def rv(v):
+        """比较前的占位符解析（把 {{doc.*}} 等按 scope 展开为实值）"""
         return resolve_trigger_placeholders(v, scope)
 
     if op == "eq":

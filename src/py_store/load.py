@@ -48,6 +48,7 @@ def collect_files(roots):
 
 
 def _walk(dir_path, root, out):
+    """递归遍历定义目录：`_` 前缀跳过，.json 文件解析后以 {rel, defn} 追加进 out（解析失败抛 ERR:LOAD）"""
     entries = sorted(os.listdir(dir_path))  # 目录项名排序（确定性）
     for name in entries:
         if name.startswith("_"):

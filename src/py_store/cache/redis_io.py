@@ -27,6 +27,7 @@ class RedisIoError(Exception):
     def __init__(
         self, message: str, *, database: Any = None, op: Any = None, cause: Any = None
     ):
+        """``op`` 标注失败环节（init/scan/get/set/parse/stringify），``database`` 标注分区"""
         super().__init__(message)
         self.database = database
         self.op = op

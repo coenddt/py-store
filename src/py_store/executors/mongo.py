@@ -70,12 +70,14 @@ def _explicit_null(v):
 
 
 def _norm_filter(cmd):
+    """命令带 dict filter 时原地改写为显式 null 语义（``_explicit_null``）。"""
     filter_ = cmd.get("filter")
     if isinstance(filter_, dict):
         cmd["filter"] = _explicit_null(filter_)
 
 
 def _norm_pipeline(cmd):
+    """命令带管道时原地改写各 ``$match`` 阶段为显式 null 语义。"""
     pipe = cmd.get("pipeline")
     if isinstance(pipe, list):
         for stage in pipe:
@@ -118,6 +120,7 @@ async def open_transaction(connection):
     closed = False
 
     async def commit():
+        """提交 Mongo 事务（``commit_transaction``）；幂等，重复调用为 no-op。"""
         nonlocal closed
         if closed:
             return
@@ -125,6 +128,7 @@ async def open_transaction(connection):
         await session.commit_transaction()
 
     async def rollback():
+        """中止 Mongo 事务（``abort_transaction``）；幂等，重复调用为 no-op。"""
         nonlocal closed
         if closed:
             return
@@ -132,6 +136,7 @@ async def open_transaction(connection):
         await session.abort_transaction()
 
     async def release():
+        """结束并释放 session（``end_session``），无论事务是否已提交/中止。"""
         await session.end_session()
 
     return {

@@ -23,6 +23,89 @@ def create_connection(kind, driver, options=None):
     return mod.create(driver, options)
 
 
+def idempotent_tx_ops(commit_call, rollback_call):
+    """commit/rollback 幂等包装（三 SQL executor 显式事务句柄共享）
+
+    两函数共享同一 ``closed`` 位：任一首次调用执行并置位，其后重复 / 交叉调用为
+    no-op（与各 executor 原内联实现语义一致）。入参为无参协程工厂（如
+    ``conn.commit``），在置位后调用。
+    """
+    closed = False
+
+    async def commit():
+        """提交当前事务；幂等，重复调用为 no-op。"""
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        await commit_call()
+
+    async def rollback():
+        """回滚当前事务；幂等，重复调用为 no-op。"""
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        await rollback_call()
+
+    return commit, rollback
+
+
+def savepoint_ops(exec_sql):
+    """SAVEPOINT 原语三件套（savepoint / release_savepoint / rollback_to_savepoint，共享）
+
+    ``exec_sql(sql)`` 为该后端的单语句执行入口（mysql 走 cursor 包装，
+    postgres / sqlite 直 ``execute``）。SQL 文本仍为标准 SAVEPOINT 语法。
+    """
+
+    async def savepoint(name):
+        """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
+        await exec_sql("SAVEPOINT %s" % name)
+
+    async def release_savepoint(name):
+        """释放保存点（RELEASE SAVEPOINT），其后的嵌套作用域收尾用。"""
+        await exec_sql("RELEASE SAVEPOINT %s" % name)
+
+    async def rollback_to_savepoint(name):
+        """回滚到保存点（ROLLBACK TO SAVEPOINT），保存点本身保留可复用。"""
+        await exec_sql("ROLLBACK TO SAVEPOINT %s" % name)
+
+    return savepoint, release_savepoint, rollback_to_savepoint
+
+
+def make_with_transaction(open_transaction, wrap=None):
+    """with_transaction 工厂（三 SQL executor 共享）：基于 ``open_transaction`` 的
+    显式事务句柄构造事务执行入口（无第二套事务路径）。
+
+    ``wrap`` 可选：包装「开事务→body→提交/回滚」整个窗口。单连接驱动的
+    事务边界（commit/BEGIN/rollback）是连接级共享状态、跨协程互踩，sqlite 因此
+    传入 per-connection 锁；池形态（mysql/postgres）每个事务独占连接，不需要。
+    """
+
+    async def with_transaction(body):
+        """事务执行：body(execute_on_tx, tx=None) 的全部 plan 落在同一连接同一事务，
+        任一失败整体回滚。第二参数为事务句柄（供上层读保存点原语）；
+        py 位置参数语义下调用方必须接收该参数"""
+
+        async def _attempt():
+            tx = await open_transaction()
+            try:
+                out = await body(tx["exec"], tx)
+                await tx["commit"]()
+                return out
+            except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+                await tx["rollback"]()
+                raise
+            finally:
+                await tx["release"]()
+
+        if wrap is None:
+            return await _attempt()
+        return await wrap(_attempt)
+
+    return with_transaction
+
+
 async def _noop_release():
     """单连接形态的 release 占位（幂等 no-op，不关闭连接）"""
     return None
@@ -47,6 +130,7 @@ async def open_acquire(driver):
         released = False
 
         async def release():
+            """交回专用连接（退出 async 上下文）；幂等，重复调用为 no-op。"""
             nonlocal released
             if released:
                 return
@@ -59,6 +143,7 @@ async def open_acquire(driver):
     released = False
 
     async def release_pooled():
+        """把连接交回驱动池（``driver.release``）；幂等，重复调用为 no-op。"""
         nonlocal released
         if released:
             return
@@ -74,6 +159,7 @@ class UpdateResult:
     """PyMongo ``UpdateResult`` 的最小等价物（SQL 路径回喂给 ``crud/write.py``）"""
 
     def __init__(self, modified_count, matched_count=None):
+        """``matched_count`` 缺省取 ``modified_count``（SQL 侧两者同值）。"""
         self.modified_count = modified_count
         self.matched_count = (
             matched_count if matched_count is not None else modified_count
@@ -84,6 +170,7 @@ class DeleteResult:
     """PyMongo ``DeleteResult`` 的最小等价物（SQL 路径回喂给 ``crud/write.py``）"""
 
     def __init__(self, deleted_count):
+        """仅承载 ``deleted_count``（PyMongo ``DeleteResult`` 最小契约）。"""
         self.deleted_count = deleted_count
 
 

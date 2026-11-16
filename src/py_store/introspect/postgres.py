@@ -81,6 +81,7 @@ def _group_indexes(rows):
 
 
 async def introspect(driver, options=None):
+    """只读采集指定 schema（缺省 ``public``）的表/列/外键/索引并归一化。"""
     if driver is None or not hasattr(driver, "fetch"):
         raise TypeError("postgres introspection 需要 asyncpg 的连接或连接池")
 
