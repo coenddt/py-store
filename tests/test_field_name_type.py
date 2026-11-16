@@ -22,43 +22,48 @@ def _run(coro):
 
 
 def test_field_named_type_full_chain():
-    _sc.register({
-        'name': 'TypeFieldMsg', 'collection': 'type_field_msgs', 'idPrefix': 'tfm_', 'timestamps': False,
-        'fields': {
-            '_id': {'type': 'string'},
-            'type': {'type': 'string', 'default': 'text'},
-            'content': {'type': 'string'},
-        },
-        'relations': {},
-    })
+    _sc.register(
+        {
+            "name": "TypeFieldMsg",
+            "collection": "type_field_msgs",
+            "idPrefix": "tfm_",
+            "timestamps": False,
+            "fields": {
+                "_id": {"type": "string"},
+                "type": {"type": "string", "default": "text"},
+                "content": {"type": "string"},
+            },
+            "relations": {},
+        }
+    )
 
     async def _main():
         # insert：缺省 type → default 'text' 生效
-        a = await store.insert('TypeFieldMsg', {'content': 'hello'})
-        assert a['type'] == 'text', 'default 应生效'
+        a = await store.insert("TypeFieldMsg", {"content": "hello"})
+        assert a["type"] == "text", "default 应生效"
 
         # insert：显式 type 保真
-        b = await store.insert('TypeFieldMsg', {'type': 'image', 'content': 'pic'})
-        assert b['type'] == 'image'
+        b = await store.insert("TypeFieldMsg", {"type": "image", "content": "pic"})
+        assert b["type"] == "image"
 
         # GQL 查询：投影含 type 字段 + $condition 过滤（GQL 参数只接受 $var:@key 引用形态）
         rows = await store.query(
-            'TypeFieldMsg($condition:@c){ _id type content }',
-            {'c': {'type': 'image'}},
+            "TypeFieldMsg($condition:@c){ _id type content }",
+            {"c": {"type": "image"}},
         )
-        assert rows == [{'_id': b['_id'], 'type': 'image', 'content': 'pic'}]
+        assert rows == [{"_id": b["_id"], "type": "image", "content": "pic"}]
 
         # update：type 字段可写
-        await store.update('TypeFieldMsg', {'_id': b['_id']}, {'type': 'video'})
-        after = await store.query('TypeFieldMsg{ _id type }')
-        assert next(r for r in after if r['_id'] == b['_id'])['type'] == 'video'
+        await store.update("TypeFieldMsg", {"_id": b["_id"]}, {"type": "video"})
+        after = await store.query("TypeFieldMsg{ _id type }")
+        assert next(r for r in after if r["_id"] == b["_id"])["type"] == "video"
 
         # remove
-        await store.remove('TypeFieldMsg', {'_id': a['_id']})
-        assert await store.count('TypeFieldMsg', {}) == 1
+        await store.remove("TypeFieldMsg", {"_id": a["_id"]})
+        assert await store.count("TypeFieldMsg", {}) == 1
 
     try:
-        _run(init(connect({'store': {}})))
+        _run(init(connect({"store": {}})))
         _run(_main())
     finally:
         _ds.set_connections({})

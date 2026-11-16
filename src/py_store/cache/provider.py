@@ -28,23 +28,30 @@ def create_link_cache_provider(spec: dict | None = None) -> Callable[[Any], str]
         ``current_selection()``（可注入以复用于非 contextvars 场景 / 测试）
     """
     spec = spec or {}
-    sel_of = spec.get('selection_of')
+    sel_of = spec.get("selection_of")
     # 缺省读请求级记录：current_selection() 无参，包一层吞掉 ctx（对齐 node `currentSelection`）
-    selection_of = sel_of if callable(sel_of) else (lambda ctx=None: current_selection())
+    selection_of = (
+        sel_of if callable(sel_of) else (lambda ctx=None: current_selection())
+    )
 
     def provider(ctx: Any = None) -> str:
         sel = selection_of(ctx)
         if sel is None:
-            return 'BYPASS'                        # 3. 读不到 ⇒ 绝不猜
+            return "BYPASS"  # 3. 读不到 ⇒ 绝不猜
         groups = [v for v in sel.values() if isinstance(v, list)]
         flat = [link for g in groups for link in g]
-        if not any(isinstance(link, dict) and link.get('role') == 'cache' for link in flat):
-            return 'BYPASS'                        # 1. 无 cache 链路 ⇒ 本请求不涉缓存
+        if not any(
+            isinstance(link, dict) and link.get("role") == "cache" for link in flat
+        ):
+            return "BYPASS"  # 1. 无 cache 链路 ⇒ 本请求不涉缓存
         selected_cache = any(
-            g and isinstance(g[0], dict) and g[0].get('role') == 'cache' for g in groups)
-        return 'HIT' if selected_cache else 'MISS'  # 2. 选中判定（与 node 同规：候选序首项）
+            g and isinstance(g[0], dict) and g[0].get("role") == "cache" for g in groups
+        )
+        return (
+            "HIT" if selected_cache else "MISS"
+        )  # 2. 选中判定（与 node 同规：候选序首项）
 
     return provider
 
 
-__all__ = ['create_link_cache_provider']
+__all__ = ["create_link_cache_provider"]

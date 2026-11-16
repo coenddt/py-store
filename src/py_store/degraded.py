@@ -13,18 +13,21 @@ from typing import Any
 from .feedback import emit
 
 _BUCKET: contextvars.ContextVar = contextvars.ContextVar(
-    'py_store_degraded', default=None)
+    "py_store_degraded", default=None
+)
 
 
 def begin() -> contextvars.Token:
     """建立请求容器（HTTP 中间件调用）"""
-    return _BUCKET.set({'events': []})
+    return _BUCKET.set({"events": []})
 
 
 def end(token: contextvars.Token) -> None:
     try:
         _BUCKET.reset(token)
-    except ValueError:  # 跨上下文 reset（理论上不可达）：不掩盖，仅复位失败
+    except ValueError:
+        # 跨上下文 reset 失败无补救路径：token 必来自 begin() 的同栈配对（理论上不可达），
+        # 失败时保持当前容器原样（不掩盖、不制造新事件），与 nodejs 侧语义一致。
         pass
 
 
@@ -32,33 +35,36 @@ def record(event: dict[str, Any]) -> None:
     evt = dict(event or {})
     bucket = _BUCKET.get()
     if bucket is not None:
-        bucket['events'].append(evt)
+        bucket["events"].append(evt)
     emit(evt)
 
 
 def emit_plan(plan: dict[str, Any] | None, fallback_type: str) -> None:
-    for d in (plan or {}).get('degraded') or []:
+    for d in (plan or {}).get("degraded") or []:
         item = dict(d or {})
-        item.setdefault('type', fallback_type)
-        item['type'] = item.get('type') or fallback_type
+        item.setdefault("type", fallback_type)
+        item["type"] = item.get("type") or fallback_type
         record(item)
 
 
 def status() -> dict[str, Any]:
     bucket = _BUCKET.get()
-    events = list(bucket['events']) if bucket else []
-    return {'degraded': bool(events), 'events': events}
+    events = list(bucket["events"]) if bucket else []
+    return {"degraded": bool(events), "events": events}
 
 
-def vector_degraded(*, backend: str, field: str, metric: str,
-                    message: str, hint: str) -> None:
-    record({
-        'type': 'vector_degraded',
-        'code': 'vectorDegraded',
-        'layer': 'host',
-        'backend': backend,
-        'field': field,
-        'metric': metric,
-        'message': message,
-        'hint': hint,
-    })
+def vector_degraded(
+    *, backend: str, field: str, metric: str, message: str, hint: str
+) -> None:
+    record(
+        {
+            "type": "vector_degraded",
+            "code": "vectorDegraded",
+            "layer": "host",
+            "backend": backend,
+            "field": field,
+            "metric": metric,
+            "message": message,
+            "hint": hint,
+        }
+    )

@@ -13,7 +13,7 @@ import os
 
 from . import schema
 
-__all__ = ['collect_files', 'load_defs', 'plan_load', 'read_config']
+__all__ = ["collect_files", "load_defs", "plan_load", "read_config"]
 
 
 def read_config(path_or_obj, base_dir=None):
@@ -21,13 +21,15 @@ def read_config(path_or_obj, base_dir=None):
     if isinstance(path_or_obj, dict):
         return path_or_obj, base_dir or os.getcwd()
     if not isinstance(path_or_obj, str) or not path_or_obj:
-        raise TypeError('ERR:LOAD config 须为 store.config.json 路径或对象')
+        raise TypeError("ERR:LOAD config 须为 store.config.json 路径或对象")
     abs_path = os.path.abspath(path_or_obj)
     try:
-        with open(abs_path, 'r', encoding='utf-8') as fp:
+        with open(abs_path, "r", encoding="utf-8") as fp:
             parsed = json.load(fp)
     except Exception as e:
-        raise RuntimeError(f'ERR:LOAD 读取 store.config.json 失败: {abs_path}: {e}') from e
+        raise RuntimeError(
+            f"ERR:LOAD 读取 store.config.json 失败: {abs_path}: {e}"
+        ) from e
     return parsed, base_dir or os.path.dirname(abs_path)
 
 
@@ -40,7 +42,7 @@ def collect_files(roots):
     for root in roots or []:
         abs_root = os.path.abspath(root)
         if not os.path.exists(abs_root):
-            raise RuntimeError(f'ERR:LOAD 定义根不存在: {root}')
+            raise RuntimeError(f"ERR:LOAD 定义根不存在: {root}")
         _walk(abs_root, abs_root, out)
     return out
 
@@ -48,19 +50,19 @@ def collect_files(roots):
 def _walk(dir_path, root, out):
     entries = sorted(os.listdir(dir_path))  # 目录项名排序（确定性）
     for name in entries:
-        if name.startswith('_'):
+        if name.startswith("_"):
             continue  # IO 层约定：忽略 `_` 前缀
         full = os.path.join(dir_path, name)
         if os.path.isdir(full):
             _walk(full, root, out)
-        elif os.path.isfile(full) and name.lower().endswith('.json'):
-            rel = os.path.relpath(full, root).replace(os.sep, '/')
+        elif os.path.isfile(full) and name.lower().endswith(".json"):
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
             try:
-                with open(full, 'r', encoding='utf-8') as fp:
+                with open(full, "r", encoding="utf-8") as fp:
                     defn = json.load(fp)
             except Exception as e:
-                raise RuntimeError(f'ERR:LOAD 解析定义失败: {rel}: {e}') from e
-            out.append({'rel': rel, 'defn': defn})
+                raise RuntimeError(f"ERR:LOAD 解析定义失败: {rel}: {e}") from e
+            out.append({"rel": rel, "defn": defn})
 
 
 def plan_load(config, files):
@@ -75,9 +77,11 @@ def load_defs(config=None, ctx=None, base_dir=None):
     ``{'defn': dict, 'location': {'source', 'database', 'schema'}}``。
     """
     if not config:
-        raise RuntimeError('ERR:LOAD load_defs 缺 config（store.config.json 路径或对象）')
+        raise RuntimeError(
+            "ERR:LOAD load_defs 缺 config（store.config.json 路径或对象）"
+        )
     cfg, base = read_config(config, base_dir)
-    roots = [os.path.abspath(os.path.join(base, r)) for r in (cfg.get('defs') or [])]
+    roots = [os.path.abspath(os.path.join(base, r)) for r in (cfg.get("defs") or [])]
     files = collect_files(roots)
     items = plan_load(cfg, files)
     schema.register_batch(items, ctx)

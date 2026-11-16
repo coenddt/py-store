@@ -140,15 +140,19 @@ async def step(op, dir_path):
     if kind == "snapshot":
         return snapshot_stats(dir_path)
     if kind == "txCommit":
+
         async def _commit():
             await store.insert(op["model"], op["doc"])
             return await store.count(op["model"], None)
+
         return await store.transaction("default", _commit)
     if kind == "txRollback":
         try:
+
             async def _fail():
                 await store.insert(op["model"], op["doc"])
                 raise RuntimeError("parity-rollback")
+
             await store.transaction("default", _fail)
         except RuntimeError as e:
             if "parity-rollback" not in str(e):
@@ -171,7 +175,9 @@ async def run():
         out = []
         for op in FIXTURE["ops"]:
             out.append(await step(op, dir_path))
-        sys.stdout.write(json.dumps(out, separators=(",", ":"), ensure_ascii=False) + "\n")
+        sys.stdout.write(
+            json.dumps(out, separators=(",", ":"), ensure_ascii=False) + "\n"
+        )
     finally:
         shutil.rmtree(dir_path, ignore_errors=True)
 

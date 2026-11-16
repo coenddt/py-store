@@ -26,11 +26,11 @@ from .schema import get_core
 # （非 ``import schema``）以规避 ``_model(schema)`` 形参对模块名的遮蔽（node 侧同因改用
 # ``schemaMod``，见 03 步骤 3 偏差留痕）；禁模块级缓存 core 引用。
 
-_ctx: contextvars.ContextVar = contextvars.ContextVar('py_store_ctx', default=None)
+_ctx: contextvars.ContextVar = contextvars.ContextVar("py_store_ctx", default=None)
 
 #: 可信标记：仅允许由 run_as_internal 等内部机制写入，禁止经请求上下文注入
 #: （core 读 ``ctx.internal`` 即放行，用户可控输入带上它 = 越权）。
-_TRUSTED_KEYS = ('internal',)
+_TRUSTED_KEYS = ("internal",)
 
 
 def _assert_no_trusted_keys(ctx, where):
@@ -39,12 +39,13 @@ def _assert_no_trusted_keys(ctx, where):
     for k in _TRUSTED_KEYS:
         if k in ctx:
             raise PermissionError(
-                f'{where}: ctx.{k} 属可信标记，禁止由请求上下文注入（内部调用请用 run_as_internal）')
+                f"{where}: ctx.{k} 属可信标记，禁止由请求上下文注入（内部调用请用 run_as_internal）"
+            )
 
 
 def set_context(ctx):
     """设置当前请求的上下文，每次请求开始时调用一次"""
-    _assert_no_trusted_keys(ctx, 'set_context')
+    _assert_no_trusted_keys(ctx, "set_context")
     _ctx.set(ctx)
 
 
@@ -61,7 +62,7 @@ def scoped_roles(roles):
     取代 set_context + finally set_context(None) 的清空式写法（后者嵌套时会误清外层上下文，
     且「无上下文 = 权限全放行」，清空即静默失守方向）。
     """
-    token = _ctx.set({**(get_context() or {}), 'roles': roles})
+    token = _ctx.set({**(get_context() or {}), "roles": roles})
     try:
         yield
     finally:
@@ -76,7 +77,7 @@ def scoped_context(ctx):
     供 AI 问数（``ask``）等把服务端构造的用户上下文显式注入执行面的场景——
     不用「set_context + finally 清空」写法（嵌套时误清外层，静默失守方向）。
     """
-    _assert_no_trusted_keys(ctx, 'scoped_context')
+    _assert_no_trusted_keys(ctx, "scoped_context")
     token = _ctx.set(ctx)
     try:
         yield
@@ -87,7 +88,7 @@ def scoped_context(ctx):
 async def run_as_internal(fn):
     """在内部上下文中执行操作（绕过权限检查），结束后自动恢复上下文"""
     prev = get_context()
-    token = _ctx.set({**(prev or {}), 'internal': True})
+    token = _ctx.set({**(prev or {}), "internal": True})
     try:
         out = fn()
         # 与 crud/query.py::_finalize 统一用 isawaitable：对 partial / 包装协程同样稳妥
@@ -101,9 +102,10 @@ async def run_as_internal(fn):
 
 # ─── core 权限方法包装 ────────────────────────────────────────
 
+
 def _model(schema):
     """接受 schema 字典或 schema 名称"""
-    return schema['name'] if isinstance(schema, dict) else schema
+    return schema["name"] if isinstance(schema, dict) else schema
 
 
 def can_read_schema(schema, ctx):
@@ -212,5 +214,5 @@ class NoContextError(Exception):
 
     def __init__(self, message, status=403):
         super().__init__(message)
-        self.code = 'no_context'
+        self.code = "no_context"
         self.status = status

@@ -27,7 +27,10 @@ from py_store.schema import register
 
 _HOST_FIXTURES = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    'rust-store', 'fixtures', 'host')
+    "rust-store",
+    "fixtures",
+    "host",
+)
 
 
 def _load(name):
@@ -35,8 +38,8 @@ def _load(name):
     # 此时 skip 而非抛 FileNotFoundError，保证测试可独立运行
     path = os.path.join(_HOST_FIXTURES, name)
     if not os.path.exists(path):
-        pytest.skip(f'缺少 rust-store fixture: {path}（需同时 clone rust-store 仓库）')
-    with open(path, encoding='utf-8') as f:
+        pytest.skip(f"缺少 rust-store fixture: {path}（需同时 clone rust-store 仓库）")
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -46,50 +49,55 @@ def _run(coro):
 
 # ─── 1. 占位符替换 ──────────────────────────────────────────
 
+
 def test_resolve_placeholders():
-    fx = _load('placeholders.json')
-    for c in fx['cases']:
-        got = resolve_placeholders(c['command'], ids=c.get('ids'), steps=c.get('steps'))
-        assert got == c['expected'], f"占位符用例不一致: {c['name']}"
+    fx = _load("placeholders.json")
+    for c in fx["cases"]:
+        got = resolve_placeholders(c["command"], ids=c.get("ids"), steps=c.get("steps"))
+        assert got == c["expected"], f"占位符用例不一致: {c['name']}"
 
 
 # ─── 2. is_truthy 语义 ──────────────────────────────────────
 
+
 def test_truthy():
-    fx = _load('truthy.json')
-    for c in fx['cases']:
-        assert _truthy(c['value']) == c['expected'], f"truthy 用例不一致: {c['name']}"
+    fx = _load("truthy.json")
+    for c in fx["cases"]:
+        assert _truthy(c["value"]) == c["expected"], f"truthy 用例不一致: {c['name']}"
 
 
 # ─── 3. mutation ID 池遍历 ──────────────────────────────────
 
+
 def test_new_id_pool():
-    fx = _load('id_pool.json')
-    for s in fx['schemas']:
+    fx = _load("id_pool.json")
+    for s in fx["schemas"]:
         register(s)
 
-    for c in fx['cases']:
-        pool = _new_id_pool(c['model'], c['data'])
-        assert len(pool) == c['expectCount'], f"ID 池长度不一致: {c['name']}"
-        for i, prefix in enumerate(c['expectPrefixes']):
+    for c in fx["cases"]:
+        pool = _new_id_pool(c["model"], c["data"])
+        assert len(pool) == c["expectCount"], f"ID 池长度不一致: {c['name']}"
+        for i, prefix in enumerate(c["expectPrefixes"]):
             assert pool[i].startswith(prefix), (
-                f"ID 池第 {i} 项前缀不符: {c['name']}（期望 {prefix}，实际 {pool[i]}）")
+                f"ID 池第 {i} 项前缀不符: {c['name']}（期望 {prefix}，实际 {pool[i]}）"
+            )
 
 
 # ─── 4. 回调桥（fn + asyncFn） ──────────────────────────────
 
+
 def _hc_sum_ab(doc):
     """fixture 桩语义：sum(a, b)"""
-    return (doc.get('a') or 0) + (doc.get('b') or 0)
+    return (doc.get("a") or 0) + (doc.get("b") or 0)
 
 
 def _hc_tag_skus(items, ctx=None):
     """fixture 桩语义：join(items[].sku, '|')"""
     for it in items:
-        it['skuTag'] = '|'.join(s.get('sku') for s in (it.get('items') or []))
+        it["skuTag"] = "|".join(s.get("sku") for s in (it.get("items") or []))
 
 
-_STUBS = {'hc_sum_ab': _hc_sum_ab, 'hc_tag_skus': _hc_tag_skus}
+_STUBS = {"hc_sum_ab": _hc_sum_ab, "hc_tag_skus": _hc_tag_skus}
 
 
 class _MemCursor:
@@ -123,38 +131,41 @@ class _FakeDb:
     def __getitem__(self, name):
         if name not in self._colls:
             # Mongo 物理集合名（core::naming）：逻辑 hc_posts → hcPosts
-            self._colls[name] = _MemColl(self._docs if name == 'hcPosts' else [])
+            self._colls[name] = _MemColl(self._docs if name == "hcPosts" else [])
         return self._colls[name]
 
 
 def test_callback_bridge_fn_and_asyncfn():
-    fx = _load('callback_bridge.json')
+    fx = _load("callback_bridge.json")
 
     # 把 fixture 的声明式 computes 替换为真实桩函数后注册
-    for s in fx['schemas']:
+    for s in fx["schemas"]:
         defn = json.loads(json.dumps(s))
-        for key, comp in (defn.get('computes') or {}).items():
-            ref = comp.get('fnRef') or key
-            if comp.get('fn'):
-                comp['fn'] = _STUBS[ref]
-            if comp.get('asyncFn'):
-                comp['asyncFn'] = _STUBS[ref]
+        for key, comp in (defn.get("computes") or {}).items():
+            ref = comp.get("fnRef") or key
+            if comp.get("fn"):
+                comp["fn"] = _STUBS[ref]
+            if comp.get("asyncFn"):
+                comp["asyncFn"] = _STUBS[ref]
         register(defn)
 
-    c = fx['cases'][0]
+    c = fx["cases"][0]
     perm.set_context(None)
-    _crud_mod.set_db(_FakeDb(c['docs']))
+    _crud_mod.set_db(_FakeDb(c["docs"]))
 
-    out = _run(_crud_mod.query(c['gql']))
-    assert out == c['expected'], f"回调桥结果不一致: {c['name']}"
+    out = _run(_crud_mod.query(c["gql"]))
+    assert out == c["expected"], f"回调桥结果不一致: {c['name']}"
 
 
 # ─── 5. 批量注册 / 注销门面（插件 bootstrap 接入） ─────────────
 
+
 def _batch_defn(name):
     return {
-        'name': name, 'collection': name.lower(), 'idPrefix': 'bx',
-        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
+        "name": name,
+        "collection": name.lower(),
+        "idPrefix": "bx",
+        "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
     }
 
 
@@ -165,15 +176,16 @@ def test_register_batch_atomic_and_visible():
     from py_store import store as _store
 
     u = uuid.uuid4().hex[:8]
-    a, b = f'BatchA{u}', f'BatchB{u}'
-    _store.register_batch([{'defn': _batch_defn(a), 'location': None},
-                           {'defn': _batch_defn(b)}])
-    assert _store.has(a) and _store.has(b), '批量注册后两张表都应可见'
+    a, b = f"BatchA{u}", f"BatchB{u}"
+    _store.register_batch(
+        [{"defn": _batch_defn(a), "location": None}, {"defn": _batch_defn(b)}]
+    )
+    assert _store.has(a) and _store.has(b), "批量注册后两张表都应可见"
 
-    c = f'BatchC{u}'
+    c = f"BatchC{u}"
     with pytest.raises(RuntimeError):
-        _store.register_batch([{'defn': _batch_defn(c)}, {'defn': _batch_defn(c)}])
-    assert not _store.has(c), '批内冲突应零副作用（不得留下半注册）'
+        _store.register_batch([{"defn": _batch_defn(c)}, {"defn": _batch_defn(c)}])
+    assert not _store.has(c), "批内冲突应零副作用（不得留下半注册）"
 
 
 def test_unregister_real_schema_removes_derived_archive():
@@ -183,17 +195,17 @@ def test_unregister_real_schema_removes_derived_archive():
     from py_store import store as _store
 
     u = uuid.uuid4().hex[:8]
-    a = f'UndoA{u}'
-    _store.register_batch([{'defn': _batch_defn(a)}])
-    assert _store.has(a), '注册后主项应可见'
-    assert _store.has(f'{a}Deleted'), '注册期派生的归档表应可见'
+    a = f"UndoA{u}"
+    _store.register_batch([{"defn": _batch_defn(a)}])
+    assert _store.has(a), "注册后主项应可见"
+    assert _store.has(f"{a}Deleted"), "注册期派生的归档表应可见"
 
     _store.unregister(a)
-    assert not _store.has(a), '注销后主项应从 Host 镜像移除'
-    assert not _store.has(f'{a}Deleted'), '派生归档应一并清理'
+    assert not _store.has(a), "注销后主项应从 Host 镜像移除"
+    assert not _store.has(f"{a}Deleted"), "派生归档应一并清理"
 
-    _store.unregister(a)                       # 重复注销幂等
-    _store.unregister('NotRegisteredAnywhere')  # 未知 schema 幂等（补偿清单可整份重放）
+    _store.unregister(a)  # 重复注销幂等
+    _store.unregister("NotRegisteredAnywhere")  # 未知 schema 幂等（补偿清单可整份重放）
 
 
 def test_unregister_without_binding_method_reports_explicitly(monkeypatch):
@@ -203,6 +215,6 @@ def test_unregister_without_binding_method_reports_explicitly(monkeypatch):
     class _NoUnregisterCore:
         pass
 
-    monkeypatch.setattr(_schema, 'get_core', lambda: _NoUnregisterCore())
-    with pytest.raises(RuntimeError, match=r'未导出 Registry\.unregister'):
-        _schema.unregister('AnySchema')
+    monkeypatch.setattr(_schema, "get_core", lambda: _NoUnregisterCore())
+    with pytest.raises(RuntimeError, match=r"未导出 Registry\.unregister"):
+        _schema.unregister("AnySchema")

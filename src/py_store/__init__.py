@@ -88,7 +88,8 @@ from .sync import sync_schema
 def _build_pipeline(gql, params=None):
     """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
     return schema.get_core().build_pipeline(
-        gql, params if params is not None else {}, permission.get_context())
+        gql, params if params is not None else {}, permission.get_context()
+    )
 
 
 class Store:
@@ -101,98 +102,174 @@ class Store:
     Python 侧仅暴露蛇形命名（D12 / A8）。
     """
 
-    async def query(self, gql: str, params: dict | None = None,
-                    route_override: dict | None = None) -> list[dict[str, Any]]:
+    async def query(
+        self, gql: str, params: dict | None = None, route_override: dict | None = None
+    ) -> list[dict[str, Any]]:
         return await crud.query(gql, params, route_override)
 
-    async def query_one(self, gql: str, params: dict | None = None,
-                        route_override: dict | None = None) -> dict[str, Any] | None:
+    async def query_one(
+        self, gql: str, params: dict | None = None, route_override: dict | None = None
+    ) -> dict[str, Any] | None:
         return await crud.query_one(gql, params, route_override)
 
-    async def query_with_count(self, gql: str, params: dict | None = None,
-                               route_override: dict | None = None) -> dict[str, Any]:
+    async def query_with_count(
+        self, gql: str, params: dict | None = None, route_override: dict | None = None
+    ) -> dict[str, Any]:
         return await crud.query_with_count(gql, params, route_override)
 
-    async def query_federated(self, gql: str, params: dict | None = None) -> list[dict[str, Any]]:
+    async def query_federated(
+        self, gql: str, params: dict | None = None
+    ) -> list[dict[str, Any]]:
         """跨库联邦查询（一条 GQL 跨多数据源：各源取数 → 内存 join → 统一后处理）"""
         return await crud.query_federated(gql, params)
 
-    async def insert(self, schema_name: str, data: dict,
-                     route_override: dict | None = None) -> dict[str, Any]:
+    async def insert(
+        self, schema_name: str, data: dict, route_override: dict | None = None
+    ) -> dict[str, Any]:
         return await crud.insert(schema_name, data, route_override)
 
-    async def insert_many(self, schema_name: str, docs: list[dict],
-                          route_override: dict | None = None) -> list[dict[str, Any]]:
+    async def insert_many(
+        self, schema_name: str, docs: list[dict], route_override: dict | None = None
+    ) -> list[dict[str, Any]]:
         return await crud.insert_many(schema_name, docs, route_override)
 
-    async def update(self, schema_name: str, condition: dict, data: dict,
-                     options: dict | None = None,
-                     route_override: dict | None = None) -> dict[str, Any] | None:
+    async def update(
+        self,
+        schema_name: str,
+        condition: dict,
+        data: dict,
+        options: dict | None = None,
+        route_override: dict | None = None,
+    ) -> dict[str, Any] | None:
         return await crud.update(schema_name, condition, data, options, route_override)
 
-    async def apply_write_computes(self, schema_name: str,
-                                   doc: dict[str, Any]) -> dict[str, Any]:
+    async def apply_write_computes(
+        self, schema_name: str, doc: dict[str, Any]
+    ) -> dict[str, Any]:
         """写后仅叠同步 ``fn`` 计算列（入参须为 ``returnDocument: AFTER`` 落库文档；不补默认值）"""
         return await crud.apply_write_computes(schema_name, doc)
 
-    async def update_many(self, schema_name: str, condition: dict, data: dict,
-                          route_override: dict | None = None) -> dict[str, Any]:
+    async def update_many(
+        self,
+        schema_name: str,
+        condition: dict,
+        data: dict,
+        route_override: dict | None = None,
+    ) -> dict[str, Any]:
         return await crud.update_many(schema_name, condition, data, route_override)
 
-    async def remove(self, schema_name: str, condition: dict,
-                     route_override: dict | None = None,
-                     options: dict | None = None) -> dict[str, Any]:
+    async def remove(
+        self,
+        schema_name: str,
+        condition: dict,
+        route_override: dict | None = None,
+        options: dict | None = None,
+    ) -> dict[str, Any]:
         return await crud.remove(schema_name, condition, route_override, options)
 
-    async def exists(self, schema_name: str, condition: dict,
-                     route_override: dict | None = None) -> bool:
+    async def exists(
+        self, schema_name: str, condition: dict, route_override: dict | None = None
+    ) -> bool:
         return await crud.exists(schema_name, condition, route_override)
 
-    async def count(self, schema_name: str, filter: dict | None = None,
-                    route_override: dict | None = None) -> int:
+    async def count(
+        self,
+        schema_name: str,
+        filter: dict | None = None,
+        route_override: dict | None = None,
+    ) -> int:
         return await crud.count(schema_name, filter, route_override)
 
-    async def mutation(self, schema_name: str, data: dict | list[dict],
-                       route_override: dict | None = None) -> Any:
+    async def mutation(
+        self,
+        schema_name: str,
+        data: dict | list[dict],
+        route_override: dict | None = None,
+    ) -> Any:
         return await crud.mutation(schema_name, data, route_override)
 
-    async def upsert(self, schema_name: str, condition: dict, data: dict,
-                     options: dict | None = None,
-                     route_override: dict | None = None) -> dict[str, Any] | None:
+    async def upsert(
+        self,
+        schema_name: str,
+        condition: dict,
+        data: dict,
+        options: dict | None = None,
+        route_override: dict | None = None,
+    ) -> dict[str, Any] | None:
         return await crud.upsert(schema_name, condition, data, options, route_override)
 
-    async def claim(self, schema_name: str, filter: dict, update: dict, *,
-                    limit: int = 1, sort: list | None = None,
-                    route_override: dict | None = None) -> list[dict[str, Any]]:
+    async def claim(
+        self,
+        schema_name: str,
+        filter: dict,
+        update: dict,
+        *,
+        limit: int = 1,
+        sort: list | None = None,
+        route_override: dict | None = None,
+    ) -> list[dict[str, Any]]:
         """条件领取 N 行并原子置标；返回领到的行（含领取后最新值）
 
         并发原语（C1）：MySQL/PG 走 ``FOR UPDATE SKIP LOCKED`` 两步同事务，
         SQLite 走 ``IN (子查询)`` 原子领取；仅 SQL 源（Mongo 显式拒绝）。
         时间戳/身份字段由调用方写入 ``update``（门面与 core 均无时钟）。
         """
-        return await crud.claim(schema_name, filter, update, limit=limit, sort=sort,
-                                route_override=route_override)
+        return await crud.claim(
+            schema_name,
+            filter,
+            update,
+            limit=limit,
+            sort=sort,
+            route_override=route_override,
+        )
 
-    async def compare_and_set(self, schema_name: str, filter: dict, update: dict,
-                              *,
-                              route_override: dict | None = None) -> dict[str, Any]:
+    async def compare_and_set(
+        self,
+        schema_name: str,
+        filter: dict,
+        update: dict,
+        *,
+        route_override: dict | None = None,
+    ) -> dict[str, Any]:
         """条件更新并返回 ``{"matched": int, "modified": int}``（matched = WHERE 命中行数，三后端一致）"""
-        return await crud.compare_and_set(schema_name, filter, update,
-                                          route_override=route_override)
+        return await crud.compare_and_set(
+            schema_name, filter, update, route_override=route_override
+        )
 
-    async def renew_lease(self, schema_name: str, filter: dict, lease_fields: dict,
-                          *,
-                          route_override: dict | None = None) -> dict[str, Any]:
+    async def renew_lease(
+        self,
+        schema_name: str,
+        filter: dict,
+        lease_fields: dict,
+        *,
+        route_override: dict | None = None,
+    ) -> dict[str, Any]:
         """租约续期：compare_and_set 组合门面（归属条件由 filter 携带，时间戳由调用方写入）"""
-        return await crud.renew_lease(schema_name, filter, lease_fields,
-                                      route_override=route_override)
+        return await crud.renew_lease(
+            schema_name, filter, lease_fields, route_override=route_override
+        )
 
-    async def sync_schema(self, backend: str, driver: Any, introspect_options: dict | None = None,
-                          overlay: list | None = None, datasource: str | None = None,
-                          database: str | None = None, schema: str | None = None,
-                          register_defs: bool = True) -> list[dict[str, Any]]:
-        return await sync_schema(backend, driver, introspect_options, overlay,
-                                 datasource, database, schema, register_defs)
+    async def sync_schema(
+        self,
+        backend: str,
+        driver: Any,
+        introspect_options: dict | None = None,
+        overlay: list | None = None,
+        datasource: str | None = None,
+        database: str | None = None,
+        schema: str | None = None,
+        register_defs: bool = True,
+    ) -> list[dict[str, Any]]:
+        return await sync_schema(
+            backend,
+            driver,
+            introspect_options,
+            overlay,
+            datasource,
+            database,
+            schema,
+            register_defs,
+        )
 
     def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
         return _build_pipeline(gql, params)
@@ -235,8 +312,13 @@ class Store:
         """
         return Session()
 
-    async def execute_raw(self, source: str, sql: str, params: list | tuple | dict | None = None,
-                          is_write: bool | None = None) -> dict[str, Any]:
+    async def execute_raw(
+        self,
+        source: str,
+        sql: str,
+        params: list | tuple | dict | None = None,
+        is_write: bool | None = None,
+    ) -> dict[str, Any]:
         """在指定 SQL 源执行原生 SQL（事务内可用；编译由 core raw_stmt_compile 完成）
 
         两档参数风格：位置档（params 为 list/tuple/None）→ 占位符为各后端原生风格
@@ -248,9 +330,13 @@ class Store:
         """
         return await datasource.execute_raw(source, sql, params, is_write)
 
-    async def execute_native(self, source: str, collection: str,
-                             pipeline: list | None = None,
-                             options: dict | None = None) -> dict[str, Any]:
+    async def execute_native(
+        self,
+        source: str,
+        collection: str,
+        pipeline: list | None = None,
+        options: dict | None = None,
+    ) -> dict[str, Any]:
         """在指定 Mongo 源执行原生聚合管道（事务内可用；对标 SQL 侧 execute_raw）
 
         ``pipeline`` 为原生聚合管道（list[dict]），``options`` 为驱动原生透传项
@@ -262,8 +348,12 @@ class Store:
         """
         return await datasource.execute_native(source, collection, pipeline, options)
 
-    async def aggregate(self, schema_name: str, pipeline: list | None = None,
-                        options: dict | None = None) -> dict[str, Any]:
+    async def aggregate(
+        self,
+        schema_name: str,
+        pipeline: list | None = None,
+        options: dict | None = None,
+    ) -> dict[str, Any]:
         """按 schema 名执行原生聚合管道（execute_native 的 schema 名孪生；opt-in）
 
         默认关闭（产品边界）：``init(connections, {'allowNativeAggregate': True})``
@@ -275,19 +365,21 @@ class Store:
         """
         if not _allow_native_aggregate:
             err = RuntimeError(
-                'ERR_NATIVE_AGGREGATE_DISABLED:原生聚合别名未开启——默认关闭是产品边界，'
+                "ERR_NATIVE_AGGREGATE_DISABLED:原生聚合别名未开启——默认关闭是产品边界，"
                 'init(connections, {"allowNativeAggregate": True}) 显式开启；'
-                '或改用 GQL $group / $having 归一聚合 / execute_native 直调')
-            err.code = 'ERR_NATIVE_AGGREGATE_DISABLED'  # type: ignore[attr-defined]
+                "或改用 GQL $group / $having 归一聚合 / execute_native 直调"
+            )
+            err.code = "ERR_NATIVE_AGGREGATE_DISABLED"  # type: ignore[attr-defined]
             raise err
         try:
             m = schema.get(schema_name)
         except KeyError:
-            err = RuntimeError(f'ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}')
-            err.code = 'ERR_AGGREGATE_SCHEMA'  # type: ignore[attr-defined]
+            err = RuntimeError(f"ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}")
+            err.code = "ERR_AGGREGATE_SCHEMA"  # type: ignore[attr-defined]
             raise err from None
         return await datasource.execute_native(
-            m.get('datasource') or 'default', m['collection'], pipeline, options)
+            m.get("datasource") or "default", m["collection"], pipeline, options
+        )
 
     def generate_ddl(self, backend: str, names: list | None = None) -> str:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
@@ -309,39 +401,58 @@ class Store:
     async def restore_defs(self, opts: dict | None = None) -> dict:
         """从持久化定义重建注册表：schema + workflow 两类（网关 reload 重装配前调用）"""
         base = opts or {}
-        s = await metadef.restore_defs(self, {**base, 'kind': 'schema'})
-        w = await metadef.restore_defs(self, {**base, 'kind': 'workflow'})
-        return {'total': s['total'] + w['total'], 'applied': s['applied'] + w['applied']}
+        s = await metadef.restore_defs(self, {**base, "kind": "schema"})
+        w = await metadef.restore_defs(self, {**base, "kind": "workflow"})
+        return {
+            "total": s["total"] + w["total"],
+            "applied": s["applied"] + w["applied"],
+        }
 
     async def rollback_to(self, opts: dict) -> dict:
         """回滚到历史版本（追加式，重新 register 该版本 defn）"""
         return await metadef.rollback_to(self, opts)
 
-    async def migrate(self, *, backend: str, source: str, defs: dict,
-                      old_defs: dict | None = None, driver=None,
-                      tenant: str | None = None, env: str | None = None) -> dict:
+    async def migrate(
+        self,
+        *,
+        backend: str,
+        source: str,
+        defs: dict,
+        old_defs: dict | None = None,
+        driver=None,
+        tenant: str | None = None,
+        env: str | None = None,
+    ) -> dict:
         """迁移编排（A4）：diff → 方言 SQL → 事务执行 → ``__schemaMigration`` 版本行；
         白名单外拒绝并给分步建议（对齐 node ``store.migrate``）"""
-        return await migrate_module.migrate(backend=backend, source=source, defs=defs,
-                                            old_defs=old_defs, driver=driver,
-                                            tenant=tenant, env=env)
+        return await migrate_module.migrate(
+            backend=backend,
+            source=source,
+            defs=defs,
+            old_defs=old_defs,
+            driver=driver,
+            tenant=tenant,
+            env=env,
+        )
 
     # 定义控制面：workflow 定义（kind=workflow；见 metadef.py）
     async def persist_workflow_def(self, defn: dict, opts: dict | None = None) -> dict:
         """持久化 workflow 定义（同名同形幂等，异形 version+1）"""
-        return await metadef.persist_def(self, defn, {**(opts or {}), 'kind': 'workflow'})
+        return await metadef.persist_def(
+            self, defn, {**(opts or {}), "kind": "workflow"}
+        )
 
     async def list_workflow_defs(self, opts: dict | None = None) -> list[dict]:
         """列 workflow 定义行（按 version desc；name 缺省列全部）"""
-        return await metadef.list_defs(self, {**(opts or {}), 'kind': 'workflow'})
+        return await metadef.list_defs(self, {**(opts or {}), "kind": "workflow"})
 
     async def load_workflow_defs(self, opts: dict | None = None) -> list[dict]:
         """各 name 的最新 active workflow 定义行"""
-        return await metadef.load_defs(self, {**(opts or {}), 'kind': 'workflow'})
+        return await metadef.load_defs(self, {**(opts or {}), "kind": "workflow"})
 
     async def rollback_workflow_to(self, opts: dict) -> dict:
         """回滚 workflow 定义到历史版本（追加式）"""
-        return await metadef.rollback_to(self, {**(opts or {}), 'kind': 'workflow'})
+        return await metadef.rollback_to(self, {**(opts or {}), "kind": "workflow"})
 
     def ensure_builtins(self) -> None:
         """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
@@ -352,9 +463,9 @@ class Store:
         """一键接线：注册内建 __feedback 并把 sink 指向落库；返回 disposer（恢复原 sink）"""
         return feedback.enable_feedback_table(self)
 
-    def set_feedback_meta(self, tenant: str = '', env: str = '') -> None:
+    def set_feedback_meta(self, tenant: str = "", env: str = "") -> None:
         """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
-        feedback.set_meta({'tenant': tenant, 'env': env})
+        feedback.set_meta({"tenant": tenant, "env": env})
 
     async def flush_feedback(self):
         """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flush_feedback）"""
@@ -430,11 +541,18 @@ class Store:
         """按名取工作流定义（read 白名单过滤；不可见与不存在同形——防枚举）"""
         return workflow.get(name, ctx)
 
-    async def run_workflow(self, name: str, input: dict | None = None, *,
-                           dry_run: bool = False,
-                           route_override: dict | None = None) -> dict[str, Any]:
+    async def run_workflow(
+        self,
+        name: str,
+        input: dict | None = None,
+        *,
+        dry_run: bool = False,
+        route_override: dict | None = None,
+    ) -> dict[str, Any]:
         """触发工作流 → 完整 run 文档（终态 failed/rejected 不抛错，以 run.status + error 表达）"""
-        return await workflow.run(name, input, dry_run=dry_run, route_override=route_override)
+        return await workflow.run(
+            name, input, dry_run=dry_run, route_override=route_override
+        )
 
     # ── AI 问数（L1，只读）：自然语言 → LLM 翻译 → text2query 沙箱执行 → 结构化回喂 ──
     # 护栏（档位/ctx/route_override）全部服务端硬编码于 ask.py，零暴露进 LLM 消息面（D5）
@@ -517,6 +635,7 @@ store = Store()
 # 触发链执行器装配：回调实现经门面（host['store']）消费 CRUD API
 triggers.set_store(store)
 
+
 # 索引名对齐 MongoDB 自动命名（k1_v1_k2_v2），用于幂等创建
 async def _create_indexes_if_needed():
     """按数据源分派：Mongo 源执行索引创建；SQL 后端**不建索引**（indexes 仅元数据）"""
@@ -531,42 +650,48 @@ async def _create_indexes_if_needed():
         # 嵌入式载体（local / memory）v1 无索引（仅顺序扫描）：声明 indexes 即告警（禁静默忽略），直接跳过建索引
         conn = datasource.get_connection(datasource.source_of_schema(name))
         if datasource.is_embedded(conn):
-            if s.get('indexes'):
-                feedback.emit({
-                    'type': 'local_indexes_ignored',
-                    'code': 'localIndexesIgnored',
-                    'layer': conn.get('kind'),
-                    'message': f'schema {name} 声明了 indexes，但 {conn.get("kind")} 数据源 v1 不建索引（仅顺序扫描）',
-                    'hint': f'{conn.get("kind")} 源请勿声明 indexes；需要索引请改用 sqlite/mongo 等后端',
-                    'schema': name,
-                })
+            if s.get("indexes"):
+                feedback.emit(
+                    {
+                        "type": "local_indexes_ignored",
+                        "code": "localIndexesIgnored",
+                        "layer": conn.get("kind"),
+                        "message": f"schema {name} 声明了 indexes，但 {conn.get('kind')} 数据源 v1 不建索引（仅顺序扫描）",
+                        "hint": f"{conn.get('kind')} 源请勿声明 indexes；需要索引请改用 sqlite/mongo 等后端",
+                        "schema": name,
+                    }
+                )
             continue
-        db = datasource.db_of_schema(name)  # Mongo 按 (datasource, database) 解析；SQL 源返回 None
+        db = datasource.db_of_schema(
+            name
+        )  # Mongo 按 (datasource, database) 解析；SQL 源返回 None
         if db is None:
             continue  # SQL 后端不建索引（铁律 6）
         # 物理集合名：与命令执行路径同源（core::naming 的 camelCase 翻译，单点）
-        coll = db[naming.physical(s['collection'])]
+        coll = db[naming.physical(s["collection"])]
         try:
             index_cursor = await coll.list_indexes()
             existing_indexes = await index_cursor.to_list(length=None)
         except PyMongoError:
             existing_indexes = []
 
-        for idx in s.get('indexes') or []:
+        for idx in s.get("indexes") or []:
             try:
-                keys = idx.get('keys')
+                keys = idx.get("keys")
                 if not keys:
                     continue
                 # 合并 inline 选项（unique/sparse/expireAfterSeconds 等）与显式 options
-                explicit_options = idx.get('options') or {}
-                final_options = {k: v for k, v in idx.items() if k not in ('keys', 'options')}
+                explicit_options = idx.get("options") or {}
+                final_options = {
+                    k: v for k, v in idx.items() if k not in ("keys", "options")
+                }
                 final_options.update(explicit_options)
 
                 # 检查是否已有同 key 模式的索引（忽略选项差异）；键按目标介质逐段翻译为
                 # 物理名（点号路径保留层级结构，不得整串拼接）
                 phys_keys = [(naming.physical_path(k), v) for k, v in keys.items()]
-                name_from_keys = '_'.join(f'{k}_{v}' for k, v in phys_keys)
-                if any(ei.get('name') == name_from_keys for ei in existing_indexes):
+                name_from_keys = "_".join(f"{k}_{v}" for k, v in phys_keys)
+                if any(ei.get("name") == name_from_keys for ei in existing_indexes):
                     continue
 
                 await coll.create_index(phys_keys, **final_options)
@@ -574,14 +699,18 @@ async def _create_indexes_if_needed():
                 # 索引创建失败不阻塞 init（辅助动作），但必须走统一反馈通道：
                 # 无 sink 时由 feedback 默认落 stderr（不双份打印），宿主可 set_sink 接管。
                 # 对齐 nodejs-store/src/index.js（评审项 R7-m1）。
-                feedback.emit({
-                    'type': 'index_create_failed',
-                    'code': 'indexCreateFailed',
-                    'layer': 'host',
-                    'message': f'创建索引失败 {s["collection"]}: {e}',
-                    'hint': ('检查该集合的索引定义与连接权限；'
-                             '索引缺失不影响读写，相关查询将退化为全表扫描'),
-                })
+                feedback.emit(
+                    {
+                        "type": "index_create_failed",
+                        "code": "indexCreateFailed",
+                        "layer": "host",
+                        "message": f"创建索引失败 {s['collection']}: {e}",
+                        "hint": (
+                            "检查该集合的索引定义与连接权限；"
+                            "索引缺失不影响读写，相关查询将退化为全表扫描"
+                        ),
+                    }
+                )
 
 
 # aggregate opt-in 开关（漉金Core 接入扩展 03）：默认关闭，仅 init 第二参显式开启
@@ -603,11 +732,14 @@ async def init(connections, options: dict | None = None):
     原生聚合别名（默认关闭，产品边界；每次 init 重置——不带该项即恢复关闭）。
     """
     if connections is None or (
-            not isinstance(connections, Mapping)
-            and not callable(getattr(connections, '__getitem__', None))):
-        raise TypeError('init(connections) 需要数据源连接映射（或单个 PyMongo 的 db 实例）')
+        not isinstance(connections, Mapping)
+        and not callable(getattr(connections, "__getitem__", None))
+    ):
+        raise TypeError(
+            "init(connections) 需要数据源连接映射（或单个 PyMongo 的 db 实例）"
+        )
     global _allow_native_aggregate
-    _allow_native_aggregate = (options or {}).get('allowNativeAggregate') is True
+    _allow_native_aggregate = (options or {}).get("allowNativeAggregate") is True
     datasource.set_connections(connections)
 
     # 自动创建索引（仅 Mongo 源）— 幂等安全
@@ -627,4 +759,3 @@ def __getattr__(name: str):
 
         return create_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-

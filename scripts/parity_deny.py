@@ -13,11 +13,18 @@ from py_store import workflow
 
 BAD_DEFN = {
     "name": "parityBad",
-    "steps": [{"op": "query", "as": "x", "gql": "NoSuchModel($condition:@c){ _id }", "params": {"c": {}}}],
+    "steps": [
+        {
+            "op": "query",
+            "as": "x",
+            "gql": "NoSuchModel($condition:@c){ _id }",
+            "params": {"c": {}},
+        }
+    ],
 }
 
 try:
     workflow.register(BAD_DEFN)
-    sys.stdout.write("OK\n")          # 不应发生；出现即测试判失败
+    sys.stdout.write("OK\n")  # 不应发生；出现即测试判失败
 except Exception as e:
     sys.stdout.write(str(e) + "\n")

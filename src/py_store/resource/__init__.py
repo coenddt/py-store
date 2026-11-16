@@ -6,6 +6,7 @@
   3. 表名（schema）与字段名（fields）均可由业务自定义：表名经 ``configure({"schema": ...})``，
      字段名经 ``configure({"fields": ...})`` 的「逻辑角色 → 物理字段」映射。缺省 = canonical。
 """
+
 from __future__ import annotations
 
 import copy
@@ -18,16 +19,35 @@ from ..feedback import emit as _emit_feedback
 from . import providers
 from .providers import create_provider as create_provider  # 有意转正的公共 API（F401）
 
-_DEFAULT_SCHEMA = {"resource": "Resource", "location": "ResourceLocation", "binding": "ResourceBinding"}
+_DEFAULT_SCHEMA = {
+    "resource": "Resource",
+    "location": "ResourceLocation",
+    "binding": "ResourceBinding",
+}
 
 # 逻辑角色 → 物理字段名（canonical 缺省）。业务可经 configure_resource({"fields": ...}) 覆盖，
 # 使资源三表的字段结构由业务 schema 自定义；缺省 = canonical（向后逐字节兼容）。
 _DEFAULT_FIELDS = {
-    "resource": {"sha1": "sha1", "fileName": "fileName", "mime": "mime", "size": "size", "kind": "kind"},
-    "location": {"resourceId": "resourceId", "backend": "backend", "key": "key",
-                 "status": "status", "priority": "priority"},
-    "binding": {"resourceId": "resourceId", "businessTable": "businessTable",
-                "businessId": "businessId", "userId": "userId"},
+    "resource": {
+        "sha1": "sha1",
+        "fileName": "fileName",
+        "mime": "mime",
+        "size": "size",
+        "kind": "kind",
+    },
+    "location": {
+        "resourceId": "resourceId",
+        "backend": "backend",
+        "key": "key",
+        "status": "status",
+        "priority": "priority",
+    },
+    "binding": {
+        "resourceId": "resourceId",
+        "businessTable": "businessTable",
+        "businessId": "businessId",
+        "userId": "userId",
+    },
 }
 
 # 必填角色：值为 null / 非空字符串之外的任何值 → configure 抛错（该列缺失则引擎无法定位）
@@ -61,9 +81,13 @@ def _parse_fields(raw=None):
             is_str = isinstance(v, str) and v != ""
             if role in _REQUIRED_ROLES[table]:
                 if not is_str:
-                    raise ValueError(f"configure_resource: fields.{table}.{role} 为必填角色，须为非空字符串")
+                    raise ValueError(
+                        f"configure_resource: fields.{table}.{role} 为必填角色，须为非空字符串"
+                    )
             elif v is not None and not is_str:
-                raise ValueError(f"configure_resource: fields.{table}.{role} 须为非空字符串或 null")
+                raise ValueError(
+                    f"configure_resource: fields.{table}.{role} 须为非空字符串或 null"
+                )
         out[table] = mapped
     return out
 
@@ -97,7 +121,8 @@ def _build_pool(sub, *, strict):
             if k != "providers":
                 raise ValueError(
                     f"configure_resource: pools.<名>.{k} 不被接受（{k} 为全局配置不得按池分化；"
-                    "池级仅接受 providers）")
+                    "池级仅接受 providers）"
+                )
     pool: dict = {}
     for i, spec in enumerate(sub.get("providers") or []):
         p = providers.create_provider(spec["kind"], spec.get("options") or {})
@@ -124,7 +149,8 @@ def configure(cfg=None):
     cfg = cfg or {}
     if cfg.get("providers") and cfg.get("pools"):
         raise ValueError(
-            "configure_resource: providers 与 pools 互斥（同一 cfg 只允许一种形状），禁静默合并")
+            "configure_resource: providers 与 pools 互斥（同一 cfg 只允许一种形状），禁静默合并"
+        )
     _cfg = {
         "schema": {**_DEFAULT_SCHEMA, **(cfg.get("schema") or {})},
         "fields": _parse_fields(cfg.get("fields") or {}),
@@ -173,6 +199,7 @@ def _crud():
     if _cfg["store"] is not None:
         return _cfg["store"]
     from .. import crud
+
     return crud
 
 
@@ -218,7 +245,9 @@ def _meta_gql(schema):
     return f"{schema}($condition: @c0) {{ {', '.join(dict.fromkeys(cols))} }}"
 
 
-async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None, pool=None):
+async def put(
+    *, bytes=None, file_name=None, mime=None, kind=None, bind=None, pool=None
+):
     if bytes is None:
         raise ValueError("resource.put 需要 bytes")
     data = bytes if isinstance(bytes, _BYTES_TYPES) else str(bytes).encode("utf-8")
@@ -229,24 +258,47 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None, po
     resource_id = sha1
     key = native.resource_content_path(sha1)
 
-    locations = []          # 返回用（canonical 键，API 契约不变）
-    location_rows = []      # 落库用（按映射列名）
+    locations = []  # 返回用（canonical 键，API 契约不变）
+    location_rows = []  # 落库用（按映射列名）
     for backend, p in pool_.items():
         try:
             await _call(p["put"], key, data, {"mime": mime})
-            locations.append({"resourceId": resource_id, "backend": backend, "key": key,
-                              "status": "ok", "priority": p["priority"]})
-            location_rows.append(_loc_row(resource_id, backend, key, "ok", p["priority"]))
+            locations.append(
+                {
+                    "resourceId": resource_id,
+                    "backend": backend,
+                    "key": key,
+                    "status": "ok",
+                    "priority": p["priority"],
+                }
+            )
+            location_rows.append(
+                _loc_row(resource_id, backend, key, "ok", p["priority"])
+            )
         except Exception as e:  # 允许部分失败，但必须反馈（禁静默）
-            locations.append({"resourceId": resource_id, "backend": backend, "key": key,
-                              "status": "failed", "priority": p["priority"]})
-            location_rows.append(_loc_row(resource_id, backend, key, "failed", p["priority"]))
-            _emit_feedback({
-                "type": "resource_location_write_failed", "code": "resourceLocationWriteFailed",
-                "layer": "resource", "backend": backend, "resourceId": resource_id,
-                "message": f"资源副本写入失败（backend={backend}, id={resource_id}）：{e}",
-                "hint": "检查该 provider 配置与连通性；其余副本不受影响",
-            })
+            locations.append(
+                {
+                    "resourceId": resource_id,
+                    "backend": backend,
+                    "key": key,
+                    "status": "failed",
+                    "priority": p["priority"],
+                }
+            )
+            location_rows.append(
+                _loc_row(resource_id, backend, key, "failed", p["priority"])
+            )
+            _emit_feedback(
+                {
+                    "type": "resource_location_write_failed",
+                    "code": "resourceLocationWriteFailed",
+                    "layer": "resource",
+                    "backend": backend,
+                    "resourceId": resource_id,
+                    "message": f"资源副本写入失败（backend={backend}, id={resource_id}）：{e}",
+                    "hint": "检查该 provider 配置与连通性；其余副本不受影响",
+                }
+            )
     if not await _call(crud.exists, _cfg["schema"]["resource"], {"_id": resource_id}):
         row: dict[str, Any] = {"_id": resource_id}
         if f["resource"]["sha1"]:
@@ -262,9 +314,14 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None, po
         await _call(crud.insert, _cfg["schema"]["resource"], row)
     if location_rows:
         existing = await _call(
-            crud.query, _loc_gql(_cfg["schema"]["location"]), {"c0": {f["location"]["resourceId"]: resource_id}})
+            crud.query,
+            _loc_gql(_cfg["schema"]["location"]),
+            {"c0": {f["location"]["resourceId"]: resource_id}},
+        )
         have = {r[f["location"]["backend"]] for r in existing}
-        fresh = [row for row in location_rows if row[f["location"]["backend"]] not in have]
+        fresh = [
+            row for row in location_rows if row[f["location"]["backend"]] not in have
+        ]
         if fresh:
             await _call(crud.insert_many, _cfg["schema"]["location"], fresh)
     if bind:
@@ -276,7 +333,9 @@ async def put(*, bytes=None, file_name=None, mime=None, kind=None, bind=None, po
         if f["binding"]["businessId"]:
             b[f["binding"]["businessId"]] = str(bind["businessId"])
         if f["binding"]["userId"]:
-            b[f["binding"]["userId"]] = str(bind["userId"]) if bind.get("userId") is not None else None
+            b[f["binding"]["userId"]] = (
+                str(bind["userId"]) if bind.get("userId") is not None else None
+            )
         await _call(crud.insert, _cfg["schema"]["binding"], b)
     return {"resourceId": resource_id, "sha1": sha1, "locations": locations}
 
@@ -285,18 +344,23 @@ async def open(resource_id, *, order=None, pool=None):
     crud = _crud()
     f = _cfg["fields"]
     pool_ = _require_pool(pool)
-    rows = await _call(crud.query, _loc_gql(_cfg["schema"]["location"]),
-                       {"c0": {f["location"]["resourceId"]: resource_id}})
+    rows = await _call(
+        crud.query,
+        _loc_gql(_cfg["schema"]["location"]),
+        {"c0": {f["location"]["resourceId"]: resource_id}},
+    )
     seq = list(order) if order else list(pool_.keys())
 
     def rank(b):
-        return seq.index(b) if b in seq else 2 ** 31
+        return seq.index(b) if b in seq else 2**31
 
     def backend_of(r):
         return r[f["location"]["backend"]]
 
     def prio_of(r):
-        return (r.get(f["location"]["priority"]) or 0) if f["location"]["priority"] else 0
+        return (
+            (r.get(f["location"]["priority"]) or 0) if f["location"]["priority"] else 0
+        )
 
     rows = sorted(rows, key=lambda r: (rank(backend_of(r)), prio_of(r)))
     last_err = None
@@ -306,23 +370,41 @@ async def open(resource_id, *, order=None, pool=None):
             continue
         p = pool_.get(backend)
         if p is None:
-            _emit_feedback({"type": "resource_location_provider_missing", "code": "resourceLocationProviderMissing",
-                            "layer": "resource", "backend": backend, "resourceId": resource_id,
-                            "message": f'副本 backend "{backend}" 未配置 provider，跳过（id={resource_id}）',
-                            "hint": "补齐 configure(providers=[...]) 或清理该副本"})
+            _emit_feedback(
+                {
+                    "type": "resource_location_provider_missing",
+                    "code": "resourceLocationProviderMissing",
+                    "layer": "resource",
+                    "backend": backend,
+                    "resourceId": resource_id,
+                    "message": f'副本 backend "{backend}" 未配置 provider，跳过（id={resource_id}）',
+                    "hint": "补齐 configure(providers=[...]) 或清理该副本",
+                }
+            )
             continue
         key = loc[f["location"]["key"]]
         try:
             data = await _call(p["get"], key)
         except Exception as e:
             last_err = e
-            _emit_feedback({"type": "resource_location_degraded", "code": "resourceLocationDegraded",
-                            "layer": "resource", "backend": backend, "resourceId": resource_id,
-                            "message": f"资源副本读取失败，降级到下一副本（backend={backend}, id={resource_id}）：{e}",
-                            "hint": "检查该 provider 可用性；该副本可能需要重建"})
+            _emit_feedback(
+                {
+                    "type": "resource_location_degraded",
+                    "code": "resourceLocationDegraded",
+                    "layer": "resource",
+                    "backend": backend,
+                    "resourceId": resource_id,
+                    "message": f"资源副本读取失败，降级到下一副本（backend={backend}, id={resource_id}）：{e}",
+                    "hint": "检查该 provider 可用性；该副本可能需要重建",
+                }
+            )
             continue
         # 字节成功 → 读元数据（读失败不降级：Resource 未注册/无权限时响亮抛出，语义清晰）
-        meta = await _call(crud.query_one, _meta_gql(_cfg["schema"]["resource"]), {"c0": {"_id": resource_id}})
+        meta = await _call(
+            crud.query_one,
+            _meta_gql(_cfg["schema"]["resource"]),
+            {"c0": {"_id": resource_id}},
+        )
         file_name = None
         mime = None
         if meta:
@@ -331,25 +413,42 @@ async def open(resource_id, *, order=None, pool=None):
             if f["resource"]["mime"]:
                 mime = meta.get(f["resource"]["mime"])
         else:
-            _emit_feedback({"type": "resource_meta_missing", "code": "resourceMetaMissing",
-                            "layer": "resource", "resourceId": resource_id,
-                            "message": f"资源元数据缺失（{_cfg['schema']['resource']} 无 _id={resource_id} 行）：open 仍返回字节",
-                            "hint": "检查资源表是否被外部清理；fileName/mime 将回落调用方兜底值"})
-        return {"bytes": data, "resourceId": resource_id, "backend": backend, "key": key,
-                "fileName": file_name, "mime": mime}
+            _emit_feedback(
+                {
+                    "type": "resource_meta_missing",
+                    "code": "resourceMetaMissing",
+                    "layer": "resource",
+                    "resourceId": resource_id,
+                    "message": f"资源元数据缺失（{_cfg['schema']['resource']} 无 _id={resource_id} 行）：open 仍返回字节",
+                    "hint": "检查资源表是否被外部清理；fileName/mime 将回落调用方兜底值",
+                }
+            )
+        return {
+            "bytes": data,
+            "resourceId": resource_id,
+            "backend": backend,
+            "key": key,
+            "fileName": file_name,
+            "mime": mime,
+        }
     if last_err is not None:
         raise last_err  # 有副本行但读取失败：原样重抛（500 透传），禁改语义
     # core 稳定前缀（与 ERR_PERMISSION: / ERR_GQL_PARSE: 同构）：适配层按前缀判定 → 404，
     # 禁按中文文案匹配。仅「按 resource_id 查到零 ResourceLocation 行」时抛出。
-    raise FileNotFoundError(f"ERR_RESOURCE_NOT_FOUND:资源不存在或无可读副本: {resource_id}")
+    raise FileNotFoundError(
+        f"ERR_RESOURCE_NOT_FOUND:资源不存在或无可读副本: {resource_id}"
+    )
 
 
 async def remove(resource_id, *, pool=None):
     crud = _crud()
     f = _cfg["fields"]
     pool_ = _require_pool(pool)
-    rows = await _call(crud.query, _loc_gql(_cfg["schema"]["location"]),
-                       {"c0": {f["location"]["resourceId"]: resource_id}})
+    rows = await _call(
+        crud.query,
+        _loc_gql(_cfg["schema"]["location"]),
+        {"c0": {f["location"]["resourceId"]: resource_id}},
+    )
     removed = []
     for loc in rows:
         backend = loc[f["location"]["backend"]]
@@ -360,17 +459,30 @@ async def remove(resource_id, *, pool=None):
             await _call(p["remove"], loc[f["location"]["key"]])
             removed.append(backend)
         except Exception as e:
-            _emit_feedback({"type": "resource_location_remove_failed", "code": "resourceLocationRemoveFailed",
-                            "layer": "resource", "backend": backend, "resourceId": resource_id,
-                            "message": f"资源副本删除失败（backend={backend}, id={resource_id}）：{e}",
-                            "hint": "检查该 provider 可用性；可能需要手工清理孤儿文件"})
-    await _call(crud.remove, _cfg["schema"]["location"], {f["location"]["resourceId"]: resource_id})
+            _emit_feedback(
+                {
+                    "type": "resource_location_remove_failed",
+                    "code": "resourceLocationRemoveFailed",
+                    "layer": "resource",
+                    "backend": backend,
+                    "resourceId": resource_id,
+                    "message": f"资源副本删除失败（backend={backend}, id={resource_id}）：{e}",
+                    "hint": "检查该 provider 可用性；可能需要手工清理孤儿文件",
+                }
+            )
+    await _call(
+        crud.remove,
+        _cfg["schema"]["location"],
+        {f["location"]["resourceId"]: resource_id},
+    )
     await _call(crud.remove, _cfg["schema"]["resource"], {"_id": resource_id})
     return {"removed": removed}
 
 
 async def url(reference, *, vars=None, pool=None):
-    _require_pool(pool)  # 池存在性 fail-fast；URL 模板/签名为全局配置（跨池共享），行为不变
+    _require_pool(
+        pool
+    )  # 池存在性 fail-fast；URL 模板/签名为全局配置（跨池共享），行为不变
     cfg = dict(_cfg["url"])
     if vars:
         cfg["vars"] = {**(cfg.get("vars") or {}), **vars}

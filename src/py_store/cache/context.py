@@ -16,7 +16,9 @@ import contextvars
 import inspect
 from typing import Any, Callable
 
-_selection_var: contextvars.ContextVar = contextvars.ContextVar('store_link_selection', default=None)
+_selection_var: contextvars.ContextVar = contextvars.ContextVar(
+    "store_link_selection", default=None
+)
 
 
 async def run_with_selection(links: Any, fn: Callable[[], Any]) -> Any:
@@ -40,4 +42,4 @@ def current_selection() -> Any:
     return _selection_var.get()
 
 
-__all__ = ['current_selection', 'run_with_selection']
+__all__ = ["current_selection", "run_with_selection"]

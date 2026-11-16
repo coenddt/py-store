@@ -51,16 +51,16 @@ def _explicit_null(v):
     if isinstance(v, dict):
         out = {}
         for k, val in v.items():
-            if k.startswith('$') and isinstance(val, (dict, list)):
+            if k.startswith("$") and isinstance(val, (dict, list)):
                 out[k] = _explicit_null(val)
-            elif k.startswith('$'):
+            elif k.startswith("$"):
                 out[k] = val
             elif isinstance(val, (dict, list)):
                 # 与 nodejs-store/src/executors/mongo.js#_explicitNull 对齐：
                 # 非 `$` 键的对象/数组值一律递归下钻（否则数组内嵌套对象的显式 null 不会被改写 → 三端 parity 破）
                 out[k] = _explicit_null(val)
             elif val is None:
-                out[k] = {'$eq': None, '$exists': True}
+                out[k] = {"$eq": None, "$exists": True}
             else:
                 out[k] = val
         return out
@@ -70,17 +70,17 @@ def _explicit_null(v):
 
 
 def _norm_filter(cmd):
-    filter_ = cmd.get('filter')
+    filter_ = cmd.get("filter")
     if isinstance(filter_, dict):
-        cmd['filter'] = _explicit_null(filter_)
+        cmd["filter"] = _explicit_null(filter_)
 
 
 def _norm_pipeline(cmd):
-    pipe = cmd.get('pipeline')
+    pipe = cmd.get("pipeline")
     if isinstance(pipe, list):
         for stage in pipe:
-            if isinstance(stage, dict) and isinstance(stage.get('$match'), dict):
-                stage['$match'] = _explicit_null(stage['$match'])
+            if isinstance(stage, dict) and isinstance(stage.get("$match"), dict):
+                stage["$match"] = _explicit_null(stage["$match"])
 
 
 def _client_of(connection):
@@ -89,24 +89,26 @@ def _client_of(connection):
     本模块不 import ``datasource``（会被 ``datasource`` 反向 import，形成环），
     故在此自带最小判定。对齐 ``nodejs-store/src/executors/mongo.js#_clientOf``。
     """
-    if hasattr(connection, 'get_database') and not hasattr(connection, 'get_collection'):
-        return connection          # MongoClient
-    return connection.client       # Database.client
+    if hasattr(connection, "get_database") and not hasattr(
+        connection, "get_collection"
+    ):
+        return connection  # MongoClient
+    return connection.client  # Database.client
 
 
 def _opts(session, **kw):
     """session 非 None 时注入 ``session`` 关键字；None 时保持原调用形态（零回归）"""
     if session is not None:
-        kw['session'] = session
+        kw["session"] = session
     return kw
 
 
 async def open_transaction(connection):
     """Mongo 事务句柄：start_session + start_transaction
 
-      - ``commit`` / ``rollback`` 幂等（closed 标志）；``release`` 结束 session；
-      - **无保存点原语** —— Mongo 不支持 ``SAVEPOINT``；嵌套作用域由 datasource
-        层走降级声明（``nested_savepoint_unsupported``），不在此伪造。
+    - ``commit`` / ``rollback`` 幂等（closed 标志）；``release`` 结束 session；
+    - **无保存点原语** —— Mongo 不支持 ``SAVEPOINT``；嵌套作用域由 datasource
+      层走降级声明（``nested_savepoint_unsupported``），不在此伪造。
     """
     client = _client_of(connection)
     # PyMongo async：``start_session`` 为同步方法，返回 AsyncClientSession；
@@ -132,7 +134,12 @@ async def open_transaction(connection):
     async def release():
         await session.end_session()
 
-    return {'session': session, 'commit': commit, 'rollback': rollback, 'release': release}
+    return {
+        "session": session,
+        "commit": commit,
+        "rollback": rollback,
+        "release": release,
+    }
 
 
 async def exec_mongo(db, cmd, session=None):
@@ -147,70 +154,85 @@ async def exec_mongo(db, cmd, session=None):
 
 async def _exec_mongo_raw(db, cmd, session=None):
     """原生驱动调用（不做结果归一；唯一调用方是 ``exec_mongo`` 包装层）"""
-    coll = db[cmd['collection']]
-    kind = cmd['kind']
+    coll = db[cmd["collection"]]
+    kind = cmd["kind"]
 
-    if kind == 'find':
+    if kind == "find":
         _norm_filter(cmd)
-        cursor = coll.find(cmd['filter'], cmd.get('projection'), **_opts(session))
+        cursor = coll.find(cmd["filter"], cmd.get("projection"), **_opts(session))
         return await cursor.to_list(length=None)
-    if kind == 'aggregate':
+    if kind == "aggregate":
         # PyMongo async 下 ``aggregate`` 是协程（与 ``find`` 直接返回游标不同）
         # cmd['options'] 为原生聚合透传项（execute_native 注入；GQL 路径无此键，零回归）
         _norm_pipeline(cmd)
-        cursor = await coll.aggregate(cmd['pipeline'], **_opts(session, **(cmd.get('options') or {})))
+        cursor = await coll.aggregate(
+            cmd["pipeline"], **_opts(session, **(cmd.get("options") or {}))
+        )
         return await cursor.to_list(length=None)
-    if kind == 'countDocuments':
+    if kind == "countDocuments":
         _norm_filter(cmd)
-        return await coll.count_documents(cmd['filter'], **_opts(session))
-    if kind == 'findOne':
+        return await coll.count_documents(cmd["filter"], **_opts(session))
+    if kind == "findOne":
         _norm_filter(cmd)
-        return await coll.find_one(cmd['filter'], cmd.get('projection'), **_opts(session))
-    if kind == 'insertOne':
-        doc = cmd.get('doc') or {}
+        return await coll.find_one(
+            cmd["filter"], cmd.get("projection"), **_opts(session)
+        )
+    if kind == "insertOne":
+        doc = cmd.get("doc") or {}
         # 阶段2（no-error-masking）：Mongo 无自增语义 —— `_id` 缺失的文档只可能来自
         # 声明 strategy=autoincrement 的 schema（常规 schema 该形态已被 core 拦截）。
         # 禁止 ObjectId 静默顶替自增契约，显式报错。
-        if not doc.get('_id'):
+        if not doc.get("_id"):
             raise ValueError(
                 'AUTOINCREMENT_NOT_SUPPORTED: schema 声明了 strategy="autoincrement"，'
-                'MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源')
+                "MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源"
+            )
         await coll.insert_one(doc, **_opts(session))
         return doc
-    if kind == 'insertMany':
-        if cmd.get('upsertById'):
+    if kind == "insertMany":
+        if cmd.get("upsertById"):
             # 归档幂等（core plan_archive_docs）：按 _id 逐条覆盖 —— 「归档成功但删除失败」
             # 的重试不再因 _id 冲突整批失败。SQL 侧由 dialect 的 ON CONFLICT/REPLACE 承接。
-            for doc in cmd['docs']:
-                await coll.replace_one({'_id': doc['_id']}, doc, **_opts(session, upsert=True))
-            return {'insertedCount': len(cmd['docs'])}
-        if cmd['docs'] and any(not (d or {}).get('_id') for d in cmd['docs']):
+            for doc in cmd["docs"]:
+                await coll.replace_one(
+                    {"_id": doc["_id"]}, doc, **_opts(session, upsert=True)
+                )
+            return {"insertedCount": len(cmd["docs"])}
+        if cmd["docs"] and any(not (d or {}).get("_id") for d in cmd["docs"]):
             raise ValueError(
                 'AUTOINCREMENT_NOT_SUPPORTED: schema 声明了 strategy="autoincrement"，'
-                'MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源')
-        await coll.insert_many(cmd['docs'], **_opts(session))
-        return {'insertedCount': len(cmd['docs'])}
-    if kind == 'findOneAndUpdate':
+                "MongoDB 后端无自增语义（禁 ObjectId 顶替）；请使用 SQL 数据源"
+            )
+        await coll.insert_many(cmd["docs"], **_opts(session))
+        return {"insertedCount": len(cmd["docs"])}
+    if kind == "findOneAndUpdate":
         _norm_filter(cmd)
-        options = dict(cmd.get('options') or {})
-        rd = options.pop('returnDocument', 'after')
-        options['return_document'] = (
-            ReturnDocument.AFTER if rd == 'after' else ReturnDocument.BEFORE)
+        options = dict(cmd.get("options") or {})
+        rd = options.pop("returnDocument", "after")
+        options["return_document"] = (
+            ReturnDocument.AFTER if rd == "after" else ReturnDocument.BEFORE
+        )
         options.update(_opts(session))
-        return await coll.find_one_and_update(cmd['filter'], cmd['update'], **options)
-    if kind == 'updateMany':
+        return await coll.find_one_and_update(cmd["filter"], cmd["update"], **options)
+    if kind == "updateMany":
         _norm_filter(cmd)
-        return await coll.update_many(cmd['filter'], cmd['update'], **_opts(session))
-    if kind == 'deleteMany':
+        return await coll.update_many(cmd["filter"], cmd["update"], **_opts(session))
+    if kind == "deleteMany":
         _norm_filter(cmd)
-        return await coll.delete_many(cmd['filter'], **_opts(session))
+        return await coll.delete_many(cmd["filter"], **_opts(session))
 
-    if kind in ('claim', 'compareAndSet'):
+    if kind in ("claim", "compareAndSet"):
         # 并发原语（C1）仅 SQL 三后端有方言路径：Mongo 无行锁语义等价物，
         # 禁止静默走通用路径或伪装成功 —— 显式报错并指引改用 SQL 源。
         from ..datasource import PushdownUnsupportedError
-        raise PushdownUnsupportedError(
-            cmd.get('source') or '', kind, ['concurrencyPrimitivesSqlOnly'],
-            ['claim/compareAndSet 仅 SQL 源支持（MongoDB 无行锁等价物）；请使用 SQL 源'])
 
-    raise RuntimeError(f'未支持的命令: {kind}')
+        raise PushdownUnsupportedError(
+            cmd.get("source") or "",
+            kind,
+            ["concurrencyPrimitivesSqlOnly"],
+            [
+                "claim/compareAndSet 仅 SQL 源支持（MongoDB 无行锁等价物）；请使用 SQL 源"
+            ],
+        )
+
+    raise RuntimeError(f"未支持的命令: {kind}")

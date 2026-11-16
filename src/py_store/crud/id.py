@@ -10,25 +10,25 @@ import time
 
 from ..schema import get as _get_schema
 
-_ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
+_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 _BASE36_DIGITS = string.digits + string.ascii_lowercase
 
 
 def _to_base36(n):
     if n == 0:
-        return '0'
+        return "0"
     out = []
     while n:
         n, r = divmod(n, 36)
         out.append(_BASE36_DIGITS[r])
-    return ''.join(reversed(out))
+    return "".join(reversed(out))
 
 
 def _generate_id(schema):
     """按 schema.idPrefix 生成唯一 ID（时间戳36进制 + secrets 随机8位）"""
     ts = _to_base36(int(time.time() * 1000)).upper()
-    rnd = ''.join(secrets.choice(_ID_CHARS).upper() for _ in range(8))
-    return schema['idPrefix'] + ts + rnd
+    rnd = "".join(secrets.choice(_ID_CHARS).upper() for _ in range(8))
+    return schema["idPrefix"] + ts + rnd
 
 
 def _truthy(v):
@@ -54,18 +54,18 @@ def _new_id_pool(schema_name, data):
 
     def walk(name, node):
         s = _get_schema(name)
-        if not _truthy((node or {}).get('_id')) and s['idPrefix']:
+        if not _truthy((node or {}).get("_id")) and s["idPrefix"]:
             pool.append(_generate_id(s))
         for key, val in (node or {}).items():
-            rel = (s.get('relations') or {}).get(key)
+            rel = (s.get("relations") or {}).get(key)
             if not rel or val is None:
                 continue
             if isinstance(val, list):
                 for child in val:
                     if child is not None:
-                        walk(rel.get('model'), child)
+                        walk(rel.get("model"), child)
             else:
-                walk(rel.get('model'), val)
+                walk(rel.get("model"), val)
 
     walk(schema_name, data)
     return pool

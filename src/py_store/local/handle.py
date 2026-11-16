@@ -53,75 +53,103 @@ class LocalCollection:
 
     def _eval(self, cmd):
         """单命令求值：load 快照 → core.local_eval → 返回包络 {result, changed, collections}"""
-        return _local_core.local_eval(self._load(), {'collection': self._name, **cmd})
+        return _local_core.local_eval(self._load(), {"collection": self._name, **cmd})
 
     def _read(self, cmd):
         """读命令：changed 恒空，直接取 result"""
-        return self._eval(cmd)['result']
+        return self._eval(cmd)["result"]
 
     def _write(self, cmd):
         """写命令：changed 非空则回写，返回 result"""
         out = self._eval(cmd)
-        if out.get('changed'):
-            self._save(out['changed'], out['collections'])
-        return out['result']
+        if out.get("changed"):
+            self._save(out["changed"], out["collections"])
+        return out["result"]
 
     # ── 读（与 exec_mongo 调用点一一对应） ────────────────────────
     def find(self, filter=None, projection=None, **opts):
-        return _Cursor(self._read({
-            'kind': 'find', 'filter': filter or {}, 'projection': projection,
-        }))
+        return _Cursor(
+            self._read(
+                {
+                    "kind": "find",
+                    "filter": filter or {},
+                    "projection": projection,
+                }
+            )
+        )
 
     async def find_one(self, filter=None, projection=None, **opts):
-        return self._read({
-            'kind': 'findOne', 'filter': filter or {}, 'projection': projection,
-        })
+        return self._read(
+            {
+                "kind": "findOne",
+                "filter": filter or {},
+                "projection": projection,
+            }
+        )
 
     async def count_documents(self, filter=None, **opts):
-        return self._read({'kind': 'countDocuments', 'filter': filter or {}})
+        return self._read({"kind": "countDocuments", "filter": filter or {}})
 
     async def aggregate(self, pipeline, **opts):
-        return _Cursor(self._read({
-            'kind': 'aggregate', 'pipeline': list(pipeline or []), 'options': opts or {},
-        }))
+        return _Cursor(
+            self._read(
+                {
+                    "kind": "aggregate",
+                    "pipeline": list(pipeline or []),
+                    "options": opts or {},
+                }
+            )
+        )
 
     def list_indexes(self):
         return _Cursor([])  # local v1 无索引
 
     async def create_index(self, *a, **kw):
-        return None  # 声明即告警（由 __init__ 发 local_indexes_ignored），此处不静默建索引
+        return (
+            None  # 声明即告警（由 __init__ 发 local_indexes_ignored），此处不静默建索引
+        )
 
     # ── 写 ──────────────────────────────────────────────────────
     async def insert_one(self, doc, **opts):
-        return self._write({'kind': 'insertOne', 'doc': doc})
+        return self._write({"kind": "insertOne", "doc": doc})
 
     async def insert_many(self, docs, upsert_by_id=False, **opts):
-        return self._write({
-            'kind': 'insertMany', 'docs': list(docs), 'upsertById': bool(upsert_by_id),
-        })
+        return self._write(
+            {
+                "kind": "insertMany",
+                "docs": list(docs),
+                "upsertById": bool(upsert_by_id),
+            }
+        )
 
     async def replace_one(self, filter, doc, upsert=False, **opts):
         # core 无独立 replaceOne：映射为 insertMany(upsertById=true) 单词形态
         # （exec_mongo 的 upsertById 分支逐条走 replaceOne({_id}, doc, upsert=True)）
         if not upsert:
-            raise ValueError('local replace_one 仅支持 upsert 语义（upsertById 路径）；请勿它用')
-        return self._write({'kind': 'insertMany', 'docs': [doc], 'upsertById': True})
+            raise ValueError(
+                "local replace_one 仅支持 upsert 语义（upsertById 路径）；请勿它用"
+            )
+        return self._write({"kind": "insertMany", "docs": [doc], "upsertById": True})
 
     async def find_one_and_update(self, filter, update, **opts):
-        return self._write({
-            'kind': 'findOneAndUpdate', 'filter': filter, 'update': update,
-            'options': opts or {},
-        })
+        return self._write(
+            {
+                "kind": "findOneAndUpdate",
+                "filter": filter,
+                "update": update,
+                "options": opts or {},
+            }
+        )
 
     async def update_many(self, filter, update, **opts):
         # core 回喂 {modifiedCount} → 塑形为 PyMongo UpdateResult（crud 读 .modified_count）
-        out = self._write({'kind': 'updateMany', 'filter': filter, 'update': update})
-        return UpdateResult(out['modifiedCount'])
+        out = self._write({"kind": "updateMany", "filter": filter, "update": update})
+        return UpdateResult(out["modifiedCount"])
 
     async def delete_many(self, filter, **opts):
         # core 回喂 {deletedCount} → 塑形为 PyMongo DeleteResult（crud 读 .deleted_count）
-        out = self._write({'kind': 'deleteMany', 'filter': filter})
-        return DeleteResult(out['deletedCount'])
+        out = self._write({"kind": "deleteMany", "filter": filter})
+        return DeleteResult(out["deletedCount"])
 
 
 class LocalDb:

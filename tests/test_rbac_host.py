@@ -92,12 +92,19 @@ def test_row_condition_helper():
             "mode": "overlay",
             "roles": {"reader": {}},
             "grants": [
-                {"role": "reader", "model": "Post", "actions": ["read"], "ownerOnly": True}
+                {
+                    "role": "reader",
+                    "model": "Post",
+                    "actions": ["read"],
+                    "ownerOnly": True,
+                }
             ],
         }
     )
     try:
-        cond = store.rbac_row_condition("Post", "read", {"userId": "u1", "roles": ["reader"]})
+        cond = store.rbac_row_condition(
+            "Post", "read", {"userId": "u1", "roles": ["reader"]}
+        )
         assert cond == {"createdBy": "u1"}, cond
         # overlay 下无匹配角色的角色 → RBAC 不介入 → 无行级条件
         assert store.rbac_row_condition("Post", "read", _CTX_VIEWER) is None

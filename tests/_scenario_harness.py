@@ -16,7 +16,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-_DEPS = ('checks', 'fns', 'probes')
+_DEPS = ("checks", "fns", "probes")
 
 
 def load_scenario_harness(unique_name: str, impl_dir: Path):
@@ -27,17 +27,19 @@ def load_scenario_harness(unique_name: str, impl_dir: Path):
     加载完成后即卸下标准名（harness 的 globals 已持有引用，不受影响）。
     """
     # py-store/src（harness.py 内部虽自行 insert，但以测试侧为准先行注入）
-    src = impl_dir.parent.parent.parent / 'src'
+    src = impl_dir.parent.parent.parent / "src"
     if str(src) not in sys.path:
         sys.path.insert(0, str(src))
 
     loaded = {}
     try:
         for dep in _DEPS:
-            dep_path = impl_dir / f'{dep}.py'
+            dep_path = impl_dir / f"{dep}.py"
             if not dep_path.exists():
                 continue
-            spec = importlib.util.spec_from_file_location(f'{unique_name}_{dep}', dep_path)
+            spec = importlib.util.spec_from_file_location(
+                f"{unique_name}_{dep}", dep_path
+            )
             mod = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = mod
             spec.loader.exec_module(mod)
@@ -45,7 +47,9 @@ def load_scenario_harness(unique_name: str, impl_dir: Path):
         for dep, mod in loaded.items():
             sys.modules[dep] = mod  # harness.py 的 `import checks` 按标准名命中
 
-        spec = importlib.util.spec_from_file_location(unique_name, impl_dir / 'harness.py')
+        spec = importlib.util.spec_from_file_location(
+            unique_name, impl_dir / "harness.py"
+        )
         harness = importlib.util.module_from_spec(spec)
         sys.modules[unique_name] = harness
         spec.loader.exec_module(harness)

@@ -26,7 +26,7 @@ from .scope import current_scope
 _sink = None
 
 # 进程级 ns 标签（进程级隔离下天然单 ns；由宿主 set_meta 注入）
-_meta = {'tenant': '', 'env': ''}
+_meta = {"tenant": "", "env": ""}
 
 # 落库失败累计计数（进程级；>0 表示有事件未入表——可观测，不静默）
 _fail_count = 0
@@ -72,17 +72,18 @@ def fail_count():
 def _fail(msg):
     global _fail_count
     _fail_count += 1
-    print(f'[py-store][feedback] {msg}', file=sys.stderr)
+    print(f"[py-store][feedback] {msg}", file=sys.stderr)
 
 
 async def _write_feedback(store, row):
     """落库（internal 上下文——__feedback write 空名单仅放行 internal/admin）；失败不静默、不抛回 emit"""
     from . import metadef as _metadef
+
     try:
         with _metadef._internal_ctx():
-            await store.insert('__feedback', row)
+            await store.insert("__feedback", row)
     except Exception as e:  # 落库失败：stderr + 计数，绝不抛回 emit（不破坏主链路）
-        _fail(f'__feedback 落库失败: {e}')
+        _fail(f"__feedback 落库失败: {e}")
 
 
 def enable_feedback_table(store):
@@ -92,6 +93,7 @@ def enable_feedback_table(store):
     绝不抛回 ``emit``。未调用本函数时 ``emit`` 保持原 stderr 行为（不改变默认语义）。
     """
     from . import metadef as _metadef
+
     _metadef.ensure_builtins()  # 幂等（含 __feedback）
     prev = get_sink()
 
@@ -100,8 +102,13 @@ def enable_feedback_table(store):
         e = event or {}
         row = dict(e)
         ns = _current_meta()
-        row.update({'tenant': ns.get('tenant', ''),
-                    'env': ns.get('env', ''), 'now': int(time.time() * 1000)})
+        row.update(
+            {
+                "tenant": ns.get("tenant", ""),
+                "env": ns.get("env", ""),
+                "now": int(time.time() * 1000),
+            }
+        )
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -109,9 +116,9 @@ def enable_feedback_table(store):
         if loop is not None:
             task = loop.create_task(_write_feedback(store, row))
             _pending.add(task)
-            task.add_done_callback(_pending.discard)   # 完成即出集合
+            task.add_done_callback(_pending.discard)  # 完成即出集合
         else:
-            _fail('无运行中事件循环，__feedback 事件未落库')
+            _fail("无运行中事件循环，__feedback 事件未落库")
 
     set_sink(_sink)
     return lambda: set_sink(prev)

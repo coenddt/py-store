@@ -20,6 +20,7 @@ from py_store.executors.mongo import exec_mongo, open_transaction
 
 # ─── 假 Mongo 驱动（能力 + session 记录） ────────────────────
 
+
 class _RecCursor:
     async def to_list(self, length=None):
         return []
@@ -31,47 +32,47 @@ class _RecColl:
         self._name = name
 
     def _hit(self, op, session):
-        self._rec['ops'].append((self._name, op, session))
+        self._rec["ops"].append((self._name, op, session))
 
     def find(self, f=None, projection=None, session=None):
-        self._hit('find', session)
+        self._hit("find", session)
         return _RecCursor()
 
     async def aggregate(self, pipeline=None, session=None):
-        self._hit('aggregate', session)
+        self._hit("aggregate", session)
         return _RecCursor()
 
     async def count_documents(self, f=None, session=None):
-        self._hit('countDocuments', session)
+        self._hit("countDocuments", session)
         return 0
 
     async def find_one(self, f=None, projection=None, session=None):
-        self._hit('findOne', session)
+        self._hit("findOne", session)
         return None
 
     async def insert_one(self, doc, session=None):
-        self._hit('insertOne', session)
+        self._hit("insertOne", session)
         return doc
 
     async def insert_many(self, docs, session=None):
-        self._hit('insertMany', session)
-        return {'insertedCount': len(docs)}
+        self._hit("insertMany", session)
+        return {"insertedCount": len(docs)}
 
     async def replace_one(self, f, doc, upsert=False, session=None):
-        self._hit('replaceOne', session)
-        return {'modifiedCount': 1}
+        self._hit("replaceOne", session)
+        return {"modifiedCount": 1}
 
     async def find_one_and_update(self, f, u, **kw):
-        self._hit('findOneAndUpdate', kw.get('session'))
+        self._hit("findOneAndUpdate", kw.get("session"))
         return None
 
     async def update_many(self, f, u, session=None):
-        self._hit('updateMany', session)
-        return {'modifiedCount': 1}
+        self._hit("updateMany", session)
+        return {"modifiedCount": 1}
 
     async def delete_many(self, f, session=None):
-        self._hit('deleteMany', session)
-        return {'deletedCount': 1}
+        self._hit("deleteMany", session)
+        return {"deletedCount": 1}
 
 
 class _FakeSession:
@@ -82,16 +83,16 @@ class _FakeSession:
         self._rec = rec
 
     async def start_transaction(self, *a, **kw):
-        self._rec['tx'].append('start')
+        self._rec["tx"].append("start")
 
     async def commit_transaction(self):
-        self._rec['tx'].append('commit')
+        self._rec["tx"].append("commit")
 
     async def abort_transaction(self):
-        self._rec['tx'].append('abort')
+        self._rec["tx"].append("abort")
 
     async def end_session(self):
-        self._rec['tx'].append('end')
+        self._rec["tx"].append("end")
 
 
 class _FakeAdmin:
@@ -100,7 +101,7 @@ class _FakeAdmin:
         self._counter = counter
 
     async def command(self, _name):
-        self._counter['hello'] += 1
+        self._counter["hello"] += 1
         if isinstance(self._hello, BaseException):
             raise self._hello
         return self._hello
@@ -113,13 +114,13 @@ class _FakeMongoClient:
     """
 
     def __init__(self, hello, rec):
-        self._counter = {'hello': 0}
+        self._counter = {"hello": 0}
         self.admin = _FakeAdmin(hello, self._counter)
         self._rec = rec
 
     def start_session(self):
         s = _FakeSession(self._rec)
-        self._rec['sessions'].append(s)
+        self._rec["sessions"].append(s)
         return s
 
 
@@ -135,8 +136,12 @@ class _FakeMongoDb:
 
 
 def _make_db(hello=None, transactable=True):
-    rec = {'ops': [], 'tx': [], 'sessions': [], 'hello': 0}
-    hello = hello if hello is not None else ({'setName': 'rs0'} if transactable else {'ok': 1})
+    rec = {"ops": [], "tx": [], "sessions": [], "hello": 0}
+    hello = (
+        hello
+        if hello is not None
+        else ({"setName": "rs0"} if transactable else {"ok": 1})
+    )
     client = _FakeMongoClient(hello, rec)
     return _FakeMongoDb(client, rec), rec, client
 
@@ -155,20 +160,27 @@ def _isolate():
 
 
 def _register_mongo(name, source, collection=None):
-    _sc.register({
-        'name': name, 'collection': collection or name.lower(),
-        'timestamps': False, 'idPrefix': 'mx',
-        'fields': {'v': {'type': 'string'}}, 'relations': {}, 'datasource': source,
-    })
+    _sc.register(
+        {
+            "name": name,
+            "collection": collection or name.lower(),
+            "timestamps": False,
+            "idPrefix": "mx",
+            "fields": {"v": {"type": "string"}},
+            "relations": {},
+            "datasource": source,
+        }
+    )
 
 
 # ─── A1 能力探测四态 ─────────────────────────────────────────
 
+
 def test_capability_four_states():
-    case_repl, _, _ = _make_db({'setName': 'rs0'})
-    case_shard, _, _ = _make_db({'msg': 'isdbgrid'})
-    case_alone, _, _ = _make_db({'ok': 1})
-    case_err, _, _ = _make_db(RuntimeError('boom'))
+    case_repl, _, _ = _make_db({"setName": "rs0"})
+    case_shard, _, _ = _make_db({"msg": "isdbgrid"})
+    case_alone, _, _ = _make_db({"ok": 1})
+    case_err, _, _ = _make_db(RuntimeError("boom"))
     assert _run(_ds.mongo_transactable(case_repl)) is True
     assert _run(_ds.mongo_transactable(case_shard)) is True
     assert _run(_ds.mongo_transactable(case_alone)) is False
@@ -177,166 +189,182 @@ def test_capability_four_states():
 
 # ─── A2 探测按 client 缓存；失败不缓存 ───────────────────────
 
+
 def test_capability_cached_per_client():
-    db, _, client = _make_db({'setName': 'rs0'})
+    db, _, client = _make_db({"setName": "rs0"})
     _run(_ds.mongo_transactable(db))
     _run(_ds.mongo_transactable(db))
-    assert client._counter['hello'] == 1, '同一 client 只探测一次'
-    bad, _, bad_client = _make_db(RuntimeError('x'))
+    assert client._counter["hello"] == 1, "同一 client 只探测一次"
+    bad, _, bad_client = _make_db(RuntimeError("x"))
     assert _run(_ds.mongo_transactable(bad)) is None
     assert _run(_ds.mongo_transactable(bad)) is None
-    assert bad_client._counter['hello'] == 2, '探测失败不写缓存（重探）'
+    assert bad_client._counter["hello"] == 2, "探测失败不写缓存（重探）"
 
 
 # ─── A6 事务原语：start/commit/abort/end，幂等，无保存点 ─────
 
+
 def test_open_transaction_primitives():
-    db, rec, _ = _make_db({'setName': 'rs0'})
+    db, rec, _ = _make_db({"setName": "rs0"})
 
     async def scenario():
         tx = await open_transaction(db)
-        assert 'savepoint' not in tx and 'release_savepoint' not in tx
-        await tx['commit']()
-        await tx['commit']()          # 幂等
-        await tx['release']()
+        assert "savepoint" not in tx and "release_savepoint" not in tx
+        await tx["commit"]()
+        await tx["commit"]()  # 幂等
+        await tx["release"]()
         return tx
 
     tx = _run(scenario())
-    assert rec['tx'] == ['start', 'commit', 'end']
-    assert 'session' in tx
+    assert rec["tx"] == ["start", "commit", "end"]
+    assert "session" in tx
 
 
 # ─── A5 exec_mongo 全 9 kind 透传 session ───────────────────
 
+
 def test_exec_mongo_passes_session_all_kinds():
-    db, rec, _ = _make_db({'setName': 'rs0'})
+    db, rec, _ = _make_db({"setName": "rs0"})
     sentinel = object()
     cmds = [
-        {'collection': 'c', 'kind': 'find', 'filter': {}},
-        {'collection': 'c', 'kind': 'aggregate', 'pipeline': []},
-        {'collection': 'c', 'kind': 'countDocuments', 'filter': {}},
-        {'collection': 'c', 'kind': 'findOne', 'filter': {}},
-        {'collection': 'c', 'kind': 'insertOne', 'doc': {'_id': '1'}},
-        {'collection': 'c', 'kind': 'insertMany', 'docs': [{'_id': '1'}]},
-        {'collection': 'c', 'kind': 'insertMany', 'docs': [{'_id': '1'}], 'upsertById': True},
-        {'collection': 'c', 'kind': 'findOneAndUpdate', 'filter': {}, 'update': {}},
-        {'collection': 'c', 'kind': 'updateMany', 'filter': {}, 'update': {}},
-        {'collection': 'c', 'kind': 'deleteMany', 'filter': {}},
+        {"collection": "c", "kind": "find", "filter": {}},
+        {"collection": "c", "kind": "aggregate", "pipeline": []},
+        {"collection": "c", "kind": "countDocuments", "filter": {}},
+        {"collection": "c", "kind": "findOne", "filter": {}},
+        {"collection": "c", "kind": "insertOne", "doc": {"_id": "1"}},
+        {"collection": "c", "kind": "insertMany", "docs": [{"_id": "1"}]},
+        {
+            "collection": "c",
+            "kind": "insertMany",
+            "docs": [{"_id": "1"}],
+            "upsertById": True,
+        },
+        {"collection": "c", "kind": "findOneAndUpdate", "filter": {}, "update": {}},
+        {"collection": "c", "kind": "updateMany", "filter": {}, "update": {}},
+        {"collection": "c", "kind": "deleteMany", "filter": {}},
     ]
     for cmd in cmds:
         _run(exec_mongo(db, dict(cmd), session=sentinel))
-    assert rec['ops'], '应有操作记录'
-    assert all(op[2] is sentinel for op in rec['ops']), '每个操作都携带 session'
+    assert rec["ops"], "应有操作记录"
+    assert all(op[2] is sentinel for op in rec["ops"]), "每个操作都携带 session"
 
 
 def test_exec_mongo_without_session_no_kwarg():
-    db, rec, _ = _make_db({'setName': 'rs0'})
-    _run(exec_mongo(db, {'collection': 'c', 'kind': 'insertOne', 'doc': {'_id': '1'}}))
-    assert rec['ops'][0][2] is None, '零回归：无 session 时不传'
+    db, rec, _ = _make_db({"setName": "rs0"})
+    _run(exec_mongo(db, {"collection": "c", "kind": "insertOne", "doc": {"_id": "1"}}))
+    assert rec["ops"][0][2] is None, "零回归：无 session 时不传"
 
 
 # ─── A3 standalone：会话内声明降级、命令仍执行 ──────────────
 
+
 def test_session_standalone_declares_and_runs():
-    db, rec, _ = _make_db({'ok': 1})   # standalone
-    _register_mongo('MxAlone', 'mx_alone')
-    _ds.set_connections({'mx_alone': db})
+    db, rec, _ = _make_db({"ok": 1})  # standalone
+    _register_mongo("MxAlone", "mx_alone")
+    _ds.set_connections({"mx_alone": db})
     events = []
     feedback.set_sink(events.append)
 
     async def scenario():
         async with store.session() as s:
-            await s.insert('MxAlone', {'v': '1'})
-            await s.insert('MxAlone', {'v': '2'})
+            await s.insert("MxAlone", {"v": "1"})
+            await s.insert("MxAlone", {"v": "2"})
 
     _run(scenario())
-    warned = [e for e in events if e.get('code') == 'mongoTransactionUnsupported']
-    assert len(warned) == 1, '同一源只声明一次'
-    assert warned[0]['deployment'] == 'standalone'
-    assert not [e for e in events if e.get('type') == 'session_not_atomic']
-    assert rec['sessions'] == [], 'standalone 不开 session'
-    assert [op[1] for op in rec['ops']] == ['insertOne', 'insertOne'], '命令按原样执行'
+    warned = [e for e in events if e.get("code") == "mongoTransactionUnsupported"]
+    assert len(warned) == 1, "同一源只声明一次"
+    assert warned[0]["deployment"] == "standalone"
+    assert not [e for e in events if e.get("type") == "session_not_atomic"]
+    assert rec["sessions"] == [], "standalone 不开 session"
+    assert [op[1] for op in rec["ops"]] == ["insertOne", "insertOne"], "命令按原样执行"
 
 
 # ─── A4 unknown：声明 deployment=unknown ────────────────────
 
+
 def test_session_unknown_deployment_declares():
-    db, _, _ = _make_db(RuntimeError('probe-fail'))
-    _register_mongo('MxUnknown', 'mx_unknown')
-    _ds.set_connections({'mx_unknown': db})
+    db, _, _ = _make_db(RuntimeError("probe-fail"))
+    _register_mongo("MxUnknown", "mx_unknown")
+    _ds.set_connections({"mx_unknown": db})
     events = []
     feedback.set_sink(events.append)
 
     async def scenario():
         async with store.session() as s:
-            await s.insert('MxUnknown', {'v': '1'})
+            await s.insert("MxUnknown", {"v": "1"})
 
     _run(scenario())
-    warned = [e for e in events if e.get('code') == 'mongoTransactionUnsupported']
-    assert len(warned) == 1 and warned[0]['deployment'] == 'unknown'
+    warned = [e for e in events if e.get("code") == "mongoTransactionUnsupported"]
+    assert len(warned) == 1 and warned[0]["deployment"] == "unknown"
 
 
 # ─── A7 单 Mongo 源 run_atomic 包事务（可事务桩） ───────────
 
+
 def test_run_atomic_wraps_mongo_transaction():
-    db, rec, _ = _make_db({'setName': 'rs0'})
-    _register_mongo('MxTx', 'mx_tx')
-    _ds.set_connections({'mx_tx': db})
+    db, rec, _ = _make_db({"setName": "rs0"})
+    _register_mongo("MxTx", "mx_tx")
+    _ds.set_connections({"mx_tx": db})
 
     async def scenario():
         async def body():
-            await store.insert('MxTx', {'v': '1'})
-            return 'ok'
-        return await run_atomic({'mx_tx'}, body)
+            await store.insert("MxTx", {"v": "1"})
+            return "ok"
+
+        return await run_atomic({"mx_tx"}, body)
 
     out = _run(scenario())
-    assert out == 'ok'
-    assert rec['tx'] == ['start', 'commit', 'end']
-    assert rec['ops'][0][2] is not None, '写入携带 session'
+    assert out == "ok"
+    assert rec["tx"] == ["start", "commit", "end"]
+    assert rec["ops"][0][2] is not None, "写入携带 session"
 
 
 def test_run_atomic_mongo_failure_aborts():
-    db, rec, _ = _make_db({'setName': 'rs0'})
-    _register_mongo('MxTxFail', 'mx_tx_fail')
-    _ds.set_connections({'mx_tx_fail': db})
+    db, rec, _ = _make_db({"setName": "rs0"})
+    _register_mongo("MxTxFail", "mx_tx_fail")
+    _ds.set_connections({"mx_tx_fail": db})
 
     async def scenario():
         async def body():
-            await store.insert('MxTxFail', {'v': '1'})
-            raise RuntimeError('boom')
-        return await run_atomic({'mx_tx_fail'}, body)
+            await store.insert("MxTxFail", {"v": "1"})
+            raise RuntimeError("boom")
 
-    with pytest.raises(RuntimeError, match='boom'):
+        return await run_atomic({"mx_tx_fail"}, body)
+
+    with pytest.raises(RuntimeError, match="boom"):
         _run(scenario())
-    assert rec['tx'] == ['start', 'abort', 'end']
+    assert rec["tx"] == ["start", "abort", "end"]
 
 
 # ─── A8 嵌套 Mongo 走保存点降级；跨源写 fail-closed ─────────
 
+
 def test_nested_mongo_uses_savepoint_degradation():
-    db, rec, _ = _make_db({'setName': 'rs0'})
-    _register_mongo('MxNest', 'mx_nest')
-    _ds.set_connections({'mx_nest': db})
+    db, rec, _ = _make_db({"setName": "rs0"})
+    _register_mongo("MxNest", "mx_nest")
+    _ds.set_connections({"mx_nest": db})
     events = []
     feedback.set_sink(events.append)
 
     async def scenario():
         async with store.session() as s:
-            await s.insert('MxNest', {'v': '1'})
+            await s.insert("MxNest", {"v": "1"})
             async with store.session() as inner:
-                await inner.insert('MxNest', {'v': '2'})
+                await inner.insert("MxNest", {"v": "2"})
 
     _run(scenario())
-    assert [e for e in events if e.get('code') == 'nestedSavepointUnsupported'], \
-        'Mongo 无保存点 → 既有降级声明'
-    assert not [e for e in events if e.get('code') == 'mongoTransactionUnsupported'], \
-        '可事务的 Mongo 不应发「不支持」声明'
-    assert rec['tx'].count('start') == 1, '嵌套会话共用外层事务'
+    assert [e for e in events if e.get("code") == "nestedSavepointUnsupported"], (
+        "Mongo 无保存点 → 既有降级声明"
+    )
+    assert not [e for e in events if e.get("code") == "mongoTransactionUnsupported"], (
+        "可事务的 Mongo 不应发「不支持」声明"
+    )
+    assert rec["tx"].count("start") == 1, "嵌套会话共用外层事务"
 
 
 # ─── A10 真实本机 rs0：事务真提交 / 真回滚 ──────────────────
 
-MONGO_URI = 'mongodb://127.0.0.1:27017/mongo_store_e2e_tx'
+MONGO_URI = "mongodb://127.0.0.1:27017/mongo_store_e2e_tx"
 
 
 def _run_real(scenario):
@@ -344,20 +372,20 @@ def _run_real(scenario):
 
     AsyncMongoClient 与创建它的事件循环绑定，故探测与用例必须在**同一** ``asyncio.run`` 内。
     """
-    pytest.importorskip('pymongo')
+    pytest.importorskip("pymongo")
     from pymongo import AsyncMongoClient
 
     async def _main():
         client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
         try:
-            hello = await client.admin.command('hello')
+            hello = await client.admin.command("hello")
         except BaseException:
             await client.close()
-            pytest.skip('本机 MongoDB 不可达（127.0.0.1:27017）')
-        if not hello.get('setName'):
+            pytest.skip("本机 MongoDB 不可达（127.0.0.1:27017）")
+        if not hello.get("setName"):
             await client.close()
-            pytest.skip('本机 Mongo 非副本集（如 CI standalone）→ 跳过真实事务用例')
-        db = client['mongo_store_e2e_tx']
+            pytest.skip("本机 Mongo 非副本集（如 CI standalone）→ 跳过真实事务用例")
+        db = client["mongo_store_e2e_tx"]
         try:
             return await scenario(client, db)
         finally:
@@ -369,34 +397,34 @@ def _run_real(scenario):
 def test_real_rs0_session_commits():
     async def scenario(_client, db):
         # Mongo 落库用物理集合名（core::naming camelCase）：逻辑 mx_real → mxReal
-        coll = naming.physical('mx_real')
+        coll = naming.physical("mx_real")
         await db[coll].drop()
-        _register_mongo('MxReal', 'mx_real', collection='mx_real')
-        _ds.set_connections({'mx_real': db})
+        _register_mongo("MxReal", "mx_real", collection="mx_real")
+        _ds.set_connections({"mx_real": db})
         async with store.session() as s:
-            await s.insert('MxReal', {'v': 'a'})
-            await s.insert('MxReal', {'v': 'b'})
+            await s.insert("MxReal", {"v": "a"})
+            await s.insert("MxReal", {"v": "b"})
         n = await db[coll].count_documents({})
         await db[coll].drop()
         return n
 
-    assert _run_real(scenario) == 2, 'rs0 会话事务提交后全部可见'
+    assert _run_real(scenario) == 2, "rs0 会话事务提交后全部可见"
 
 
 def test_real_rs0_session_aborts_on_error():
     async def scenario(_client, db):
-        coll = naming.physical('mx_real_b')
+        coll = naming.physical("mx_real_b")
         await db[coll].drop()
-        _register_mongo('MxRealB', 'mx_real', collection='mx_real_b')
-        _ds.set_connections({'mx_real': db})
+        _register_mongo("MxRealB", "mx_real", collection="mx_real_b")
+        _ds.set_connections({"mx_real": db})
         try:
             async with store.session() as s:
-                await s.insert('MxRealB', {'v': 'a'})
-                raise RuntimeError('boom')
+                await s.insert("MxRealB", {"v": "a"})
+                raise RuntimeError("boom")
         except RuntimeError:
             pass
         n = await db[coll].count_documents({})
         await db[coll].drop()
         return n
 
-    assert _run_real(scenario) == 0, 'rs0 会话事务异常 → abort，全部不可见'
+    assert _run_real(scenario) == 0, "rs0 会话事务异常 → abort，全部不可见"

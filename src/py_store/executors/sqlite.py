@@ -39,8 +39,8 @@ def _bind(params):
 
 def create(db, options=None):
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
-    if db is None or not hasattr(db, 'execute'):
-        raise TypeError('sqlite 执行器需要 aiosqlite 的 Connection 实例')
+    if db is None or not hasattr(db, "execute"):
+        raise TypeError("sqlite 执行器需要 aiosqlite 的 Connection 实例")
 
     lock = asyncio.Lock()
     _lock_held = contextvars.ContextVar('pystore_sqlite_lock_held', default=False)
@@ -62,13 +62,15 @@ def create(db, options=None):
         rows = None
         affected_rows = 0
         insert_id = None
-        for stmt in plan.get('stmts') or []:
-            cur = await db.execute(stmt['text'], _bind(stmt.get('params')))
+        for stmt in plan.get("stmts") or []:
+            cur = await db.execute(stmt["text"], _bind(stmt.get("params")))
             try:
                 if cur.description is not None:
                     cols = [d[0] for d in cur.description]
-                    rows = [dict(zip(cols, r, strict=True)) for r in await cur.fetchall()]
-                    shape = stmt.get('rowShape')
+                    rows = [
+                        dict(zip(cols, r, strict=True)) for r in await cur.fetchall()
+                    ]
+                    shape = stmt.get("rowShape")
                     if shape:
                         docs = _core.restore_rows(shape, rows)
                 else:
@@ -78,17 +80,23 @@ def create(db, options=None):
                     insert_id = cur.lastrowid
             finally:
                 await cur.close()
-        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows, 'insertId': insert_id}
+        return {
+            "docs": docs,
+            "rows": rows,
+            "affectedRows": affected_rows,
+            "insertId": insert_id,
+        }
 
     async def exec_(plan):
         """非事务路径：plan 成功后显式提交（aiosqlite 默认非 autocommit，
         不提交则仅当前连接可见 —— 落盘场景会丢数据/读到幻象，且无任何告警）；
         失败则回滚后上抛，绝不提交半截写入。全程过锁（执行 + 提交同一窗口，
         防事务边界被其他协程的 commit/BEGIN 插队）"""
+
         async def _body():
             try:
                 out = await run_stmts(plan)
-            except BaseException:
+            except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
                 await db.rollback()
                 raise
             await db.commit()
@@ -105,7 +113,7 @@ def create(db, options=None):
           见模块 docstring「已知边界」。
         """
         await db.commit()
-        await db.execute('BEGIN')
+        await db.execute("BEGIN")
         closed = False
 
         async def commit():
@@ -127,22 +135,22 @@ def create(db, options=None):
 
         async def savepoint(name):
             """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
-            await db.execute('SAVEPOINT %s' % name)
+            await db.execute("SAVEPOINT %s" % name)
 
         async def release_savepoint(name):
-            await db.execute('RELEASE SAVEPOINT %s' % name)
+            await db.execute("RELEASE SAVEPOINT %s" % name)
 
         async def rollback_to_savepoint(name):
-            await db.execute('ROLLBACK TO SAVEPOINT %s' % name)
+            await db.execute("ROLLBACK TO SAVEPOINT %s" % name)
 
         return {
-            'exec': run_stmts,
-            'commit': commit,
-            'rollback': rollback,
-            'release': release,
-            'savepoint': savepoint,
-            'release_savepoint': release_savepoint,
-            'rollback_to_savepoint': rollback_to_savepoint,
+            "exec": run_stmts,
+            "commit": commit,
+            "rollback": rollback,
+            "release": release,
+            "savepoint": savepoint,
+            "release_savepoint": release_savepoint,
+            "rollback_to_savepoint": rollback_to_savepoint,
         }
 
     async def with_transaction(body):
@@ -150,23 +158,24 @@ def create(db, options=None):
         body(execute_on_tx, tx=None) 的全部 plan 落在同一事务，任一失败整体回滚。
         第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数。
         开事务→body→提交/回滚全窗口过锁（防其他协程的事务边界插队互踩）"""
+
         async def _body():
             tx = await open_transaction()
             try:
-                out = await body(tx['exec'], tx)
-                await tx['commit']()
+                out = await body(tx["exec"], tx)
+                await tx["commit"]()
                 return out
-            except BaseException:
-                await tx['rollback']()
+            except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+                await tx["rollback"]()
                 raise
             finally:
-                await tx['release']()
+                await tx["release"]()
 
         return await _with_lock(_body)
 
     return {
-        'kind': 'sqlite',
-        'exec': exec_,
-        'with_transaction': with_transaction,
-        'open_transaction': open_transaction,
+        "kind": "sqlite",
+        "exec": exec_,
+        "with_transaction": with_transaction,
+        "open_transaction": open_transaction,
     }

@@ -17,31 +17,49 @@ from py_store import schema as _sc
 
 
 def test_a6_explicit_fnref_matches_snake_impl():
-    _sc.set_fn('order_total', lambda it, ctx=None: it['a'] + it['b'])
+    _sc.set_fn("order_total", lambda it, ctx=None: it["a"] + it["b"])
     defn = {
-        'name': 'Order',
-        'collection': 'order',
-        'fields': {'_id': {'type': 'string'}, 'a': {'type': 'int'}, 'b': {'type': 'int'}},
-        'computes': {'total': {'type': 'int', 'fn': True, 'fnRef': 'Order.total', 'depends': ['a', 'b']}},
+        "name": "Order",
+        "collection": "order",
+        "fields": {
+            "_id": {"type": "string"},
+            "a": {"type": "int"},
+            "b": {"type": "int"},
+        },
+        "computes": {
+            "total": {
+                "type": "int",
+                "fn": True,
+                "fnRef": "Order.total",
+                "depends": ["a", "b"],
+            }
+        },
     }
-    _sc.assert_fns_covered([defn])   # 不抛即通过
+    _sc.assert_fns_covered([defn])  # 不抛即通过
 
 
 def test_a6_default_composite_ref():
-    _sc.set_fn('order_total', lambda it, ctx=None: it['a'] + it['b'])
-    _sc.assert_fns_covered([
-        {'name': 'Order', 'computes': {'total': {'type': 'int', 'fn': True}}},
-    ])
+    _sc.set_fn("order_total", lambda it, ctx=None: it["a"] + it["b"])
+    _sc.assert_fns_covered(
+        [
+            {"name": "Order", "computes": {"total": {"type": "int", "fn": True}}},
+        ]
+    )
 
 
 def test_missing_impl_raises():
-    with pytest.raises(RuntimeError, match='ERR_FN_MISSING'):
-        _sc.assert_fns_covered([
-            {'name': 'Nope', 'computes': {'zzz': {'type': 'int', 'fn': True}}},   # 逻辑 ref Nope.zzz 无实现
-        ])
+    with pytest.raises(RuntimeError, match="ERR_FN_MISSING"):
+        _sc.assert_fns_covered(
+            [
+                {
+                    "name": "Nope",
+                    "computes": {"zzz": {"type": "int", "fn": True}},
+                },  # 逻辑 ref Nope.zzz 无实现
+            ]
+        )
 
 
 def test_normalized_conflict_raises():
-    with pytest.raises(ValueError, match='ERR_FN_CONFLICT'):
-        _sc.set_fn('order_total', lambda it, ctx=None: 1)
-        _sc.set_fn('orderTotal', lambda it, ctx=None: 2)
+    with pytest.raises(ValueError, match="ERR_FN_CONFLICT"):
+        _sc.set_fn("order_total", lambda it, ctx=None: 1)
+        _sc.set_fn("orderTotal", lambda it, ctx=None: 2)

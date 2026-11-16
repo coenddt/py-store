@@ -52,29 +52,32 @@ def _group_indexes(rows):
         entry = by_key.get(key)
         if entry is None:
             entry = {
-                'table': r['table'],
-                'name': r['name'],
-                'columns': [],
-                'unique': 0 if int(r['nonUnique']) else 1,
+                "table": r["table"],
+                "name": r["name"],
+                "columns": [],
+                "unique": 0 if int(r["nonUnique"]) else 1,
             }
             by_key[key] = entry
-        entry['columns'].append(r['column'])
+        entry["columns"].append(r["column"])
     return list(by_key.values())
 
 
 async def introspect(driver, options=None):
     if driver is None:
-        raise TypeError('mysql introspection 需要 asyncmy 的连接或连接池')
+        raise TypeError("mysql introspection 需要 asyncmy 的连接或连接池")
 
     from asyncmy.cursors import DictCursor
 
-    database = (options or {}).get('database')
+    database = (options or {}).get("database")
     # 显式传 database（连接串不带库或跨库同步）→ 参数化 table_schema；
     # 缺省用当前连接的 DATABASE()。显式库名会作为 database 透出到 def。
-    schema_filter = 'table_schema = %s' if database is not None else 'table_schema = DATABASE()'
+    schema_filter = (
+        "table_schema = %s" if database is not None else "table_schema = DATABASE()"
+    )
     params = (database,) if database is not None else ()
+
     def tables_sql(base):
-        return base.replace('table_schema = DATABASE()', schema_filter)
+        return base.replace("table_schema = DATABASE()", schema_filter)
 
     async def run(sql, args=()):
         async with _acquire(driver) as conn:
@@ -89,18 +92,19 @@ async def introspect(driver, options=None):
 
     return {
         # 显式库名 → 行携带 database（core schema_from_rows 会写进 def）
-        'tables': [dict(t, database=database) for t in tables]
-        if database is not None else list(tables),
-        'columns': [
+        "tables": [dict(t, database=database) for t in tables]
+        if database is not None
+        else list(tables),
+        "columns": [
             {
-                'table': c['table'],
-                'name': c['name'],
-                'type': c['type'] or '',
-                'notnull': 1 if c['nullable'] == 'NO' else 0,
-                'pk': 1 if c['columnKey'] == 'PRI' else 0,
+                "table": c["table"],
+                "name": c["name"],
+                "type": c["type"] or "",
+                "notnull": 1 if c["nullable"] == "NO" else 0,
+                "pk": 1 if c["columnKey"] == "PRI" else 0,
             }
             for c in columns
         ],
-        'fks': list(fks),
-        'indexes': _group_indexes(index_rows),
+        "fks": list(fks),
+        "indexes": _group_indexes(index_rows),
     }

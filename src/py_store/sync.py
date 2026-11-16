@@ -11,8 +11,16 @@ from .schema import core as _core
 from .schema import register as _register
 
 
-async def sync_schema(backend, driver, introspect_options=None, overlay=None,
-                      datasource=None, database=None, schema=None, register_defs=True):
+async def sync_schema(
+    backend,
+    driver,
+    introspect_options=None,
+    overlay=None,
+    datasource=None,
+    database=None,
+    schema=None,
+    register_defs=True,
+):
     """
     同步一个数据源的物理结构到 Registry。
 

@@ -22,18 +22,18 @@ import pytest
 from py_store import init, naming, permission, store
 from py_store import schema as _sc
 
-E2E_TOKEN = os.environ.get('PYSTORE_E2E_TOKEN') or uuid.uuid4().hex[:8]
-MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://127.0.0.1:27017/mongo_store_e2e')
+E2E_TOKEN = os.environ.get("PYSTORE_E2E_TOKEN") or uuid.uuid4().hex[:8]
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/mongo_store_e2e")
 
-SCHEMA = 'IdxSigner'
-COLLECTION = f'idx_signers_{E2E_TOKEN}'
-NESTED_PATH = 'signers.userId'
+SCHEMA = "IdxSigner"
+COLLECTION = f"idx_signers_{E2E_TOKEN}"
+NESTED_PATH = "signers.userId"
 
 
 class _State:
     def __init__(self):
         self.ready = False
-        self.reason = 'MongoDB 不可达'
+        self.reason = "MongoDB 不可达"
         self.client = None
         self.db = None
 
@@ -46,31 +46,33 @@ async def _setup():
     try:
         from pymongo import AsyncMongoClient
     except ImportError as e:
-        state.reason = f'缺少 PyMongo AsyncMongoClient: {e}'
+        state.reason = f"缺少 PyMongo AsyncMongoClient: {e}"
         return
     client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
     try:
-        await client.admin.command({'ping': 1})
+        await client.admin.command({"ping": 1})
     except Exception as e:
-        state.reason = f'MongoDB 不可达（{MONGO_URI}）: {e}'
+        state.reason = f"MongoDB 不可达（{MONGO_URI}）: {e}"
         await client.close()
         return
     state.client = client
     state.db = client.get_default_database()
 
-    _sc.register({
-        'name': SCHEMA,
-        'collection': COLLECTION,
-        'idPrefix': 'is_',
-        'datasource': 'mongo_e2e',
-        'timestamps': False,
-        'fields': {'signers': {'type': 'array'}},
-        'relations': {},
-        'indexes': [{'keys': {NESTED_PATH: 1}}],
-    })
+    _sc.register(
+        {
+            "name": SCHEMA,
+            "collection": COLLECTION,
+            "idPrefix": "is_",
+            "datasource": "mongo_e2e",
+            "timestamps": False,
+            "fields": {"signers": {"type": "array"}},
+            "relations": {},
+            "indexes": [{"keys": {NESTED_PATH: 1}}],
+        }
+    )
     # 物理集合名与生产同源（core::naming）；先清掉上次运行残留，保证索引断言干净
     await state.db[naming.physical(COLLECTION)].drop()
-    await init({'mongo_e2e': state.db, 'default': state.db})
+    await init({"mongo_e2e": state.db, "default": state.db})
     state.ready = True
 
 
@@ -84,7 +86,7 @@ async def _teardown():
 _LOOP = None
 
 
-@pytest.fixture(scope='module', autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _boot():
     global _LOOP
     try:
@@ -113,11 +115,11 @@ def _stages(plan):
     out = []
     if not isinstance(plan, dict):
         return out
-    if plan.get('stage'):
+    if plan.get("stage"):
         out.append(plan)
-    for key in ('inputStage',):
+    for key in ("inputStage",):
         out.extend(_stages(plan.get(key)))
-    for stage in plan.get('inputStages') or []:
+    for stage in plan.get("inputStages") or []:
         out.extend(_stages(stage))
     return out
 
@@ -133,16 +135,18 @@ def test_nested_index_key_matches_document_path():
 
     async def _main():
         await _reset()
-        await store.insert(SCHEMA, {'signers': [{'userId': 'u1'}, {'userId': 'u2'}]})
+        await store.insert(SCHEMA, {"signers": [{"userId": "u1"}, {"userId": "u2"}]})
         return await state.db[naming.physical(COLLECTION)].index_information()
 
     info = _run(_main())
-    index_keys = {(k, d) for v in info.values() for k, d in v['key']}
-    assert (NESTED_PATH, 1) in index_keys, \
-        f'索引键应为嵌套路径 {NESTED_PATH}，实际索引：{index_keys}'
+    index_keys = {(k, d) for v in info.values() for k, d in v["key"]}
+    assert (NESTED_PATH, 1) in index_keys, (
+        f"索引键应为嵌套路径 {NESTED_PATH}，实际索引：{index_keys}"
+    )
     # 整串 physical 会产出 signersUserId；该键不存在才是真修复
-    assert ('signersUserId', 1) not in index_keys, \
-        f'不应出现整串拼接的索引键 signersUserId，实际索引：{index_keys}'
+    assert ("signersUserId", 1) not in index_keys, (
+        f"不应出现整串拼接的索引键 signersUserId，实际索引：{index_keys}"
+    )
 
 
 def test_nested_index_used_by_field_query():
@@ -159,23 +163,27 @@ def test_nested_index_used_by_field_query():
 
     async def _main():
         await _reset()
-        await store.insert(SCHEMA, {'signers': [{'userId': 'u1'}, {'userId': 'u2'}]})
+        await store.insert(SCHEMA, {"signers": [{"userId": "u1"}, {"userId": "u2"}]})
         got = await store.execute_native(
-            'mongo_e2e', phys_coll, [{'$match': {NESTED_PATH: 'u2'}}])
-        plan = await state.db.command({
-            'explain': {
-                'find': phys_coll,
-                'filter': {NESTED_PATH: 'u2'},
-            },
-            'verbosity': 'queryPlanner',
-        })
+            "mongo_e2e", phys_coll, [{"$match": {NESTED_PATH: "u2"}}]
+        )
+        plan = await state.db.command(
+            {
+                "explain": {
+                    "find": phys_coll,
+                    "filter": {NESTED_PATH: "u2"},
+                },
+                "verbosity": "queryPlanner",
+            }
+        )
         return got, plan
 
     got, plan = _run(_main())
-    assert len(got['rows']) == 1, f'按嵌套字段应查到 1 条，实际：{got["rows"]}'
+    assert len(got["rows"]) == 1, f"按嵌套字段应查到 1 条，实际：{got['rows']}"
 
-    winning = plan.get('queryPlanner', {}).get('winningPlan') or {}
-    ixscans = [s for s in _stages(winning) if s.get('stage') == 'IXSCAN']
-    assert ixscans, f'按 {NESTED_PATH} 查询应走索引，实际执行计划：{winning}'
-    assert ixscans[0].get('indexName', '').startswith(NESTED_PATH), \
-        f'应命中 {NESTED_PATH} 索引，实际：{ixscans[0].get("indexName")}'
+    winning = plan.get("queryPlanner", {}).get("winningPlan") or {}
+    ixscans = [s for s in _stages(winning) if s.get("stage") == "IXSCAN"]
+    assert ixscans, f"按 {NESTED_PATH} 查询应走索引，实际执行计划：{winning}"
+    assert ixscans[0].get("indexName", "").startswith(NESTED_PATH), (
+        f"应命中 {NESTED_PATH} 索引，实际：{ixscans[0].get('indexName')}"
+    )

@@ -29,16 +29,21 @@ from .exec import _call, _now_for, run_atomic_commands
 
 def _single_source(plan):
     """从 atomic_commands plan 的命令序列提取唯一源（多源/缺源显式报错）"""
-    sources = {(c or {}).get('source') or 'default' for c in plan.get('commands') or []}
+    sources = {(c or {}).get("source") or "default" for c in plan.get("commands") or []}
     if len(sources) != 1:
-        listed = ', '.join(sorted(sources))
+        listed = ", ".join(sorted(sources))
         raise PushdownUnsupportedError(
-            listed, 'claim', ['concurrencyPrimitivesSingleSource'],
-            [f'claim/compareAndSet 仅支持单一数据源（同事务语义）；实际涉及: {listed}'])
+            listed,
+            "claim",
+            ["concurrencyPrimitivesSingleSource"],
+            [f"claim/compareAndSet 仅支持单一数据源（同事务语义）；实际涉及: {listed}"],
+        )
     return next(iter(sources))
 
 
-async def claim(schema_name, filter, update, *, limit=1, sort=None, route_override=None):
+async def claim(
+    schema_name, filter, update, *, limit=1, sort=None, route_override=None
+):
     """条件领取 N 行并原子置标；返回领到的行（含领取后最新值）
 
     MySQL/PG 走 ``FOR UPDATE SKIP LOCKED`` 两步同事务；SQLite 走 ``IN (子查询)``
@@ -47,9 +52,18 @@ async def claim(schema_name, filter, update, *, limit=1, sort=None, route_overri
     """
     _get_schema(schema_name)  # 未注册 schema 先行显式报错（与写路径入口对齐）
     now = _now_for(schema_name)
-    plan = _call(lambda: get_core().plan_claim(
-        schema_name, filter or {}, update or {}, sort, limit, now,
-        get_context(), route_override))
+    plan = _call(
+        lambda: get_core().plan_claim(
+            schema_name,
+            filter or {},
+            update or {},
+            sort,
+            limit,
+            now,
+            get_context(),
+            route_override,
+        )
+    )
     return await run_atomic_commands(_single_source(plan), plan)
 
 
@@ -66,15 +80,17 @@ async def compare_and_set(schema_name, filter, update, *, route_override=None):
     """
     _get_schema(schema_name)
     now = _now_for(schema_name)
-    plan = _call(lambda: get_core().plan_compare_and_set(
-        schema_name, filter or {}, update or {}, now,
-        get_context(), route_override))
+    plan = _call(
+        lambda: get_core().plan_compare_and_set(
+            schema_name, filter or {}, update or {}, now, get_context(), route_override
+        )
+    )
     env = await run_atomic_commands(_single_source(plan), plan)
-    if isinstance(env, Mapping) and env.get('rows'):
-        matched = len(env['rows'])
+    if isinstance(env, Mapping) and env.get("rows"):
+        matched = len(env["rows"])
     else:
-        matched = int(env.get('affectedRows') or 0) if isinstance(env, Mapping) else 0
-    return {'matched': matched, 'modified': matched}
+        matched = int(env.get("affectedRows") or 0) if isinstance(env, Mapping) else 0
+    return {"matched": matched, "modified": matched}
 
 
 async def renew_lease(schema_name, filter, lease_fields, *, route_override=None):
@@ -85,5 +101,6 @@ async def renew_lease(schema_name, filter, lease_fields, *, route_override=None)
     ``lease_fields``（如 ``{"lease_until": <ms>}``）——门面与 core 均无时钟。
     返回值同 compare_and_set。
     """
-    return await compare_and_set(schema_name, filter, lease_fields,
-                                 route_override=route_override)
+    return await compare_and_set(
+        schema_name, filter, lease_fields, route_override=route_override
+    )

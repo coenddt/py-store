@@ -30,21 +30,24 @@ from py_store import schema as _sc
 
 # 进程级唯一 token（M-4）：表 / 集合名统一加此后缀，`_reset()` 只清理自己的表。
 # 每次运行随机生成；可用 PYSTORE_E2E_TOKEN 环境变量覆盖（复现并发冲突时固定值）。
-E2E_TOKEN = os.environ.get('PYSTORE_E2E_TOKEN') or uuid.uuid4().hex[:8]
+E2E_TOKEN = os.environ.get("PYSTORE_E2E_TOKEN") or uuid.uuid4().hex[:8]
 
 MYSQL_URI = os.environ.get(
-    'MYSQL_URI', 'mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4')
-PG_URI = os.environ.get('PG_URI', 'postgres://e2e:e2e123@127.0.0.1:5432/mongo_store_e2e')
-MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://127.0.0.1:27017/mongo_store_e2e')
+    "MYSQL_URI", "mysql://e2e:e2e123@127.0.0.1:3306/mongo_store_e2e?charset=utf8mb4"
+)
+PG_URI = os.environ.get(
+    "PG_URI", "postgres://e2e:e2e123@127.0.0.1:5432/mongo_store_e2e"
+)
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/mongo_store_e2e")
 
 # ─── 物理表结构（标量范式，与 core 关系模型一致；archive 表供 remove 归档） ───
 # 归档表名 = collection + '_deleted'（core 在 register 时自动派生 `<collection>_deleted` 归档 schema）
 
 MYSQL_DDL = [
-    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}',
-    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN}',
-    f'DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}_deleted',
-    f'DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}',
+    f"DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}",
+    f"DROP TABLE IF EXISTS widgets_{E2E_TOKEN}",
+    f"DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}_deleted",
+    f"DROP TABLE IF EXISTS my_posts_{E2E_TOKEN}",
     f"""CREATE TABLE my_posts_{E2E_TOKEN} (
          _id VARCHAR(64) NOT NULL,
          title VARCHAR(255),
@@ -80,34 +83,34 @@ MYSQL_DDL = [
 ]
 
 PG_DDL = [
-    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN} CASCADE',
-    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN} CASCADE',
-    f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN}_deleted CASCADE',
-    f'DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN} CASCADE',
-    f'CREATE TABLE pg_posts_{E2E_TOKEN} '
-    f'(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT)',
+    f"DROP TABLE IF EXISTS gadgets_{E2E_TOKEN} CASCADE",
+    f"DROP TABLE IF EXISTS widgets_{E2E_TOKEN} CASCADE",
+    f"DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN}_deleted CASCADE",
+    f"DROP TABLE IF EXISTS pg_posts_{E2E_TOKEN} CASCADE",
+    f"CREATE TABLE pg_posts_{E2E_TOKEN} "
+    f"(_id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT)",
     f"""CREATE TABLE pg_posts_{E2E_TOKEN}_deleted (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, "deleted_at" BIGINT, __present TEXT
        )""",
-    f'CREATE TABLE widgets_{E2E_TOKEN} '
-    f'(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION, __present TEXT)',
+    f"CREATE TABLE widgets_{E2E_TOKEN} "
+    f"(_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price DOUBLE PRECISION, __present TEXT)",
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
          _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT, __present TEXT
        )""",
 ]
 
 SQLITE_DDL = [
-    f'DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}',
-    f'DROP TABLE IF EXISTS widgets_{E2E_TOKEN}',
-    f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}_deleted',
-    f'DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}',
+    f"DROP TABLE IF EXISTS gadgets_{E2E_TOKEN}",
+    f"DROP TABLE IF EXISTS widgets_{E2E_TOKEN}",
+    f"DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}_deleted",
+    f"DROP TABLE IF EXISTS sq_posts_{E2E_TOKEN}",
     f"""CREATE TABLE sq_posts_{E2E_TOKEN} (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, __present TEXT
        )""",
     f"""CREATE TABLE sq_posts_{E2E_TOKEN}_deleted (
          _id TEXT PRIMARY KEY, title TEXT, status TEXT, views INTEGER, deleted_at INTEGER, __present TEXT
        )""",
-    f'CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL, __present TEXT)',
+    f"CREATE TABLE widgets_{E2E_TOKEN} (_id TEXT PRIMARY KEY, sku TEXT NOT NULL, price REAL, __present TEXT)",
     f"""CREATE TABLE gadgets_{E2E_TOKEN} (
          _id TEXT PRIMARY KEY, widget_id TEXT REFERENCES widgets_{E2E_TOKEN}(_id), label TEXT, __present TEXT
        )""",
@@ -116,11 +119,12 @@ SQLITE_DDL = [
 
 # ─── 后端上下文（物理名/注册名/连接句柄） ─────────────────────
 
+
 class _Ctx:
     def __init__(self, **kw):
         self.__dict__.update(kw)
         self.ready = False
-        self.reason = '数据库不可达'
+        self.reason = "数据库不可达"
         self.driver = None
         self.conn = None
         self.client = None
@@ -129,19 +133,39 @@ class _Ctx:
         self.reset_collections = []
 
 
-mysql_ctx = _Ctx(kind='mysql', ds='mysql_e2e', schema_name='MyPost',
-                 collection=f'my_posts_{E2E_TOKEN}',
-                 archive_schema='MyPostDeleted', archive=f'my_posts_{E2E_TOKEN}_deleted')
-pg_ctx = _Ctx(kind='postgres', ds='pg_e2e', schema_name='PgPost',
-              collection=f'pg_posts_{E2E_TOKEN}',
-              archive_schema='PgPostDeleted', archive=f'pg_posts_{E2E_TOKEN}_deleted')
-mongo_ctx = _Ctx(kind='mongodb', ds='mongo_e2e', schema_name='MgPost',
-                 collection=f'mg_posts_{E2E_TOKEN}',
-                 archive_schema='MgPostDeleted', archive=f'mg_posts_{E2E_TOKEN}_deleted')
+mysql_ctx = _Ctx(
+    kind="mysql",
+    ds="mysql_e2e",
+    schema_name="MyPost",
+    collection=f"my_posts_{E2E_TOKEN}",
+    archive_schema="MyPostDeleted",
+    archive=f"my_posts_{E2E_TOKEN}_deleted",
+)
+pg_ctx = _Ctx(
+    kind="postgres",
+    ds="pg_e2e",
+    schema_name="PgPost",
+    collection=f"pg_posts_{E2E_TOKEN}",
+    archive_schema="PgPostDeleted",
+    archive=f"pg_posts_{E2E_TOKEN}_deleted",
+)
+mongo_ctx = _Ctx(
+    kind="mongodb",
+    ds="mongo_e2e",
+    schema_name="MgPost",
+    collection=f"mg_posts_{E2E_TOKEN}",
+    archive_schema="MgPostDeleted",
+    archive=f"mg_posts_{E2E_TOKEN}_deleted",
+)
 # SQLite 内存库无需外部服务，天然作为 `default` 源（表名带 token 与其余后端保持一致）
-sqlite_ctx = _Ctx(kind='sqlite', ds='default', schema_name='SqPost',
-                  collection=f'sq_posts_{E2E_TOKEN}',
-                  archive_schema='SqPostDeleted', archive=f'sq_posts_{E2E_TOKEN}_deleted')
+sqlite_ctx = _Ctx(
+    kind="sqlite",
+    ds="default",
+    schema_name="SqPost",
+    collection=f"sq_posts_{E2E_TOKEN}",
+    archive_schema="SqPostDeleted",
+    archive=f"sq_posts_{E2E_TOKEN}_deleted",
+)
 
 CTXS = [mysql_ctx, pg_ctx, mongo_ctx, sqlite_ctx]
 CRUD_CTXS = CTXS
@@ -152,49 +176,54 @@ _SYNC_IDS = [c.kind for c in SYNC_CTXS]
 
 def _register_post(ctx):
     """注册逻辑模型（自动派生 `<Name>Deleted` 归档表镜像）"""
-    _sc.register({
-        'name': ctx.schema_name,
-        'collection': ctx.collection,
-        'idPrefix': 'p_',
-        'timestamps': False,
-        'fields': {
-            'title': {'type': 'string'},
-            'status': {'type': 'string'},
-            'views': {'type': 'number'},
-        },
-        'relations': {},
-        'datasource': ctx.ds,
-    })
+    _sc.register(
+        {
+            "name": ctx.schema_name,
+            "collection": ctx.collection,
+            "idPrefix": "p_",
+            "timestamps": False,
+            "fields": {
+                "title": {"type": "string"},
+                "status": {"type": "string"},
+                "views": {"type": "number"},
+            },
+            "relations": {},
+            "datasource": ctx.ds,
+        }
+    )
 
 
 def _parse_mysql_uri(uri):
     u = urlparse(uri)
     return {
-        'host': u.hostname or '127.0.0.1',
-        'port': u.port or 3306,
-        'user': unquote(u.username or ''),
-        'password': unquote(u.password or ''),
-        'db': (u.path or '/').lstrip('/'),
+        "host": u.hostname or "127.0.0.1",
+        "port": u.port or 3306,
+        "user": unquote(u.username or ""),
+        "password": unquote(u.password or ""),
+        "db": (u.path or "/").lstrip("/"),
     }
 
 
 # ─── 各后端连接与建表 ────────────────────────────────────────
 
+
 async def _setup_mysql(ctx):
     try:
         import asyncmy
     except ImportError as e:
-        ctx.reason = f'缺少 asyncmy 驱动: {e}'
+        ctx.reason = f"缺少 asyncmy 驱动: {e}"
         return
     cfg = _parse_mysql_uri(MYSQL_URI)
     try:
-        pool = await asyncio.wait_for(asyncmy.create_pool(autocommit=True, **cfg), timeout=5)
+        pool = await asyncio.wait_for(
+            asyncmy.create_pool(autocommit=True, **cfg), timeout=5
+        )
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT 1')
+                await cur.execute("SELECT 1")
                 await cur.fetchall()
     except Exception as e:
-        ctx.reason = f'MySQL 不可达（{MYSQL_URI}）: {e}'
+        ctx.reason = f"MySQL 不可达（{MYSQL_URI}）: {e}"
         return
 
     async with pool.acquire() as conn:
@@ -202,9 +231,11 @@ async def _setup_mysql(ctx):
             for stmt in MYSQL_DDL:
                 await cur.execute(stmt)
     ctx.driver = pool
-    ctx.conn = executors.create_connection('mysql', pool)
-    ctx.reset_sql = [f'DELETE FROM my_posts_{E2E_TOKEN}',
-                     f'DELETE FROM my_posts_{E2E_TOKEN}_deleted']
+    ctx.conn = executors.create_connection("mysql", pool)
+    ctx.reset_sql = [
+        f"DELETE FROM my_posts_{E2E_TOKEN}",
+        f"DELETE FROM my_posts_{E2E_TOKEN}_deleted",
+    ]
     _register_post(ctx)
     ctx.ready = True
 
@@ -213,21 +244,25 @@ async def _setup_postgres(ctx):
     try:
         import asyncpg
     except ImportError as e:
-        ctx.reason = f'缺少 asyncpg 驱动: {e}'
+        ctx.reason = f"缺少 asyncpg 驱动: {e}"
         return
     try:
-        pool = await asyncio.wait_for(asyncpg.create_pool(dsn=PG_URI, timeout=5), timeout=8)
-        await pool.execute('SELECT 1')
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(dsn=PG_URI, timeout=5), timeout=8
+        )
+        await pool.execute("SELECT 1")
     except Exception as e:
-        ctx.reason = f'PostgreSQL 不可达（{PG_URI}）: {e}'
+        ctx.reason = f"PostgreSQL 不可达（{PG_URI}）: {e}"
         return
 
     for stmt in PG_DDL:
         await pool.execute(stmt)
     ctx.driver = pool
-    ctx.conn = executors.create_connection('postgres', pool)
-    ctx.reset_sql = [f'DELETE FROM pg_posts_{E2E_TOKEN}',
-                     f'DELETE FROM pg_posts_{E2E_TOKEN}_deleted']
+    ctx.conn = executors.create_connection("postgres", pool)
+    ctx.reset_sql = [
+        f"DELETE FROM pg_posts_{E2E_TOKEN}",
+        f"DELETE FROM pg_posts_{E2E_TOKEN}_deleted",
+    ]
     _register_post(ctx)
     ctx.ready = True
 
@@ -236,13 +271,13 @@ async def _setup_mongo(ctx):
     try:
         from pymongo import AsyncMongoClient
     except ImportError as e:
-        ctx.reason = f'缺少 PyMongo AsyncMongoClient: {e}'
+        ctx.reason = f"缺少 PyMongo AsyncMongoClient: {e}"
         return
     client = AsyncMongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
     try:
-        await client.admin.command({'ping': 1})
+        await client.admin.command({"ping": 1})
     except Exception as e:
-        ctx.reason = f'MongoDB 不可达（{MONGO_URI}）: {e}'
+        ctx.reason = f"MongoDB 不可达（{MONGO_URI}）: {e}"
         await client.close()
         return
     db = client.get_default_database()
@@ -250,8 +285,10 @@ async def _setup_mongo(ctx):
     ctx.driver = db
     ctx.conn = db
     # M-4：只清理本 token 的集合；Mongo 落库用物理集合名（core::naming camelCase），按单点翻译后再清
-    ctx.reset_collections = [naming.physical(f'mg_posts_{E2E_TOKEN}'),
-                             naming.physical(f'mg_posts_{E2E_TOKEN}_deleted')]
+    ctx.reset_collections = [
+        naming.physical(f"mg_posts_{E2E_TOKEN}"),
+        naming.physical(f"mg_posts_{E2E_TOKEN}_deleted"),
+    ]
     _register_post(ctx)
     ctx.ready = True
 
@@ -260,33 +297,35 @@ async def _setup_sqlite(ctx):
     try:
         import aiosqlite
     except ImportError as e:
-        ctx.reason = f'缺少 aiosqlite 驱动: {e}'
+        ctx.reason = f"缺少 aiosqlite 驱动: {e}"
         return
-    db = await aiosqlite.connect(':memory:')
+    db = await aiosqlite.connect(":memory:")
     for stmt in SQLITE_DDL:
         await db.execute(stmt)
     await db.commit()
     ctx.driver = db
-    ctx.conn = executors.create_connection('sqlite', db)
-    ctx.reset_sql = [f'DELETE FROM sq_posts_{E2E_TOKEN}',
-                     f'DELETE FROM sq_posts_{E2E_TOKEN}_deleted']
+    ctx.conn = executors.create_connection("sqlite", db)
+    ctx.reset_sql = [
+        f"DELETE FROM sq_posts_{E2E_TOKEN}",
+        f"DELETE FROM sq_posts_{E2E_TOKEN}_deleted",
+    ]
     _register_post(ctx)
     ctx.ready = True
 
 
 async def _reset(ctx):
     """清空该后端的主表与归档表（用例间隔离）"""
-    if ctx.kind == 'mysql':
+    if ctx.kind == "mysql":
         async with ctx.driver.acquire() as conn:
             async with conn.cursor() as cur:
                 for sql in ctx.reset_sql:
                     await cur.execute(sql)
-    elif ctx.kind in ('postgres', 'sqlite'):
+    elif ctx.kind in ("postgres", "sqlite"):
         for sql in ctx.reset_sql:
             await ctx.driver.execute(sql)
-        if ctx.kind == 'sqlite':
+        if ctx.kind == "sqlite":
             await ctx.driver.commit()
-    elif ctx.kind == 'mongodb':
+    elif ctx.kind == "mongodb":
         for coll in ctx.reset_collections:
             await ctx.driver[coll].delete_many({})
 
@@ -301,7 +340,7 @@ async def _setup():
     connections = {c.ds: c.conn for c in CTXS if c.ready}
     # 兜底 default：本 pytest 进程内其他测试模块注册的 schema 未绑定数据源，
     # init 的索引巡检会按 default 反查连接；SQLite 源天然兜底（SQL 源不建索引，铁律 6）。
-    connections.setdefault('default', sqlite_ctx.conn)
+    connections.setdefault("default", sqlite_ctx.conn)
     await init(connections)
 
 
@@ -322,7 +361,7 @@ async def _teardown():
 _LOOP = None
 
 
-@pytest.fixture(scope='module', autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _boot():
     global _LOOP
     # m-11：惰性 / 安全建 loop —— asyncmy/asyncpg 连接池绑定创建时的 loop，连接须共用同一事件循环；
@@ -354,80 +393,88 @@ def _run(coro):
 
 # ─── A4：CRUD 闭环（同一套断言跑四个后端） ────────────────────
 
+
 async def _t_insert_and_query(ctx):
     S = ctx.schema_name
     await _reset(ctx)
-    doc = await store.insert(S, {'title': '你好', 'status': 'draft', 'views': 3})
-    assert doc and isinstance(doc.get('_id'), str) and doc['_id'].startswith('p_'), \
-        '应生成 idPrefix 前缀 _id'
+    doc = await store.insert(S, {"title": "你好", "status": "draft", "views": 3})
+    assert doc and isinstance(doc.get("_id"), str) and doc["_id"].startswith("p_"), (
+        "应生成 idPrefix 前缀 _id"
+    )
 
-    items = await store.query(f'{S}{{_id, title, status, views}}')
+    items = await store.query(f"{S}{{_id, title, status, views}}")
     assert len(items) == 1
-    assert items[0]['_id'] == doc['_id']
-    assert items[0]['title'] == '你好'
-    assert items[0]['views'] == 3
+    assert items[0]["_id"] == doc["_id"]
+    assert items[0]["title"] == "你好"
+    assert items[0]["views"] == 3
 
 
 async def _t_count_exists(ctx):
     S = ctx.schema_name
     await _reset(ctx)
-    await store.insert_many(S, [
-        {'title': 'A', 'status': 'draft', 'views': 1},
-        {'title': 'B', 'status': 'draft', 'views': 2},
-    ])
+    await store.insert_many(
+        S,
+        [
+            {"title": "A", "status": "draft", "views": 1},
+            {"title": "B", "status": "draft", "views": 2},
+        ],
+    )
     assert await store.count(S, {}) == 2
-    assert await store.count(S, {'status': 'draft'}) == 2
-    assert await store.count(S, {'views': {'$gte': 2}}) == 1
-    assert await store.exists(S, {'title': 'A'}) is True
-    assert await store.exists(S, {'title': 'nope'}) is False
+    assert await store.count(S, {"status": "draft"}) == 2
+    assert await store.count(S, {"views": {"$gte": 2}}) == 1
+    assert await store.exists(S, {"title": "A"}) is True
+    assert await store.exists(S, {"title": "nope"}) is False
 
 
 async def _t_update(ctx):
     """写后回读：PG/SQLite RETURNING，MySQL 两段编排"""
     S = ctx.schema_name
     await _reset(ctx)
-    doc = await store.insert(S, {'title': 'x', 'status': 'draft', 'views': 1})
-    out = await store.update(S, {'_id': doc['_id']}, {'views': 42})
-    assert out and out['_id'] == doc['_id'], '应回读到被更新文档'
-    assert out['views'] == 42
+    doc = await store.insert(S, {"title": "x", "status": "draft", "views": 1})
+    out = await store.update(S, {"_id": doc["_id"]}, {"views": 42})
+    assert out and out["_id"] == doc["_id"], "应回读到被更新文档"
+    assert out["views"] == 42
 
-    items = await store.query(f'{S}{{_id, views}}')
-    assert items[0]['views'] == 42
+    items = await store.query(f"{S}{{_id, views}}")
+    assert items[0]["views"] == 42
 
 
 async def _t_update_many(ctx):
     S = ctx.schema_name
     await _reset(ctx)
-    await store.insert_many(S, [
-        {'title': 'A', 'status': 'draft', 'views': 1},
-        {'title': 'B', 'status': 'draft', 'views': 2},
-    ])
-    r = await store.update_many(S, {'status': 'draft'}, {'$inc': {'views': 10}})
-    assert r['modifiedCount'] == 2
-    items = await store.query(f'{S}{{_id, views}}')
-    assert sorted(d['views'] for d in items) == [11, 12]
+    await store.insert_many(
+        S,
+        [
+            {"title": "A", "status": "draft", "views": 1},
+            {"title": "B", "status": "draft", "views": 2},
+        ],
+    )
+    r = await store.update_many(S, {"status": "draft"}, {"$inc": {"views": 10}})
+    assert r["modifiedCount"] == 2
+    items = await store.query(f"{S}{{_id, views}}")
+    assert sorted(d["views"] for d in items) == [11, 12]
 
 
 async def _t_remove(ctx):
     S, SD = ctx.schema_name, ctx.archive_schema
     await _reset(ctx)
-    doc = await store.insert(S, {'title': 'gone', 'status': 'done', 'views': 7})
-    r = await store.remove(S, {'_id': doc['_id']})
-    assert r['deletedCount'] == 1
-    assert r['archivedCount'] == 1
+    doc = await store.insert(S, {"title": "gone", "status": "done", "views": 7})
+    r = await store.remove(S, {"_id": doc["_id"]})
+    assert r["deletedCount"] == 1
+    assert r["archivedCount"] == 1
 
     assert await store.count(S, {}) == 0
-    archived = await store.query(f'{SD}{{_id, title, deletedAt}}')
+    archived = await store.query(f"{SD}{{_id, title, deletedAt}}")
     assert len(archived) == 1
-    assert archived[0]['_id'] == doc['_id']
-    assert float(archived[0]['deletedAt']) > 0, '归档应写 deletedAt'
+    assert archived[0]["_id"] == doc["_id"]
+    assert float(archived[0]["deletedAt"]) > 0, "归档应写 deletedAt"
 
 
 async def _t_mutation(ctx):
     S = ctx.schema_name
     await _reset(ctx)
-    created = await store.mutation(S, {'title': 'm1', 'status': 'new', 'views': 5})
-    assert created and isinstance(created.get('_id'), str), 'mutation 应写入并回读 _id'
+    created = await store.mutation(S, {"title": "m1", "status": "new", "views": 5})
+    assert created and isinstance(created.get("_id"), str), "mutation 应写入并回读 _id"
     assert await store.count(S, {}) == 1
 
 
@@ -435,14 +482,14 @@ async def _t_upsert(ctx):
     """_id 冲突目标：未命中新建 / 命中更新"""
     S = ctx.schema_name
     await _reset(ctx)
-    created = await store.upsert(S, {'_id': 'p_u1'}, {'status': 'on', 'views': 1})
-    assert created and created['_id'] == 'p_u1', 'upsert 未命中应新建并回读'
-    assert created['status'] == 'on'
+    created = await store.upsert(S, {"_id": "p_u1"}, {"status": "on", "views": 1})
+    assert created and created["_id"] == "p_u1", "upsert 未命中应新建并回读"
+    assert created["status"] == "on"
 
-    hit = await store.upsert(S, {'_id': 'p_u1'}, {'views': 9})
-    assert hit['_id'] == 'p_u1'
-    assert hit['views'] == 9
-    assert await store.count(S, {}) == 1, '命中时不应产生新行'
+    hit = await store.upsert(S, {"_id": "p_u1"}, {"views": 9})
+    assert hit["_id"] == "p_u1"
+    assert hit["views"] == 9
+    assert await store.count(S, {}) == 1, "命中时不应产生新行"
 
 
 async def _t_sync_schema(ctx):
@@ -450,90 +497,93 @@ async def _t_sync_schema(ctx):
     # 库里含已注册逻辑模型（my_posts 等），三元组唯一性下直接注册必冲突 ——
     # 故先 register_defs=False 拿 defs 验证映射，再显式断言冲突 fail fast，
     # 最后单独注册非冲突表验证注册链路。
-    defs = await store.sync_schema(ctx.kind, ctx.driver, datasource=ctx.ds,
-                                   register_defs=False)
+    defs = await store.sync_schema(
+        ctx.kind, ctx.driver, datasource=ctx.ds, register_defs=False
+    )
 
-    widgets = next((d for d in defs if d['collection'] == f'widgets_{E2E_TOKEN}'), None)
-    assert widgets, '应产出 widgets 定义'
-    assert widgets['collection'] == f'widgets_{E2E_TOKEN}'
-    assert widgets['datasource'] == ctx.ds
-    assert widgets['fields'].get('_id'), '主键应映射为 _id'
-    assert widgets['fields']['sku']['required'] is True, 'NOT NULL 应映射 required'
-    assert widgets['fields']['price']['type'] == 'number'
+    widgets = next((d for d in defs if d["collection"] == f"widgets_{E2E_TOKEN}"), None)
+    assert widgets, "应产出 widgets 定义"
+    assert widgets["collection"] == f"widgets_{E2E_TOKEN}"
+    assert widgets["datasource"] == ctx.ds
+    assert widgets["fields"].get("_id"), "主键应映射为 _id"
+    assert widgets["fields"]["sku"]["required"] is True, "NOT NULL 应映射 required"
+    assert widgets["fields"]["price"]["type"] == "number"
     # 关系键 = 物理表名（带 token 后缀），见探针确认
-    assert widgets['relations'].get(f'gadgets_{E2E_TOKEN}'), '外键应生成反向 many 关系'
-    assert widgets['relations'][f'gadgets_{E2E_TOKEN}']['type'] == 'many'
+    assert widgets["relations"].get(f"gadgets_{E2E_TOKEN}"), "外键应生成反向 many 关系"
+    assert widgets["relations"][f"gadgets_{E2E_TOKEN}"]["type"] == "many"
 
-    gadgets = next((d for d in defs if d['collection'] == f'gadgets_{E2E_TOKEN}'), None)
-    assert gadgets['relations'].get(f'widgets_{E2E_TOKEN}'), '外键侧应有 many-to-one 关系'
-    assert gadgets['relations'][f'widgets_{E2E_TOKEN}']['type'] == 'one'
-    assert gadgets['relations'][f'widgets_{E2E_TOKEN}']['localField'] == 'widget_id'
+    gadgets = next((d for d in defs if d["collection"] == f"gadgets_{E2E_TOKEN}"), None)
+    assert gadgets["relations"].get(f"widgets_{E2E_TOKEN}"), (
+        "外键侧应有 many-to-one 关系"
+    )
+    assert gadgets["relations"][f"widgets_{E2E_TOKEN}"]["type"] == "one"
+    assert gadgets["relations"][f"widgets_{E2E_TOKEN}"]["localField"] == "widget_id"
 
     # 三元组冲突 fail fast：已注册 <ctx.schema_name>（同 source、同 collection）再注册即抛错
-    dupe = next((d for d in defs if d['collection'] == ctx.collection), None)
-    assert dupe, 'introspect 应产出已注册表的 def'
-    with pytest.raises(RuntimeError, match='冲突|占用'):  # noqa: RUF043  正则交替是本意（两类冲突文案二选一）
-        _sc.register({**dupe, 'name': f"{dupe['name']}_dupe"})
+    dupe = next((d for d in defs if d["collection"] == ctx.collection), None)
+    assert dupe, "introspect 应产出已注册表的 def"
+    with pytest.raises(RuntimeError, match="冲突|占用"):  # noqa: RUF043  正则交替是本意（两类冲突文案二选一）
+        _sc.register({**dupe, "name": f"{dupe['name']}_dupe"})
 
-    taken = {_sc.get(n)['collection'] for n in _sc.list()}
+    taken = {_sc.get(n)["collection"] for n in _sc.list()}
     for d in defs:
         # M-4：共享库中还有并发进程 / 跨仓（nodejs-store）的表，只注册本 token 的表
-        if d['collection'] in taken or not d['collection'].endswith(f'_{E2E_TOKEN}'):
+        if d["collection"] in taken or not d["collection"].endswith(f"_{E2E_TOKEN}"):
             continue
         _sc.register(d)
-    assert _sc.has(f'widgets_{E2E_TOKEN}'), 'syncSchema 应完成非冲突表注册'
+    assert _sc.has(f"widgets_{E2E_TOKEN}"), "syncSchema 应完成非冲突表注册"
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_insert_and_query(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_insert_and_query(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_count_exists(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_count_exists(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_update(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_update(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_update_many(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_update_many(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_remove(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_remove(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_mutation(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_mutation(ctx))
 
 
-@pytest.mark.parametrize('ctx', CRUD_CTXS, ids=_IDS)
+@pytest.mark.parametrize("ctx", CRUD_CTXS, ids=_IDS)
 def test_upsert(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)
     _run(_t_upsert(ctx))
 
 
-@pytest.mark.parametrize('ctx', SYNC_CTXS, ids=_SYNC_IDS)
+@pytest.mark.parametrize("ctx", SYNC_CTXS, ids=_SYNC_IDS)
 def test_sync_schema(ctx):
     if not ctx.ready:
         pytest.skip(ctx.reason)

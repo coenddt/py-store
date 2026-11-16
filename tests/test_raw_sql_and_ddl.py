@@ -32,178 +32,208 @@ class _FakeMongo:
 
 # ─── ① execute_raw ──────────────────────────────────────────
 
+
 def test_execute_raw_builds_plan_and_returns_rows():
     captured = {}
 
     async def fake_exec(plan):
-        captured['plan'] = plan
-        return {'docs': None, 'rows': [{'a': 1}], 'affectedRows': 0}
+        captured["plan"] = plan
+        return {"docs": None, "rows": [{"a": 1}], "affectedRows": 0}
 
-    datasource.set_connections({'db': {'kind': 'sqlite', 'exec': fake_exec}})
-    out = _run(store.execute_raw('db', 'SELECT 1', [7]))
+    datasource.set_connections({"db": {"kind": "sqlite", "exec": fake_exec}})
+    out = _run(store.execute_raw("db", "SELECT 1", [7]))
 
-    assert captured['plan'] == {'stmts': [{'text': 'SELECT 1', 'params': [7], 'isWrite': False}]}
-    assert out == {'rows': [{'a': 1}], 'affectedRows': 0}
+    assert captured["plan"] == {
+        "stmts": [{"text": "SELECT 1", "params": [7], "isWrite": False}]
+    }
+    assert out == {"rows": [{"a": 1}], "affectedRows": 0}
 
 
 def test_execute_raw_is_write_flag_and_affected_rows():
     captured = {}
 
     async def fake_exec(plan):
-        captured['plan'] = plan
-        return {'docs': None, 'rows': None, 'affectedRows': 3}
+        captured["plan"] = plan
+        return {"docs": None, "rows": None, "affectedRows": 3}
 
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': fake_exec}})
-    out = _run(store.execute_raw('db', 'UPDATE t SET a = ?', [1], True))
+    datasource.set_connections({"db": {"kind": "mysql", "exec": fake_exec}})
+    out = _run(store.execute_raw("db", "UPDATE t SET a = ?", [1], True))
 
-    assert captured['plan']['stmts'][0]['isWrite'] is True
-    assert out == {'rows': None, 'affectedRows': 3}
+    assert captured["plan"]["stmts"][0]["isWrite"] is True
+    assert out == {"rows": None, "affectedRows": 3}
 
 
 def test_execute_raw_mongo_source_raises():
-    datasource.set_connections({'db': _FakeMongo()})
+    datasource.set_connections({"db": _FakeMongo()})
     with pytest.raises(store.RawSqlError):
-        _run(store.execute_raw('db', 'SELECT 1'))
+        _run(store.execute_raw("db", "SELECT 1"))
 
 
 def test_execute_raw_missing_executor_raises():
-    datasource.set_connections({'db': {'kind': 'sqlite'}})
+    datasource.set_connections({"db": {"kind": "sqlite"}})
     with pytest.raises(store.RawSqlError):
-        _run(store.execute_raw('db', 'SELECT 1'))
+        _run(store.execute_raw("db", "SELECT 1"))
 
 
 # ─── ①′ execute_raw 命名档与写推断（core raw_stmt_compile 编译链）───
 
+
 def _capture_exec(captured):
     async def fake_exec(plan):
-        captured['plan'] = plan
-        return {'docs': None, 'rows': [], 'affectedRows': 0}
+        captured["plan"] = plan
+        return {"docs": None, "rows": [], "affectedRows": 0}
+
     return fake_exec
 
 
 def test_execute_raw_named_params_mysql():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
-    _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {'x': 7}))
-    assert captured['plan']['stmts'][0]['text'] == 'SELECT * FROM t WHERE a = ?'
-    assert captured['plan']['stmts'][0]['params'] == [7]
-    assert captured['plan']['stmts'][0]['isWrite'] is False
+    datasource.set_connections(
+        {"db": {"kind": "mysql", "exec": _capture_exec(captured)}}
+    )
+    _run(store.execute_raw("db", "SELECT * FROM t WHERE a = :x", {"x": 7}))
+    assert captured["plan"]["stmts"][0]["text"] == "SELECT * FROM t WHERE a = ?"
+    assert captured["plan"]["stmts"][0]["params"] == [7]
+    assert captured["plan"]["stmts"][0]["isWrite"] is False
 
 
 def test_execute_raw_named_params_pg_reorder():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
-    _run(store.execute_raw('db', 'SELECT :b, :a', {'a': 1, 'b': 2}))
-    assert captured['plan']['stmts'][0]['text'] == 'SELECT $1, $2'
-    assert captured['plan']['stmts'][0]['params'] == [2, 1]
+    datasource.set_connections(
+        {"db": {"kind": "postgres", "exec": _capture_exec(captured)}}
+    )
+    _run(store.execute_raw("db", "SELECT :b, :a", {"a": 1, "b": 2}))
+    assert captured["plan"]["stmts"][0]["text"] == "SELECT $1, $2"
+    assert captured["plan"]["stmts"][0]["params"] == [2, 1]
 
 
 def test_execute_raw_named_reuse_and_cast():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
-    _run(store.execute_raw('db', 'SELECT :x::text OR b = :x', {'x': 'v'}))
+    datasource.set_connections(
+        {"db": {"kind": "postgres", "exec": _capture_exec(captured)}}
+    )
+    _run(store.execute_raw("db", "SELECT :x::text OR b = :x", {"x": "v"}))
     # 同名复用各占一个占位符；:: cast 不误判为参数
-    assert captured['plan']['stmts'][0]['text'] == 'SELECT $1::text OR b = $2'
-    assert captured['plan']['stmts'][0]['params'] == ['v', 'v']
+    assert captured["plan"]["stmts"][0]["text"] == "SELECT $1::text OR b = $2"
+    assert captured["plan"]["stmts"][0]["params"] == ["v", "v"]
 
 
 def test_execute_raw_quoted_and_comment_colons_kept():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
+    datasource.set_connections(
+        {"db": {"kind": "mysql", "exec": _capture_exec(captured)}}
+    )
     sql = "SELECT ':' -- :hint\nFROM t WHERE a = :x"
-    _run(store.execute_raw('db', sql, {'x': 1}))
+    _run(store.execute_raw("db", sql, {"x": 1}))
     # 字符串字面量与行注释内的冒号保持原样，仅真实 :x 被编译
-    assert captured['plan']['stmts'][0]['text'] == "SELECT ':' -- :hint\nFROM t WHERE a = ?"
-    assert captured['plan']['stmts'][0]['params'] == [1]
+    assert (
+        captured["plan"]["stmts"][0]["text"]
+        == "SELECT ':' -- :hint\nFROM t WHERE a = ?"
+    )
+    assert captured["plan"]["stmts"][0]["params"] == [1]
 
 
 def test_execute_raw_write_inferred_from_insert():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec(captured)}})
-    _run(store.execute_raw('db', 'INSERT INTO t VALUES (1)'))
-    assert captured['plan']['stmts'][0]['isWrite'] is True
+    datasource.set_connections(
+        {"db": {"kind": "mysql", "exec": _capture_exec(captured)}}
+    )
+    _run(store.execute_raw("db", "INSERT INTO t VALUES (1)"))
+    assert captured["plan"]["stmts"][0]["isWrite"] is True
 
 
 def test_execute_raw_unknown_first_word_treated_as_write():
     captured = {}
-    datasource.set_connections({'db': {'kind': 'postgres', 'exec': _capture_exec(captured)}})
+    datasource.set_connections(
+        {"db": {"kind": "postgres", "exec": _capture_exec(captured)}}
+    )
     # 未知首词按写（R7 默认安全方向，非 Err）
-    _run(store.execute_raw('db', 'VACUUM ANALYZE t'))
-    assert captured['plan']['stmts'][0]['isWrite'] is True
+    _run(store.execute_raw("db", "VACUUM ANALYZE t"))
+    assert captured["plan"]["stmts"][0]["isWrite"] is True
 
 
 def test_execute_raw_named_missing_param_raises():
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    datasource.set_connections({"db": {"kind": "mysql", "exec": _capture_exec({})}})
     with pytest.raises(store.RawSqlError) as ei:
-        _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {}))
-    assert '未在 params 中提供' in str(ei.value)
+        _run(store.execute_raw("db", "SELECT * FROM t WHERE a = :x", {}))
+    assert "未在 params 中提供" in str(ei.value)
 
 
 def test_execute_raw_named_unused_param_raises():
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    datasource.set_connections({"db": {"kind": "mysql", "exec": _capture_exec({})}})
     with pytest.raises(store.RawSqlError) as ei:
-        _run(store.execute_raw('db', 'SELECT * FROM t WHERE a = :x', {'x': 1, 'y': 2}))
-    assert '未使用的命名参数' in str(ei.value)
+        _run(store.execute_raw("db", "SELECT * FROM t WHERE a = :x", {"x": 1, "y": 2}))
+    assert "未使用的命名参数" in str(ei.value)
 
 
 def test_execute_raw_scalar_params_raises():
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    datasource.set_connections({"db": {"kind": "mysql", "exec": _capture_exec({})}})
     with pytest.raises(store.RawSqlError) as ei:
-        _run(store.execute_raw('db', 'SELECT 1', 7))
-    assert '仅支持 list/tuple（位置档）或 dict（命名档）' in str(ei.value)
+        _run(store.execute_raw("db", "SELECT 1", 7))
+    assert "仅支持 list/tuple（位置档）或 dict（命名档）" in str(ei.value)
 
 
 def test_transaction_uses_tx_connection_and_rolls_back():
-    state = {'committed': 0, 'rolled_back': 0}
+    state = {"committed": 0, "rolled_back": 0}
 
     async def run_stmts(plan):
-        return {'docs': None, 'rows': [{'id': 1}], 'affectedRows': 0}
+        return {"docs": None, "rows": [{"id": 1}], "affectedRows": 0}
 
     async def with_transaction(body):
         try:
             out = await body(run_stmts)
-            state['committed'] += 1
+            state["committed"] += 1
             return out
         except BaseException:
-            state['rolled_back'] += 1
+            state["rolled_back"] += 1
             raise
 
     datasource.set_connections(
-        {'db': {'kind': 'sqlite', 'exec': run_stmts, 'with_transaction': with_transaction}})
+        {
+            "db": {
+                "kind": "sqlite",
+                "exec": run_stmts,
+                "with_transaction": with_transaction,
+            }
+        }
+    )
 
     async def body():
         # 事务内 execute_raw 经 connection_for 落到事务连接（tx_desc.exec）
-        out = await store.execute_raw('db', 'SELECT * FROM t WHERE id = ? FOR UPDATE', [1])
-        assert out == {'rows': [{'id': 1}], 'affectedRows': 0}
-        raise RuntimeError('boom')
+        out = await store.execute_raw(
+            "db", "SELECT * FROM t WHERE id = ? FOR UPDATE", [1]
+        )
+        assert out == {"rows": [{"id": 1}], "affectedRows": 0}
+        raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError):
-        _run(store.transaction('db', body))
+        _run(store.transaction("db", body))
 
-    assert state['rolled_back'] == 1
-    assert state['committed'] == 0
+    assert state["rolled_back"] == 1
+    assert state["committed"] == 0
 
 
 def test_transaction_without_with_transaction_runs_plainly():
     async def fake_exec(plan):
-        return {'docs': None, 'rows': [], 'affectedRows': 0}
+        return {"docs": None, "rows": [], "affectedRows": 0}
 
-    datasource.set_connections({'db': {'kind': 'sqlite', 'exec': fake_exec}})
+    datasource.set_connections({"db": {"kind": "sqlite", "exec": fake_exec}})
     events = []
     feedback.set_sink(events.append)
 
     async def body():
-        return 'ok'
+        return "ok"
 
-    assert _run(store.transaction('db', body)) == 'ok'
-    warned = [e for e in events if e.get('type') == 'transaction_not_atomic']
-    assert len(warned) == 1, '缺 with_transaction 的事务作用域必须显式声明，不静默'
-    assert warned[0]['code'] == 'transactionNotAtomic'
-    assert warned[0]['source'] == 'db'
-    assert warned[0]['kind'] == 'sqlite'
+    assert _run(store.transaction("db", body)) == "ok"
+    warned = [e for e in events if e.get("type") == "transaction_not_atomic"]
+    assert len(warned) == 1, "缺 with_transaction 的事务作用域必须显式声明，不静默"
+    assert warned[0]["code"] == "transactionNotAtomic"
+    assert warned[0]["source"] == "db"
+    assert warned[0]["kind"] == "sqlite"
 
 
 # ─── ①″ execute_native（Mongo 原生聚合逃生口，与 js 侧对拍）───
+
 
 class _FakeMongoDb:
     """带 get_collection → Database 形态（execute_native 判定为合法 Mongo 源）"""
@@ -216,91 +246,108 @@ def test_execute_native_builds_aggregate_command(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['db'] = db
-        captured['cmd'] = cmd
-        captured['session'] = session
-        return [{'n': 1}]
+        captured["db"] = db
+        captured["cmd"] = cmd
+        captured["session"] = session
+        return [{"n": 1}]
 
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
     db = _FakeMongoDb()
-    datasource.set_connections({'db': db})
-    out = _run(store.execute_native(
-        'db', 'orders', [{'$match': {'a': 1}}], {'allowDiskUse': True}))
+    datasource.set_connections({"db": db})
+    out = _run(
+        store.execute_native(
+            "db", "orders", [{"$match": {"a": 1}}], {"allowDiskUse": True}
+        )
+    )
 
-    assert captured['db'] is db
-    assert captured['cmd'] == {'kind': 'aggregate', 'collection': 'orders',
-                               'pipeline': [{'$match': {'a': 1}}],
-                               'options': {'allowDiskUse': True}}
-    assert captured['session'] is None
-    assert out == {'rows': [{'n': 1}]}
+    assert captured["db"] is db
+    assert captured["cmd"] == {
+        "kind": "aggregate",
+        "collection": "orders",
+        "pipeline": [{"$match": {"a": 1}}],
+        "options": {"allowDiskUse": True},
+    }
+    assert captured["session"] is None
+    assert out == {"rows": [{"n": 1}]}
 
 
 def test_execute_native_pipeline_none_defaults_empty(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['cmd'] = cmd
+        captured["cmd"] = cmd
         return []
 
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
-    datasource.set_connections({'db': _FakeMongoDb()})
-    _run(store.execute_native('db', 't'))
-    assert captured['cmd']['pipeline'] == []
-    assert captured['cmd']['options'] == {}
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
+    datasource.set_connections({"db": _FakeMongoDb()})
+    _run(store.execute_native("db", "t"))
+    assert captured["cmd"]["pipeline"] == []
+    assert captured["cmd"]["options"] == {}
 
 
 def test_execute_native_tx_view_session_injected(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['session'] = session
+        captured["session"] = session
         return []
 
     async def fake_resolve(source, is_write=False):
-        return {'kind': 'mongo', 'conn': _FakeMongoDb(), 'session': 'SENTINEL', 'tx': {}}
+        return {
+            "kind": "mongo",
+            "conn": _FakeMongoDb(),
+            "session": "SENTINEL",
+            "tx": {},
+        }
 
-    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
-    _run(store.execute_native('db', 't', []))
+    monkeypatch.setattr(datasource, "resolve_connection", fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
+    _run(store.execute_native("db", "t", []))
     # 事务视图 session 强制注入执行器
-    assert captured['session'] == 'SENTINEL'
+    assert captured["session"] == "SENTINEL"
 
 
 def test_execute_native_options_session_cannot_override_tx(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['session'] = session
-        captured['options'] = cmd['options']
+        captured["session"] = session
+        captured["options"] = cmd["options"]
         return []
 
     async def fake_resolve(source, is_write=False):
-        return {'kind': 'mongo', 'conn': _FakeMongoDb(), 'session': 'SENTINEL', 'tx': {}}
+        return {
+            "kind": "mongo",
+            "conn": _FakeMongoDb(),
+            "session": "SENTINEL",
+            "tx": {},
+        }
 
-    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
-    _run(store.execute_native('db', 't', [], {'session': 'USER_SESSION'}))
+    monkeypatch.setattr(datasource, "resolve_connection", fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
+    _run(store.execute_native("db", "t", [], {"session": "USER_SESSION"}))
     # session 由事务接管：用户 options.session 不可覆盖（executors _opts 内 session 强制注入）
-    assert captured['session'] == 'SENTINEL'
-    assert captured['options'] == {'session': 'USER_SESSION'}
+    assert captured["session"] == "SENTINEL"
+    assert captured["options"] == {"session": "USER_SESSION"}
 
 
 def test_execute_native_sql_source_raises():
-    datasource.set_connections({'db': {'kind': 'mysql', 'exec': _capture_exec({})}})
+    datasource.set_connections({"db": {"kind": "mysql", "exec": _capture_exec({})}})
     with pytest.raises(store.NativeCommandError) as ei:
-        _run(store.execute_native('db', 't', []))
-    assert '是 SQL 源' in str(ei.value)
-    assert 'execute_raw' in str(ei.value)
+        _run(store.execute_native("db", "t", []))
+    assert "是 SQL 源" in str(ei.value)
+    assert "execute_raw" in str(ei.value)
 
 
 def test_execute_native_non_mongo_source_raises():
-    datasource.set_connections({'db': _FakeMongo()})
+    datasource.set_connections({"db": _FakeMongo()})
     with pytest.raises(store.NativeCommandError) as ei:
-        _run(store.execute_native('db', 't', []))
-    assert '不是 Mongo 源' in str(ei.value)
+        _run(store.execute_native("db", "t", []))
+    assert "不是 Mongo 源" in str(ei.value)
 
 
 # ─── ①⁗ store.aggregate（execute_native 的 schema 名孪生，opt-in；与 js 侧对拍）───
+
 
 class _FakeAggDb:
     """get_collection + __getitem__ → Database 形态（init 建索引探测 list_indexes 可走通）"""
@@ -314,65 +361,78 @@ class _FakeAggDb:
                 class _Cur:
                     async def to_list(self, length=None):
                         return []
+
                 return _Cur()
+
         return _Coll()
 
 
 def test_aggregate_disabled_by_default():
-    store.register({'name': 'AggOff', 'fields': {'a': 'int'}})
+    store.register({"name": "AggOff", "fields": {"a": "int"}})
     with pytest.raises(RuntimeError) as ei:
-        _run(store.aggregate('AggOff', [{'$match': {'a': 1}}]))
+        _run(store.aggregate("AggOff", [{"$match": {"a": 1}}]))
     # 默认关闭是产品边界：显式报错并指引开启方式（禁静默）
-    assert str(ei.value).startswith('ERR_NATIVE_AGGREGATE_DISABLED')
-    assert 'allowNativeAggregate' in str(ei.value)
-    assert ei.value.code == 'ERR_NATIVE_AGGREGATE_DISABLED'
+    assert str(ei.value).startswith("ERR_NATIVE_AGGREGATE_DISABLED")
+    assert "allowNativeAggregate" in str(ei.value)
+    assert ei.value.code == "ERR_NATIVE_AGGREGATE_DISABLED"
 
 
 def test_aggregate_enabled_resolves_schema_and_delegates(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['db'] = db
-        captured['cmd'] = cmd
-        captured['session'] = session
-        return [{'n': 1}]
+        captured["db"] = db
+        captured["cmd"] = cmd
+        captured["session"] = session
+        return [{"n": 1}]
 
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
     db = _FakeAggDb()
-    store.register({'name': 'AggModel', 'fields': {'a': 'int'},
-                    'datasource': 'db', 'collection': 'agg_models'})
-    _run(init({'db': db}, {'allowNativeAggregate': True}))
+    store.register(
+        {
+            "name": "AggModel",
+            "fields": {"a": "int"},
+            "datasource": "db",
+            "collection": "agg_models",
+        }
+    )
+    _run(init({"db": db}, {"allowNativeAggregate": True}))
 
-    out = _run(store.aggregate('AggModel', [{'$match': {'a': 1}}], {'allowDiskUse': True}))
-    assert captured['db'] is db
-    assert captured['cmd'] == {'kind': 'aggregate', 'collection': 'agg_models',
-                               'pipeline': [{'$match': {'a': 1}}],
-                               'options': {'allowDiskUse': True}}
-    assert captured['session'] is None
-    assert out == {'rows': [{'n': 1}]}
+    out = _run(
+        store.aggregate("AggModel", [{"$match": {"a": 1}}], {"allowDiskUse": True})
+    )
+    assert captured["db"] is db
+    assert captured["cmd"] == {
+        "kind": "aggregate",
+        "collection": "agg_models",
+        "pipeline": [{"$match": {"a": 1}}],
+        "options": {"allowDiskUse": True},
+    }
+    assert captured["session"] is None
+    assert out == {"rows": [{"n": 1}]}
 
     # 未知 schema 显式报错（对拍 nodejs ERR_AGGREGATE_SCHEMA）
     with pytest.raises(RuntimeError) as ei:
-        _run(store.aggregate('NoSuchModel', []))
-    assert str(ei.value).startswith('ERR_AGGREGATE_SCHEMA')
-    assert ei.value.code == 'ERR_AGGREGATE_SCHEMA'
+        _run(store.aggregate("NoSuchModel", []))
+    assert str(ei.value).startswith("ERR_AGGREGATE_SCHEMA")
+    assert ei.value.code == "ERR_AGGREGATE_SCHEMA"
 
 
 def test_aggregate_session_injected_in_tx_scope(monkeypatch):
     captured = {}
 
     async def fake_exec_mongo(db, cmd, session=None):
-        captured['session'] = session
+        captured["session"] = session
         return []
 
     async def fake_resolve(source, is_write=False):
-        return {'kind': 'mongo', 'conn': _FakeAggDb(), 'session': 'SENTINEL', 'tx': {}}
+        return {"kind": "mongo", "conn": _FakeAggDb(), "session": "SENTINEL", "tx": {}}
 
-    monkeypatch.setattr(datasource, 'resolve_connection', fake_resolve)
-    monkeypatch.setattr(datasource.executors.mongo, 'exec_mongo', fake_exec_mongo)
+    monkeypatch.setattr(datasource, "resolve_connection", fake_resolve)
+    monkeypatch.setattr(datasource.executors.mongo, "exec_mongo", fake_exec_mongo)
     # 事务/会话作用域 session 强制注入（复用 execute_native 通道，与 js 侧对拍）
-    _run(store.aggregate('AggModel', []))
-    assert captured['session'] == 'SENTINEL'
+    _run(store.aggregate("AggModel", []))
+    assert captured["session"] == "SENTINEL"
 
 
 def test_exec_mongo_aggregate_forwards_options():
@@ -380,28 +440,35 @@ def test_exec_mongo_aggregate_forwards_options():
 
     class _FakeCursor:
         async def to_list(self, length=None):
-            return [{'n': 1}]
+            return [{"n": 1}]
 
     class _FakeColl:
         async def aggregate(self, pipeline, **kw):
-            captured['pipeline'] = pipeline
-            captured['kw'] = kw
+            captured["pipeline"] = pipeline
+            captured["kw"] = kw
             return _FakeCursor()
 
     class _FakeDriverDb:
         def __getitem__(self, name):
-            captured['collection'] = name
+            captured["collection"] = name
             return _FakeColl()
 
-    out = _run(datasource.executors.mongo.exec_mongo(
-        _FakeDriverDb(),
-        {'kind': 'aggregate', 'collection': 'orders',
-         'pipeline': [{'$match': {'a': 1}}], 'options': {'allowDiskUse': True}}))
+    out = _run(
+        datasource.executors.mongo.exec_mongo(
+            _FakeDriverDb(),
+            {
+                "kind": "aggregate",
+                "collection": "orders",
+                "pipeline": [{"$match": {"a": 1}}],
+                "options": {"allowDiskUse": True},
+            },
+        )
+    )
 
-    assert captured['collection'] == 'orders'
-    assert captured['pipeline'] == [{'$match': {'a': 1}}]
-    assert captured['kw'] == {'allowDiskUse': True}
-    assert out == [{'n': 1}]
+    assert captured["collection"] == "orders"
+    assert captured["pipeline"] == [{"$match": {"a": 1}}]
+    assert captured["kw"] == {"allowDiskUse": True}
+    assert out == [{"n": 1}]
 
 
 def test_exec_mongo_aggregate_without_options_unchanged():
@@ -414,51 +481,64 @@ def test_exec_mongo_aggregate_without_options_unchanged():
 
     class _FakeColl:
         async def aggregate(self, pipeline, **kw):
-            captured['kw'] = kw
+            captured["kw"] = kw
             return _FakeCursor()
 
     class _FakeDriverDb:
         def __getitem__(self, name):
             return _FakeColl()
 
-    _run(datasource.executors.mongo.exec_mongo(
-        _FakeDriverDb(), {'kind': 'aggregate', 'collection': 't', 'pipeline': []}))
-    assert captured['kw'] == {}
+    _run(
+        datasource.executors.mongo.exec_mongo(
+            _FakeDriverDb(), {"kind": "aggregate", "collection": "t", "pipeline": []}
+        )
+    )
+    assert captured["kw"] == {}
 
 
 # ─── ② ddl.generate ─────────────────────────────────────────
 
-def test_ddl_present_and_archive_includes_json_columns():
-    store.register({
-        'name': 'DdlProbe', 'collection': 'ddl_probes', 'idPrefix': 'd',
-        'timestamps': False,
-        'fields': {
-            '_id': {'type': 'string'},
-            'title': {'type': 'string'},
-            'nested': {'type': 'object', 'fields': {'x': {'type': 'string'}}},
-            'tags': {'type': 'array'},
-        },
-    })
-    sql = store.generate_ddl('mysql', ['DdlProbe', 'DdlProbeDeleted'])
 
-    assert 'CREATE TABLE `ddl_probes`' in sql
-    assert 'CREATE TABLE `ddl_probes_deleted`' in sql
-    assert '`__present` VARCHAR(255)' in sql
+def test_ddl_present_and_archive_includes_json_columns():
+    store.register(
+        {
+            "name": "DdlProbe",
+            "collection": "ddl_probes",
+            "idPrefix": "d",
+            "timestamps": False,
+            "fields": {
+                "_id": {"type": "string"},
+                "title": {"type": "string"},
+                "nested": {"type": "object", "fields": {"x": {"type": "string"}}},
+                "tags": {"type": "array"},
+            },
+        }
+    )
+    sql = store.generate_ddl("mysql", ["DdlProbe", "DdlProbeDeleted"])
+
+    assert "CREATE TABLE `ddl_probes`" in sql
+    assert "CREATE TABLE `ddl_probes_deleted`" in sql
+    assert "`__present` VARCHAR(255)" in sql
     # 数据标识符按目标介质翻译（snake_case）：deletedAt → deleted_at
-    assert '`deleted_at` BIGINT' in sql
-    assert 'PRIMARY KEY (`_id`)' in sql
+    assert "`deleted_at` BIGINT" in sql
+    assert "PRIMARY KEY (`_id`)" in sql
     # object / array 建 JSON 列（同 core field_column_ref::Json）
-    assert '`nested` JSON' in sql
-    assert '`tags` JSON' in sql
+    assert "`nested` JSON" in sql
+    assert "`tags` JSON" in sql
 
 
 def test_ddl_timestamps_and_no_index():
-    store.register({
-        'name': 'DdlTs', 'collection': 'ddl_ts', 'idPrefix': 't', 'timestamps': True,
-        'indexes': [{'keys': {'name': 1}}],
-        'fields': {'_id': {'type': 'string'}, 'name': {'type': 'string'}},
-    })
-    sql = store.generate_ddl('postgres', ['DdlTs'])
+    store.register(
+        {
+            "name": "DdlTs",
+            "collection": "ddl_ts",
+            "idPrefix": "t",
+            "timestamps": True,
+            "indexes": [{"keys": {"name": 1}}],
+            "fields": {"_id": {"type": "string"}, "name": {"type": "string"}},
+        }
+    )
+    sql = store.generate_ddl("postgres", ["DdlTs"])
 
     # 数据标识符按目标介质翻译（snake_case）：createdAt/updatedAt → created_at/updated_at
     assert '"created_at" BIGINT' in sql
@@ -469,86 +549,115 @@ def test_ddl_timestamps_and_no_index():
 
 
 def test_ddl_backend_types():
-    store.register({
-        'name': 'DdlTypes', 'collection': 'ddl_types', 'idPrefix': 'y', 'timestamps': False,
-        'fields': {
-            '_id': {'type': 'string'},
-            's': {'type': 'string'},
-            'i': {'type': 'int'},
-            'f': {'type': 'float'},
-            'ok': {'type': 'bool'},
-            'at': {'type': 'datetime'},
-        },
-    })
-    my = store.generate_ddl('mysql', ['DdlTypes'])
-    pg = store.generate_ddl('postgres', ['DdlTypes'])
-    lite = store.generate_ddl('sqlite', ['DdlTypes'])
+    store.register(
+        {
+            "name": "DdlTypes",
+            "collection": "ddl_types",
+            "idPrefix": "y",
+            "timestamps": False,
+            "fields": {
+                "_id": {"type": "string"},
+                "s": {"type": "string"},
+                "i": {"type": "int"},
+                "f": {"type": "float"},
+                "ok": {"type": "bool"},
+                "at": {"type": "datetime"},
+            },
+        }
+    )
+    my = store.generate_ddl("mysql", ["DdlTypes"])
+    pg = store.generate_ddl("postgres", ["DdlTypes"])
+    lite = store.generate_ddl("sqlite", ["DdlTypes"])
 
-    assert '`s` VARCHAR(255)' in my and '`f` DOUBLE' in my and '`ok` TINYINT(1)' in my
-    assert '`at` BIGINT' in my
+    assert "`s` VARCHAR(255)" in my and "`f` DOUBLE" in my and "`ok` TINYINT(1)" in my
+    assert "`at` BIGINT" in my
     assert '"s" TEXT' in pg and '"f" DOUBLE PRECISION' in pg and '"ok" BOOLEAN' in pg
     assert '"s" TEXT' in lite and '"f" REAL' in lite and '"ok" INTEGER' in lite
     assert '"at" INTEGER' in lite
 
 
 def test_ddl_json_column_types_per_backend():
-    store.register({
-        'name': 'DdlJson', 'collection': 'ddl_json', 'idPrefix': 'j', 'timestamps': False,
-        'fields': {
-            '_id': {'type': 'string'},
-            'obj': {'type': 'object'},
-            'arr': {'type': 'array'},
-        },
-    })
-    my = store.generate_ddl('mysql', ['DdlJson'])
-    pg = store.generate_ddl('postgres', ['DdlJson'])
-    lite = store.generate_ddl('sqlite', ['DdlJson'])
+    store.register(
+        {
+            "name": "DdlJson",
+            "collection": "ddl_json",
+            "idPrefix": "j",
+            "timestamps": False,
+            "fields": {
+                "_id": {"type": "string"},
+                "obj": {"type": "object"},
+                "arr": {"type": "array"},
+            },
+        }
+    )
+    my = store.generate_ddl("mysql", ["DdlJson"])
+    pg = store.generate_ddl("postgres", ["DdlJson"])
+    lite = store.generate_ddl("sqlite", ["DdlJson"])
 
-    assert '`obj` JSON' in my and '`arr` JSON' in my
+    assert "`obj` JSON" in my and "`arr` JSON" in my
     assert '"obj" jsonb' in pg and '"arr" jsonb' in pg
     assert '"obj" TEXT' in lite and '"arr" TEXT' in lite
 
 
 def test_ddl_unknown_backend_raises():
     with pytest.raises(ValueError):
-        store.generate_ddl('oracle', ['X'])
+        store.generate_ddl("oracle", ["X"])
 
 
 def test_ddl_unknown_field_type_raises():
-    store.register({
-        'name': 'DdlBad', 'collection': 'ddl_bad', 'idPrefix': 'b', 'timestamps': False,
-        'fields': {'_id': {'type': 'string'}, 'weird': {'type': 'weird'}},
-    })
+    store.register(
+        {
+            "name": "DdlBad",
+            "collection": "ddl_bad",
+            "idPrefix": "b",
+            "timestamps": False,
+            "fields": {"_id": {"type": "string"}, "weird": {"type": "weird"}},
+        }
+    )
     with pytest.raises(ValueError):
-        store.generate_ddl('mysql', ['DdlBad'])
+        store.generate_ddl("mysql", ["DdlBad"])
 
 
 def test_ddl_owner_key_uses_custom_field():
     """ownerKey 自定义 + creator 权限 ⇒ 补 ownerKey 列，不再补 created_by（三后端）。"""
-    store.register({
-        'name': 'DdlOwnerCustom', 'collection': 'ddl_owner_custom', 'idPrefix': 'o',
-        'timestamps': False, 'write': ['creator'], 'ownerKey': 'creatorId',
-        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
-    })
-    for backend, pat in (('mysql', '`creator_id` VARCHAR(255)'),
-                         ('postgres', '"creator_id" TEXT'),
-                         ('sqlite', '"creator_id" TEXT')):
-        ddl = store.generate_ddl(backend, ['DdlOwnerCustom'])
+    store.register(
+        {
+            "name": "DdlOwnerCustom",
+            "collection": "ddl_owner_custom",
+            "idPrefix": "o",
+            "timestamps": False,
+            "write": ["creator"],
+            "ownerKey": "creatorId",
+            "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
+        }
+    )
+    for backend, pat in (
+        ("mysql", "`creator_id` VARCHAR(255)"),
+        ("postgres", '"creator_id" TEXT'),
+        ("sqlite", '"creator_id" TEXT'),
+    ):
+        ddl = store.generate_ddl(backend, ["DdlOwnerCustom"])
         assert pat in ddl, ddl
-        assert 'created_by' not in ddl, ddl
+        assert "created_by" not in ddl, ddl
 
 
 def test_ddl_owner_key_without_owner_control_adds_nothing():
     """无 creator 行控（ownerKey 仅声明语义）⇒ 不补列，行为不变。"""
-    store.register({
-        'name': 'DdlOwnerNoCtl', 'collection': 'ddl_owner_noctl', 'idPrefix': 'o',
-        'timestamps': False, 'ownerKey': 'creatorId', 'read': ['admin'],
-        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
-    })
-    for backend in ('mysql', 'postgres', 'sqlite'):
-        ddl = store.generate_ddl(backend, ['DdlOwnerNoCtl'])
-        assert 'creator_id' not in ddl, ddl
-        assert 'created_by' not in ddl, ddl
+    store.register(
+        {
+            "name": "DdlOwnerNoCtl",
+            "collection": "ddl_owner_noctl",
+            "idPrefix": "o",
+            "timestamps": False,
+            "ownerKey": "creatorId",
+            "read": ["admin"],
+            "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
+        }
+    )
+    for backend in ("mysql", "postgres", "sqlite"):
+        ddl = store.generate_ddl(backend, ["DdlOwnerNoCtl"])
+        assert "creator_id" not in ddl, ddl
+        assert "created_by" not in ddl, ddl
 
 
 def test_ddl_creator_permission_adds_created_by_column():
@@ -557,48 +666,63 @@ def test_ddl_creator_permission_adds_created_by_column():
     与 core schema/registry.rs::add_creator_field 同口径：注册期字段声明补齐 +
     建表列补齐，避免写入路径注入 createdBy 时 SQL 1054 Unknown column。
     """
-    store.register({
-        'name': 'DdlCreator', 'collection': 'ddl_creator', 'idPrefix': 'c',
-        'timestamps': False, 'write': ['creator'],
-        'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}},
-    })
-    my = store.generate_ddl('mysql', ['DdlCreator'])
-    pg = store.generate_ddl('postgres', ['DdlCreator'])
-    lite = store.generate_ddl('sqlite', ['DdlCreator'])
+    store.register(
+        {
+            "name": "DdlCreator",
+            "collection": "ddl_creator",
+            "idPrefix": "c",
+            "timestamps": False,
+            "write": ["creator"],
+            "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
+        }
+    )
+    my = store.generate_ddl("mysql", ["DdlCreator"])
+    pg = store.generate_ddl("postgres", ["DdlCreator"])
+    lite = store.generate_ddl("sqlite", ["DdlCreator"])
 
-    assert '`created_by` VARCHAR(255)' in my
+    assert "`created_by` VARCHAR(255)" in my
     assert '"created_by" TEXT' in pg
     assert '"created_by" TEXT' in lite
 
 
 def test_ddl_creator_permission_keeps_declared_type():
     """已声明 createdBy 时沿用声明类型，不重复建列。"""
-    store.register({
-        'name': 'DdlCreatorDecl', 'collection': 'ddl_creator_decl', 'idPrefix': 'c',
-        'timestamps': False, 'read': ['creator'],
-        'fields': {
-            '_id': {'type': 'string'},
-            'createdBy': {'type': 'string'},
-        },
-    })
-    sql = store.generate_ddl('mysql', ['DdlCreatorDecl'])
+    store.register(
+        {
+            "name": "DdlCreatorDecl",
+            "collection": "ddl_creator_decl",
+            "idPrefix": "c",
+            "timestamps": False,
+            "read": ["creator"],
+            "fields": {
+                "_id": {"type": "string"},
+                "createdBy": {"type": "string"},
+            },
+        }
+    )
+    sql = store.generate_ddl("mysql", ["DdlCreatorDecl"])
 
-    assert sql.count('`created_by`') == 1, sql
+    assert sql.count("`created_by`") == 1, sql
 
 
 def test_ddl_present_overflow_emits_feedback():
     events = []
     feedback.set_sink(events.append)
-    fields = {'_id': {'type': 'string'}}
+    fields = {"_id": {"type": "string"}}
     for i in range(40):
-        fields[f'verylongfieldname{i:02d}'] = {'type': 'string'}
-    store.register({
-        'name': 'DdlWide', 'collection': 'ddl_wide', 'idPrefix': 'w', 'timestamps': False,
-        'fields': fields,
-    })
-    store.generate_ddl('mysql', ['DdlWide'])
+        fields[f"verylongfieldname{i:02d}"] = {"type": "string"}
+    store.register(
+        {
+            "name": "DdlWide",
+            "collection": "ddl_wide",
+            "idPrefix": "w",
+            "timestamps": False,
+            "fields": fields,
+        }
+    )
+    store.generate_ddl("mysql", ["DdlWide"])
 
-    assert any(e.get('code') == 'ddlPresentOverflow' for e in events), events
+    assert any(e.get("code") == "ddlPresentOverflow" for e in events), events
 
 
 def test_ddl_text_field_uses_backend_long_text():
@@ -607,48 +731,67 @@ def test_ddl_text_field_uses_backend_long_text():
     长字符串（任务序列化状态、base64、正文等数 KB 起步）此前只能声明 string，
     而 string 在 MySQL 侧固定 VARCHAR(255)，宿主被迫在建表后手改列型（绕过 DDL 真源）。
     """
-    store.register({
-        'name': 'DdlText', 'collection': 'ddl_text', 'idPrefix': 'x', 'timestamps': False,
-        'fields': {'_id': {'type': 'string'}, 'payload': {'type': 'text'}},
-    })
-    my = store.generate_ddl('mysql', ['DdlText'])
-    pg = store.generate_ddl('postgres', ['DdlText'])
-    lite = store.generate_ddl('sqlite', ['DdlText'])
+    store.register(
+        {
+            "name": "DdlText",
+            "collection": "ddl_text",
+            "idPrefix": "x",
+            "timestamps": False,
+            "fields": {"_id": {"type": "string"}, "payload": {"type": "text"}},
+        }
+    )
+    my = store.generate_ddl("mysql", ["DdlText"])
+    pg = store.generate_ddl("postgres", ["DdlText"])
+    lite = store.generate_ddl("sqlite", ["DdlText"])
 
-    assert '`payload` MEDIUMTEXT' in my
+    assert "`payload` MEDIUMTEXT" in my
     assert '"payload" TEXT' in pg
     assert '"payload" TEXT' in lite
 
 
 # ─── ③ 两步化 claim / compareAndSet：SQL 文本占位符回填 ─────────
 
+
 class _TwoStepCore:
     """dialect_translate 桩：返回 core 在 MySQL 侧产出的两条 stmt（首条取 _id、次条占位）"""
 
     def dialect_translate(self, kind, cmd):
-        return {'stmts': [
-            {'text': 'SELECT _id FROM claim_jobs WHERE status = 0 LIMIT 2'},
-            {'text': 'UPDATE claim_jobs SET status = 1 WHERE _id IN (___claimed_ids___)'},
-        ]}
+        return {
+            "stmts": [
+                {"text": "SELECT _id FROM claim_jobs WHERE status = 0 LIMIT 2"},
+                {
+                    "text": "UPDATE claim_jobs SET status = 1 WHERE _id IN (___claimed_ids___)"
+                },
+            ]
+        }
 
 
 def test_two_step_claim_backfills_sql_text_placeholder(monkeypatch):
     calls = []
 
     async def fake_exec(plan):
-        calls.append([dict(s) for s in plan['stmts']])
+        calls.append([dict(s) for s in plan["stmts"]])
         if len(calls) == 1:
-            return {'rows': [{'_id': 'a1'}, {'_id': 'a2'}], 'affectedRows': 0, 'insertId': None}
-        return {'rows': [], 'affectedRows': 2, 'insertId': None}
+            return {
+                "rows": [{"_id": "a1"}, {"_id": "a2"}],
+                "affectedRows": 0,
+                "insertId": None,
+            }
+        return {"rows": [], "affectedRows": 2, "insertId": None}
 
-    monkeypatch.setattr(datasource, 'get_core', lambda: _TwoStepCore())
-    out = _run(datasource._exec_sql_direct(
-        'default', {'kind': 'mysql', 'exec': fake_exec},
-        {'kind': 'updateMany', 'collection': 'claim_jobs', 'filter': {}}))
+    monkeypatch.setattr(datasource, "get_core", lambda: _TwoStepCore())
+    out = _run(
+        datasource._exec_sql_direct(
+            "default",
+            {"kind": "mysql", "exec": fake_exec},
+            {"kind": "updateMany", "collection": "claim_jobs", "filter": {}},
+        )
+    )
 
     # 置标语句的占位符必须按首条取回的 _id 回填，否则 MySQL 报 1054 Unknown column
-    assert calls[1][0]['text'] == (
-        "UPDATE claim_jobs SET status = 1 WHERE _id IN ('a1','a2')"), calls
+    assert calls[1][0]["text"] == (
+        "UPDATE claim_jobs SET status = 1 WHERE _id IN ('a1','a2')"
+    ), calls
     assert out.modified_count == 2
 
 
@@ -656,19 +799,24 @@ def test_two_step_claim_zero_rows_skips_marker_stmt(monkeypatch):
     calls = []
 
     async def fake_exec(plan):
-        calls.append([dict(s) for s in plan['stmts']])
-        return {'rows': [], 'affectedRows': 0, 'insertId': None}
+        calls.append([dict(s) for s in plan["stmts"]])
+        return {"rows": [], "affectedRows": 0, "insertId": None}
 
-    monkeypatch.setattr(datasource, 'get_core', lambda: _TwoStepCore())
-    out = _run(datasource._exec_sql_direct(
-        'default', {'kind': 'mysql', 'exec': fake_exec},
-        {'kind': 'updateMany', 'collection': 'claim_jobs', 'filter': {}}))
+    monkeypatch.setattr(datasource, "get_core", lambda: _TwoStepCore())
+    out = _run(
+        datasource._exec_sql_direct(
+            "default",
+            {"kind": "mysql", "exec": fake_exec},
+            {"kind": "updateMany", "collection": "claim_jobs", "filter": {}},
+        )
+    )
 
-    assert len(calls) == 1          # 零领取：不执行置标语句（与 run_atomic_commands 一致）
+    assert len(calls) == 1  # 零领取：不执行置标语句（与 run_atomic_commands 一致）
     assert out.modified_count == 0
 
 
 # ─── ④ execute_native：$merge/$out 写管道的连接路由（A3） ────────────
+
 
 class _RecordingSession:
     """会话桩：只记录 conn_for 的 is_write 参数，然后中断以证明调用发生"""
@@ -678,13 +826,13 @@ class _RecordingSession:
 
     async def conn_for(self, source, is_write):
         self.calls.append((source, is_write))
-        raise RuntimeError('MARK-resolve')
+        raise RuntimeError("MARK-resolve")
 
 
 def test_pipeline_writes_detects_merge_and_out():
-    assert datasource.pipeline_writes([{'$match': {}}, {'$out': 'x'}])
-    assert datasource.pipeline_writes([{'$merge': {'into': 'x'}}])
-    assert not datasource.pipeline_writes([{'$match': {}}, {'$sort': {'a': 1}}])
+    assert datasource.pipeline_writes([{"$match": {}}, {"$out": "x"}])
+    assert datasource.pipeline_writes([{"$merge": {"into": "x"}}])
+    assert not datasource.pipeline_writes([{"$match": {}}, {"$sort": {"a": 1}}])
     assert not datasource.pipeline_writes([])
 
 
@@ -693,19 +841,19 @@ def test_execute_native_write_pipeline_routes_to_write_path():
     sess = _RecordingSession()
     token = datasource._current_session.set(sess)
     try:
-        with pytest.raises(RuntimeError, match='MARK-resolve'):
-            _run(datasource.execute_native('default', 'c', [{'$out': 'x'}]))
+        with pytest.raises(RuntimeError, match="MARK-resolve"):
+            _run(datasource.execute_native("default", "c", [{"$out": "x"}]))
     finally:
         datasource._current_session.reset(token)
-    assert sess.calls == [('default', True)]
+    assert sess.calls == [("default", True)]
 
 
 def test_execute_native_read_pipeline_stays_read_path():
     sess = _RecordingSession()
     token = datasource._current_session.set(sess)
     try:
-        with pytest.raises(RuntimeError, match='MARK-resolve'):
-            _run(datasource.execute_native('default', 'c', [{'$match': {}}]))
+        with pytest.raises(RuntimeError, match="MARK-resolve"):
+            _run(datasource.execute_native("default", "c", [{"$match": {}}]))
     finally:
         datasource._current_session.reset(token)
-    assert sess.calls == [('default', False)]
+    assert sess.calls == [("default", False)]

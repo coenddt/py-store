@@ -6,7 +6,7 @@ impl_name 用 snake_case（§6.1）；与 schema 逻辑 fnRef（默认 ``<name>.
 
 
 def order_total(item, ctx=None):
-    return int(item.get('qty', 0)) * int(item.get('price', 0))
+    return int(item.get("qty", 0)) * int(item.get("price", 0))
 
 
 # A6：schema `fnRef="Order.total"` ⇒ 此处 `order_total` 归一后同为 [order, total]

@@ -18,20 +18,28 @@ from .write import apply_write_computes
 
 async def _mutation_one(schema_name, data, now, route_override=None):
     """mutation 单条：规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
-    plan = _call(lambda: get_core().plan_mutation(
-        schema_name, data, now, _new_id_pool(schema_name, data), _ctx(), route_override))
+    plan = _call(
+        lambda: get_core().plan_mutation(
+            schema_name,
+            data,
+            now,
+            _new_id_pool(schema_name, data),
+            _ctx(),
+            route_override,
+        )
+    )
 
     # §11.4 静默点收口：规划期降级（如关系不可读被跳过）走统一反馈通道，禁止静默失守
-    for d in plan.get('degraded') or []:
-        _emit_feedback(dict(d or {}, type='mutation_degraded'))
+    for d in plan.get("degraded") or []:
+        _emit_feedback(dict(d or {}, type="mutation_degraded"))
 
     async def _run_steps():
         resolved: list = []
         root_result = None
-        for i, step in enumerate(plan['steps']):
-            cmd = resolve_placeholders(step['command'], steps=resolved)
+        for i, step in enumerate(plan["steps"]):
+            cmd = resolve_placeholders(step["command"], steps=resolved)
             result = await _exec(cmd)
-            resolved.append(result.get('_id') if result else None)
+            resolved.append(result.get("_id") if result else None)
             if i == 0:
                 root_result = result  # 首步即根写入
 
@@ -76,8 +84,17 @@ async def upsert(schema_name, condition, data, options=None, route_override=None
     与 mutation 不同，upsert 需要调用方显式提供 match 条件，不处理父子关系。
     """
     s = _get_schema(schema_name)
-    plan = _call(lambda: get_core().plan_upsert(
-        schema_name, condition, data, options, _now_for(schema_name),
-        _generate_id(s) if s['idPrefix'] else '', _ctx(), route_override))
-    result = await _exec(plan['command'])
+    plan = _call(
+        lambda: get_core().plan_upsert(
+            schema_name,
+            condition,
+            data,
+            options,
+            _now_for(schema_name),
+            _generate_id(s) if s["idPrefix"] else "",
+            _ctx(),
+            route_override,
+        )
+    )
+    result = await _exec(plan["command"])
     return await apply_write_computes(schema_name, result) if result else None

@@ -22,9 +22,10 @@ def _run_in_sqlite(body):
         from py_store import datasource as _ds
         from py_store import executors, init, store
         from py_store import metadef as md
+
         md.ensure_builtins()
         prev = dict(_ds._connections)
-        db = await aiosqlite.connect(':memory:')
+        db = await aiosqlite.connect(":memory:")
         await db.executescript("""
             CREATE TABLE r2_null (
               _id TEXT PRIMARY KEY, title TEXT, nick TEXT, __present TEXT
@@ -44,27 +45,53 @@ def _run_in_sqlite(body):
             INSERT INTO r2_allow VALUES ('a1', 't', 's', ',_id,title,secret,');
         """)
         await db.commit()
-        _sc.register({
-            'name': 'R2Null', 'collection': 'r2_null', 'idPrefix': 'rn', 'timestamps': False,
-            'fields': {
-                '_id': {'type': 'string'},
-                'title': {'type': 'string'},
-                'nick': {'type': 'string', 'default': 'anon'},
-            },
-        })
+        _sc.register(
+            {
+                "name": "R2Null",
+                "collection": "r2_null",
+                "idPrefix": "rn",
+                "timestamps": False,
+                "fields": {
+                    "_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "nick": {"type": "string", "default": "anon"},
+                },
+            }
+        )
         # E1 用：denyRead 显式拒绝 / RBAC 无授权 / 有权通过 / 字段白名单
         # 6.0.0 语义：``read: []`` 表示「未配置」（不限制），显式拒绝读必须写 ``denyRead: True``。
-        _sc.register({'name': 'R2Deny', 'collection': 'r2_deny', 'timestamps': False,
-                      'denyRead': True,
-                      'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}}})
-        _sc.register({'name': 'R2Rbac', 'collection': 'r2_rbac', 'timestamps': False,
-                      'read': ['viewer'],
-                      'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'}}})
-        _sc.register({'name': 'R2Allow', 'collection': 'r2_allow', 'timestamps': False,
-                      'read': ['viewer'],
-                      'fields': {'_id': {'type': 'string'}, 'title': {'type': 'string'},
-                                 'secret': {'type': 'string'}}})
-        await init({'default': executors.create_connection('sqlite', db)})
+        _sc.register(
+            {
+                "name": "R2Deny",
+                "collection": "r2_deny",
+                "timestamps": False,
+                "denyRead": True,
+                "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
+            }
+        )
+        _sc.register(
+            {
+                "name": "R2Rbac",
+                "collection": "r2_rbac",
+                "timestamps": False,
+                "read": ["viewer"],
+                "fields": {"_id": {"type": "string"}, "title": {"type": "string"}},
+            }
+        )
+        _sc.register(
+            {
+                "name": "R2Allow",
+                "collection": "r2_allow",
+                "timestamps": False,
+                "read": ["viewer"],
+                "fields": {
+                    "_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "secret": {"type": "string"},
+                },
+            }
+        )
+        await init({"default": executors.create_connection("sqlite", db)})
         try:
             return await body(store, db)
         finally:
@@ -75,22 +102,24 @@ def _run_in_sqlite(body):
 
 
 def test_set_context_rejects_internal():
-    with pytest.raises(perm.PermissionError, match=r'ctx\.internal 属可信标记'):
-        perm.set_context({'userId': 'u1', 'roles': ['creator'], 'internal': True})
+    with pytest.raises(perm.PermissionError, match=r"ctx\.internal 属可信标记"):
+        perm.set_context({"userId": "u1", "roles": ["creator"], "internal": True})
 
 
 def test_scoped_context_rejects_internal():
-    with pytest.raises(perm.PermissionError, match=r'ctx\.internal 属可信标记'):
-        with perm.scoped_context({'userId': 'u1', 'internal': True}):
+    with pytest.raises(perm.PermissionError, match=r"ctx\.internal 属可信标记"):
+        with perm.scoped_context({"userId": "u1", "internal": True}):
             pass
 
 
 def test_update_returns_preserve_explicit_null():
     async def body(store, db):
-        ret = await store.update('R2Null', {'_id': 'rn1'}, {'title': 't1'})
-        assert ret['title'] == 't1'
-        assert ret['nick'] is None, f'returns 的 nick 应保持落库值 null，实际 {ret["nick"]!r}'
-        cur = await db.execute('SELECT nick FROM r2_null WHERE _id = ?', ('rn1',))
+        ret = await store.update("R2Null", {"_id": "rn1"}, {"title": "t1"})
+        assert ret["title"] == "t1"
+        assert ret["nick"] is None, (
+            f"returns 的 nick 应保持落库值 null，实际 {ret['nick']!r}"
+        )
+        cur = await db.execute("SELECT nick FROM r2_null WHERE _id = ?", ("rn1",))
         row = await cur.fetchone()
         assert row[0] is None
 
@@ -99,10 +128,10 @@ def test_update_returns_preserve_explicit_null():
 
 def test_exists_deny_read_denied():
     async def body(store, db):
-        perm.set_context({'userId': 'u1', 'roles': ['viewer']})
+        perm.set_context({"userId": "u1", "roles": ["viewer"]})
         try:
-            with pytest.raises(perm.PermissionError, match='无访问权限'):
-                await store.exists('R2Deny', {'_id': 'd1'})
+            with pytest.raises(perm.PermissionError, match="无访问权限"):
+                await store.exists("R2Deny", {"_id": "d1"})
         finally:
             perm.set_context(None)
 
@@ -111,18 +140,24 @@ def test_exists_deny_read_denied():
 
 def test_exists_rbac_denied():
     _POLICY = {
-        'mode': 'enforce',
-        'roles': {'viewer': {}},
-        'grants': [{'role': 'viewer', 'model': 'R2Allow', 'actions': ['read'],
-                    'readFields': ['_id', 'title']}],
+        "mode": "enforce",
+        "roles": {"viewer": {}},
+        "grants": [
+            {
+                "role": "viewer",
+                "model": "R2Allow",
+                "actions": ["read"],
+                "readFields": ["_id", "title"],
+            }
+        ],
     }
 
     async def body(store, db):
         store.set_rbac(_POLICY)
-        perm.set_context({'userId': 'u1', 'roles': ['viewer']})
+        perm.set_context({"userId": "u1", "roles": ["viewer"]})
         try:
             with pytest.raises(perm.PermissionError):
-                await store.exists('R2Rbac', {'_id': 'r1'})
+                await store.exists("R2Rbac", {"_id": "r1"})
         finally:
             perm.set_context(None)
             store.set_rbac(None)
@@ -132,17 +167,23 @@ def test_exists_rbac_denied():
 
 def test_exists_allowed():
     _POLICY = {
-        'mode': 'enforce',
-        'roles': {'viewer': {}},
-        'grants': [{'role': 'viewer', 'model': 'R2Allow', 'actions': ['read'],
-                    'readFields': ['_id', 'title']}],
+        "mode": "enforce",
+        "roles": {"viewer": {}},
+        "grants": [
+            {
+                "role": "viewer",
+                "model": "R2Allow",
+                "actions": ["read"],
+                "readFields": ["_id", "title"],
+            }
+        ],
     }
 
     async def body(store, db):
         store.set_rbac(_POLICY)
-        perm.set_context({'userId': 'u1', 'roles': ['viewer']})
+        perm.set_context({"userId": "u1", "roles": ["viewer"]})
         try:
-            assert await store.exists('R2Allow', {'title': 't'}) is True
+            assert await store.exists("R2Allow", {"title": "t"}) is True
         finally:
             perm.set_context(None)
             store.set_rbac(None)
@@ -150,23 +191,32 @@ def test_exists_allowed():
     _run_in_sqlite(body)
 
 
-@pytest.mark.skip(reason='core plan_exists_with_ctx 仅校验表级 read/RBAC（rust-store/core/src/command/write.rs:186-205），'
-                         '条件字段白名单未校验 —— 跨方向项')
+@pytest.mark.skip(
+    reason="core plan_exists_with_ctx 仅校验表级 read/RBAC（rust-store/core/src/command/write.rs:186-205），"
+    "条件字段白名单未校验 —— 跨方向项"
+)
 def test_exists_rejects_condition_on_unreadable_field():
     _POLICY = {
-        'mode': 'enforce',
-        'roles': {'viewer': {}},
-        'grants': [{'role': 'viewer', 'model': 'R2Allow', 'actions': ['read'],
-                    'readFields': ['_id', 'title']}],
+        "mode": "enforce",
+        "roles": {"viewer": {}},
+        "grants": [
+            {
+                "role": "viewer",
+                "model": "R2Allow",
+                "actions": ["read"],
+                "readFields": ["_id", "title"],
+            }
+        ],
     }
 
     async def body(store, db):
         from py_store import store as _store
+
         _store.set_rbac(_POLICY)
-        perm.set_context({'userId': 'u1', 'roles': ['viewer']})
+        perm.set_context({"userId": "u1", "roles": ["viewer"]})
         try:
             with pytest.raises(perm.PermissionError):
-                await store.exists('R2Allow', {'secret': 's'})
+                await store.exists("R2Allow", {"secret": "s"})
         finally:
             perm.set_context(None)
             _store.set_rbac(None)

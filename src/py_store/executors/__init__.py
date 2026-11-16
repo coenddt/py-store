@@ -12,14 +12,14 @@ SQL 执行器注册与结果塑形（Phase 4）
 
 from . import mongo, mysql, postgres, sqlite
 
-_BACKENDS = {'mysql': mysql, 'postgres': postgres, 'sqlite': sqlite}
+_BACKENDS = {"mysql": mysql, "postgres": postgres, "sqlite": sqlite}
 
 
 def create_connection(kind, driver, options=None):
     """创建 SQL 数据源连接描述符 ``{'kind', 'exec'}``（driver 为对应驱动实例/连接）"""
     mod = _BACKENDS.get(kind)
     if mod is None:
-        raise ValueError(f'未知 SQL 后端: {kind}（支持 mysql/postgres/sqlite）')
+        raise ValueError(f"未知 SQL 后端: {kind}（支持 mysql/postgres/sqlite）")
     return mod.create(driver, options)
 
 
@@ -37,12 +37,12 @@ async def open_acquire(driver):
       - 单连接（无 ``acquire``）→ 直用 driver，release 为 no-op。
     asyncpg / mysql 执行器的显式事务句柄均以此为基础（禁第二套 checkout 路径）。
     """
-    acquire_fn = getattr(driver, 'acquire', None)
+    acquire_fn = getattr(driver, "acquire", None)
     if acquire_fn is None:
         return driver, _noop_release
 
     got = acquire_fn()
-    if hasattr(got, '__aenter__'):
+    if hasattr(got, "__aenter__"):
         conn = await got.__aenter__()
         released = False
 
@@ -63,7 +63,7 @@ async def open_acquire(driver):
         if released:
             return
         released = True
-        release_fn = getattr(driver, 'release', None)
+        release_fn = getattr(driver, "release", None)
         if release_fn is not None:
             await release_fn(conn)
 
@@ -75,7 +75,9 @@ class UpdateResult:
 
     def __init__(self, modified_count, matched_count=None):
         self.modified_count = modified_count
-        self.matched_count = matched_count if matched_count is not None else modified_count
+        self.matched_count = (
+            matched_count if matched_count is not None else modified_count
+        )
 
 
 class DeleteResult:
@@ -106,45 +108,49 @@ def shape_result(cmd, out):
     ``deleted_count``）暴露，故 SQL 路径回喂同形对象；这与 JS 侧 ``shapeResult`` 返回
     ``{modifiedCount}`` / ``{deletedCount}`` 是**各自驱动等价**，上层 ``crud/*`` 语义一致。
     """
-    kind = cmd.get('kind')
-    if kind in ('find', 'aggregate'):
-        return out.get('docs') or []
-    if kind in ('findOne', 'findOneAndUpdate'):
-        docs = out.get('docs') or []
+    kind = cmd.get("kind")
+    if kind in ("find", "aggregate"):
+        return out.get("docs") or []
+    if kind in ("findOne", "findOneAndUpdate"):
+        docs = out.get("docs") or []
         return docs[0] if docs else None
-    if kind == 'countDocuments':
-        return _scalar(out.get('rows'))
-    if kind == 'insertOne':
-        doc = cmd.get('doc')
+    if kind == "countDocuments":
+        return _scalar(out.get("rows"))
+    if kind == "insertOne":
+        doc = cmd.get("doc")
         # 阶段2：autoincrement 主键 —— doc 无 `_id`（core 不注入）→ 从执行包络回读
         # 自增值（PG/SQLite RETURNING 走 rows；MySQL/SQLite lastrowid 走 insertId）。
         # 包络两者皆无 → 保持无 `_id` 返回（SQL 侧不该发生；Mongo 路径已在执行器报错）。
-        if isinstance(doc, dict) and not doc.get('_id'):
+        if isinstance(doc, dict) and not doc.get("_id"):
             rid = None
-            if out.get('rows') and isinstance(out['rows'][0], dict) and '_id' in out['rows'][0]:
-                rid = out['rows'][0]['_id']
-            elif out.get('insertId') is not None:
-                rid = out['insertId']
+            if (
+                out.get("rows")
+                and isinstance(out["rows"][0], dict)
+                and "_id" in out["rows"][0]
+            ):
+                rid = out["rows"][0]["_id"]
+            elif out.get("insertId") is not None:
+                rid = out["insertId"]
             if rid is not None:
-                return {**doc, '_id': rid}
+                return {**doc, "_id": rid}
         return doc
-    if kind == 'insertMany':
-        return {'insertedCount': len(cmd.get('docs') or [])}
-    if kind == 'updateMany':
-        return UpdateResult(out.get('affectedRows'))
-    if kind == 'deleteMany':
-        return DeleteResult(out.get('affectedRows'))
+    if kind == "insertMany":
+        return {"insertedCount": len(cmd.get("docs") or [])}
+    if kind == "updateMany":
+        return UpdateResult(out.get("affectedRows"))
+    if kind == "deleteMany":
+        return DeleteResult(out.get("affectedRows"))
     return out
 
 
 __all__ = [
-    'DeleteResult',
-    'UpdateResult',
-    'create_connection',
-    'mongo',
-    'mysql',
-    'open_acquire',
-    'postgres',
-    'shape_result',
-    'sqlite',
+    "DeleteResult",
+    "UpdateResult",
+    "create_connection",
+    "mongo",
+    "mysql",
+    "open_acquire",
+    "postgres",
+    "shape_result",
+    "sqlite",
 ]

@@ -17,27 +17,57 @@ from py_store import schema as _sc
 def _register_test_schemas():
     """模块 schema 注册入口（conftest 模块隔离夹具在首用例前调用；import 零副作用）"""
     # 内置最小 schema（与业务工程 CommercialLedger 同构）
-    _sc.register({
-        'name': 'CommercialLedger', 'collection': 'commercial_ledger', 'idPrefix': 'CL', 'timestamps': True,
-        'fields': {'unit': 'string', 'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
-    })
-    _sc.register({
-        'name': 'GoalLedger', 'collection': 'goal_ledger', 'idPrefix': 'GL', 'timestamps': True,
-        'fields': {'income': 'float'}, 'relations': {}, 'read': None, 'write': None,
-    })
+    _sc.register(
+        {
+            "name": "CommercialLedger",
+            "collection": "commercial_ledger",
+            "idPrefix": "CL",
+            "timestamps": True,
+            "fields": {"unit": "string", "income": "float"},
+            "relations": {},
+            "read": None,
+            "write": None,
+        }
+    )
+    _sc.register(
+        {
+            "name": "GoalLedger",
+            "collection": "goal_ledger",
+            "idPrefix": "GL",
+            "timestamps": True,
+            "fields": {"income": "float"},
+            "relations": {},
+            "read": None,
+            "write": None,
+        }
+    )
     # 权限相关
-    _sc.register({
-        'name': 'PermModel', 'collection': 'perm_model', 'timestamps': False,
-        'fields': {
-            'a': {'type': 'string'},
-            'b': {'type': 'string', 'read': ['admin'], 'write': ['admin']},
-        },
-        'relations': {}, 'computes': {}, 'read': ['seller'], 'write': ['seller'],
-    })
-    _sc.register({
-        'name': 'OwnerModel', 'collection': 'owner_model', 'timestamps': False,
-        'fields': {'a': 'string'}, 'relations': {}, 'computes': {}, 'read': ['creator'],
-    })
+    _sc.register(
+        {
+            "name": "PermModel",
+            "collection": "perm_model",
+            "timestamps": False,
+            "fields": {
+                "a": {"type": "string"},
+                "b": {"type": "string", "read": ["admin"], "write": ["admin"]},
+            },
+            "relations": {},
+            "computes": {},
+            "read": ["seller"],
+            "write": ["seller"],
+        }
+    )
+    _sc.register(
+        {
+            "name": "OwnerModel",
+            "collection": "owner_model",
+            "timestamps": False,
+            "fields": {"a": "string"},
+            "relations": {},
+            "computes": {},
+            "read": ["creator"],
+        }
+    )
 
 
 def _run(coro):
@@ -48,92 +78,100 @@ def _run(coro):
 # schema 镜像（薄适配层：core.register + Host 元数据 + 归档表派生）
 # ─────────────────────────────────────────────────────────────
 
+
 def test_schema_mirror_and_archive():
-    s = _sc.get('CommercialLedger')
-    assert s['idPrefix'] == 'CL'
-    assert s['collection'] == 'commercial_ledger'
+    s = _sc.get("CommercialLedger")
+    assert s["idPrefix"] == "CL"
+    assert s["collection"] == "commercial_ledger"
     # 自动派生归档表镜像
-    assert _sc.has('CommercialLedgerDeleted') is True
-    assert 'CommercialLedgerDeleted' in _sc.list()
-    assert _sc.get('CommercialLedgerDeleted')['collection'] == 'commercial_ledger_deleted'
+    assert _sc.has("CommercialLedgerDeleted") is True
+    assert "CommercialLedgerDeleted" in _sc.list()
+    assert (
+        _sc.get("CommercialLedgerDeleted")["collection"] == "commercial_ledger_deleted"
+    )
 
 
 def test_schema_get_unregistered_raises():
     try:
-        _sc.get('NotRegistered')
+        _sc.get("NotRegistered")
     except KeyError as e:
-        assert '未注册' in str(e)
+        assert "未注册" in str(e)
     else:
-        raise AssertionError('应抛出 KeyError')
+        raise AssertionError("应抛出 KeyError")
 
 
 def test_store_snake_only():
     from py_store import store
+
     # 蛇形：显式方法（D12 / A8 后的唯一定名）
     assert callable(store.query) and callable(store.query_one)
     assert callable(store.query_with_count) and callable(store.build_pipeline)
     # 驼峰别名已按 D12 / A8 移除（仅保留蛇形）
-    assert not hasattr(store, 'queryOne')
-    assert not hasattr(store, 'queryWithCount')
-    assert not hasattr(store, 'buildPipeline')
-    assert store.register is _sc.register                               # 其余 API：显式绑定
+    assert not hasattr(store, "queryOne")
+    assert not hasattr(store, "queryWithCount")
+    assert not hasattr(store, "buildPipeline")
+    assert store.register is _sc.register  # 其余 API：显式绑定
     assert store.PermissionError is perm.PermissionError
-    assert not hasattr(store, 'quer')                                   # 拼错属性即 AttributeError
+    assert not hasattr(store, "quer")  # 拼错属性即 AttributeError
 
 
 # ─────────────────────────────────────────────────────────────
 # 权限上下文 + core 权限方法包装
 # ─────────────────────────────────────────────────────────────
 
+
 def test_perm_scoped_roles_and_run_as_internal():
     perm.set_context(None)
-    with perm.scoped_roles(['seller']):
-        assert perm.get_context()['roles'] == ['seller']
+    with perm.scoped_roles(["seller"]):
+        assert perm.get_context()["roles"] == ["seller"]
     assert perm.get_context() is None  # 退出恢复原上下文
 
     async def _inner():
-        return perm.get_context().get('internal')
+        return perm.get_context().get("internal")
 
     assert _run(perm.run_as_internal(_inner)) is True
 
 
 def test_perm_schema_read_write():
-    s = _sc.get('PermModel')
-    assert perm.can_read_schema(s, {'roles': ['seller']}) is True
+    s = _sc.get("PermModel")
+    assert perm.can_read_schema(s, {"roles": ["seller"]}) is True
     # 清单化语义（设计 §11.5）：admin 不再默认放行——不在白名单即拒，显式豁免后直通
-    assert perm.can_read_schema(s, {'roles': ['admin']}) is False
-    assert perm.can_read_schema(s, {'roles': ['guest']}) is False
-    assert perm.can_write_schema(s, {'roles': ['seller']}) is True
-    assert perm.can_write_schema(s, {'roles': ['guest']}) is False
-    perm.set_exempt_roles(['admin'])
-    assert perm.can_read_schema(s, {'roles': ['admin']}) is True
+    assert perm.can_read_schema(s, {"roles": ["admin"]}) is False
+    assert perm.can_read_schema(s, {"roles": ["guest"]}) is False
+    assert perm.can_write_schema(s, {"roles": ["seller"]}) is True
+    assert perm.can_write_schema(s, {"roles": ["guest"]}) is False
+    perm.set_exempt_roles(["admin"])
+    assert perm.can_read_schema(s, {"roles": ["admin"]}) is True
     perm.set_exempt_roles([])
 
 
 def test_perm_owner_condition():
-    s = _sc.get('OwnerModel')
+    s = _sc.get("OwnerModel")
     # admin / internal 不注入，原样返回
-    assert perm.merge_owner_condition(s, {'roles': ['admin']}, {}) == {}
-    assert perm.merge_owner_condition(s, {'internal': True}, {'a': 1}) == {'a': 1}
+    assert perm.merge_owner_condition(s, {"roles": ["admin"]}, {}) == {}
+    assert perm.merge_owner_condition(s, {"internal": True}, {"a": 1}) == {"a": 1}
     # 非 admin 且 read 含 creator → 注入 createdBy
-    out = perm.merge_owner_condition(s, {'roles': ['seller'], 'userId': 'u1'}, None)
-    assert out == {'createdBy': 'u1'}
-    out2 = perm.merge_owner_condition(s, {'roles': ['seller'], 'userId': 'u1'}, {'year': 1})
-    assert out2 == {'$and': [{'year': 1}, {'createdBy': 'u1'}]}
+    out = perm.merge_owner_condition(s, {"roles": ["seller"], "userId": "u1"}, None)
+    assert out == {"createdBy": "u1"}
+    out2 = perm.merge_owner_condition(
+        s, {"roles": ["seller"], "userId": "u1"}, {"year": 1}
+    )
+    assert out2 == {"$and": [{"year": 1}, {"createdBy": "u1"}]}
 
 
 def test_perm_readable_and_writable_fields():
-    s = _sc.get('PermModel')
-    assert perm.get_readable_fields(s, None) is None      # 无上下文 → 不裁剪
-    assert perm.get_readable_fields(s, {'roles': ['seller']}) == ['a']
-    assert perm.get_writable_fields(s, {'roles': ['seller']}) == ['a']
+    s = _sc.get("PermModel")
+    assert perm.get_readable_fields(s, None) is None  # 无上下文 → 不裁剪
+    assert perm.get_readable_fields(s, {"roles": ["seller"]}) == ["a"]
+    assert perm.get_writable_fields(s, {"roles": ["seller"]}) == ["a"]
     # 无上下文 → 不过滤写入数据
-    assert perm.filter_writable_data(s, None, {'a': 1, 'b': 1}) == {'a': 1, 'b': 1}
+    assert perm.filter_writable_data(s, None, {"a": 1, "b": 1}) == {"a": 1, "b": 1}
 
 
 # ─────────────────────────────────────────────────────────────
 # crud 行为测试（mock 驱动）
 # ─────────────────────────────────────────────────────────────
+
 
 class _Result:
     def __init__(self, **kwargs):
@@ -169,7 +207,7 @@ class _MemColl:
 
     async def insert_one(self, doc):
         self.docs.append(doc)
-        return _Result(inserted_id=doc.get('_id'))
+        return _Result(inserted_id=doc.get("_id"))
 
     async def insert_many(self, docs):
         self.docs.extend(docs)
@@ -178,7 +216,7 @@ class _MemColl:
     async def replace_one(self, condition, doc, upsert=False):
         """归档幂等（insertMany + upsertById）走 replaceOne(upsert)"""
         for i, d in enumerate(self.docs):
-            if d.get('_id') == condition.get('_id'):
+            if d.get("_id") == condition.get("_id"):
                 self.docs[i] = dict(doc)
                 return _Result(modified_count=1)
         if upsert:
@@ -190,7 +228,7 @@ class _MemColl:
         for st in update.values():
             if isinstance(st, dict):
                 base.update(st)
-        if options.get('upsert') and not self.docs:
+        if options.get("upsert") and not self.docs:
             self.docs.append(base)
         return base
 
@@ -213,7 +251,7 @@ class _FakeDb:
         self._colls = {}
         if coll is not None:
             # Mongo 物理集合名为 camelCase（core::naming）；逻辑 commercial_ledger → commercialLedger
-            self._colls['commercialLedger'] = coll
+            self._colls["commercialLedger"] = coll
 
     def __getitem__(self, name):
         if name not in self._colls:
@@ -223,7 +261,7 @@ class _FakeDb:
 
 def _crud_mock():
     """读路径 mock：内存 coll + 空权限 ctx"""
-    docs = [{'unit': 'a', 'income': 100.0, '_id': '1'}]
+    docs = [{"unit": "a", "income": 100.0, "_id": "1"}]
     coll = _MemColl(docs)
     perm.set_context(None)
     _crud_mod.set_db(_FakeDb(coll))
@@ -240,16 +278,16 @@ def _crud_w_mock(docs=None):
 
 def test_crud_query_plain_match():
     _crud_mock()
-    items = _run(_crud_mod.query('CommercialLedger{unit, income}'))
-    assert isinstance(items, list) and items[0]['unit'] == 'a'
+    items = _run(_crud_mod.query("CommercialLedger{unit, income}"))
+    assert isinstance(items, list) and items[0]["unit"] == "a"
 
 
 def test_crud_query_one():
     _crud_mock()
-    one = _run(_crud_mod.query_one('CommercialLedger{unit, income}'))
-    assert one and one['unit'] == 'a'
+    one = _run(_crud_mod.query_one("CommercialLedger{unit, income}"))
+    assert one and one["unit"] == "a"
     # GoalLedger 无数据 → null
-    assert _run(_crud_mod.query_one('GoalLedger{income}')) is None
+    assert _run(_crud_mod.query_one("GoalLedger{income}")) is None
 
 
 def test_crud_query_with_count_page():
@@ -259,198 +297,260 @@ def test_crud_query_with_count_page():
         return 200
 
     coll.count_documents = _count200
-    r = _run(_crud_mod.query_with_count(
-        'CommercialLedger($skip:@s,$limit:@l){unit, income}', {'s': 0, 'l': 50}))
-    assert r['total'] == 200
-    assert r['pageSize'] == 50
-    assert r['page'] == 0
+    r = _run(
+        _crud_mod.query_with_count(
+            "CommercialLedger($skip:@s,$limit:@l){unit, income}", {"s": 0, "l": 50}
+        )
+    )
+    assert r["total"] == 200
+    assert r["pageSize"] == 50
+    assert r["page"] == 0
 
 
 def test_crud_query_with_count_pagesize_cap():
     _crud_mock()
-    r = _run(_crud_mod.query_with_count('CommercialLedger{unit}', {'pageSize': 99999, 'page': 0}))
-    assert r['pageSize'] == 5000  # 上限 5000 防拖库
+    r = _run(
+        _crud_mod.query_with_count(
+            "CommercialLedger{unit}", {"pageSize": 99999, "page": 0}
+        )
+    )
+    assert r["pageSize"] == 5000  # 上限 5000 防拖库
 
 
 def test_crud_insert_autoid_timestamp():
     coll = _crud_w_mock()
-    doc = _run(_crud_mod.insert('CommercialLedger', {'unit': 'x', 'income': 9.0}))
-    assert doc['_id'].startswith('CL')
-    assert doc.get('createdAt') and doc.get('updatedAt')
-    assert coll.docs[0]['unit'] == 'x'
+    doc = _run(_crud_mod.insert("CommercialLedger", {"unit": "x", "income": 9.0}))
+    assert doc["_id"].startswith("CL")
+    assert doc.get("createdAt") and doc.get("updatedAt")
+    assert coll.docs[0]["unit"] == "x"
 
 
 def test_crud_insert_many_empty():
     _crud_w_mock()
-    assert _run(_crud_mod.insert_many('CommercialLedger', [])) == []
+    assert _run(_crud_mod.insert_many("CommercialLedger", [])) == []
 
 
 def test_crud_insert_many_fills_ids():
     coll = _crud_w_mock()
-    out = _run(_crud_mod.insert_many('CommercialLedger', [{'unit': 'a'}, {'unit': 'b'}]))
+    out = _run(
+        _crud_mod.insert_many("CommercialLedger", [{"unit": "a"}, {"unit": "b"}])
+    )
     assert len(out) == 2
-    assert all(d['_id'].startswith('CL') for d in out)
+    assert all(d["_id"].startswith("CL") for d in out)
     assert len(coll.docs) == 2
 
 
 def test_crud_update_set_mode():
-    _crud_w_mock([{'_id': '1', 'unit': 'a', 'income': 100.0, 'createdAt': 1, 'updatedAt': 1}])
-    out = _run(_crud_mod.update('CommercialLedger', {'_id': '1'}, {'income': 200.0}))
-    assert out and out['income'] == 200.0
-    assert out.get('updatedAt')
+    _crud_w_mock(
+        [{"_id": "1", "unit": "a", "income": 100.0, "createdAt": 1, "updatedAt": 1}]
+    )
+    out = _run(_crud_mod.update("CommercialLedger", {"_id": "1"}, {"income": 200.0}))
+    assert out and out["income"] == 200.0
+    assert out.get("updatedAt")
 
 
 def test_crud_update_raw_operators():
-    _crud_w_mock([{'_id': '1', 'income': 100.0, 'createdAt': 1, 'updatedAt': 1}])
-    out = _run(_crud_mod.update('CommercialLedger', {'_id': '1'}, {'$inc': {'income': 5}}))
+    _crud_w_mock([{"_id": "1", "income": 100.0, "createdAt": 1, "updatedAt": 1}])
+    out = _run(
+        _crud_mod.update("CommercialLedger", {"_id": "1"}, {"$inc": {"income": 5}})
+    )
     assert out is not None
 
 
 def test_crud_update_empty_set_raises():
-    _crud_w_mock([{'_id': '1', 'unit': 'a'}])
+    _crud_w_mock([{"_id": "1", "unit": "a"}])
     try:
-        _run(_crud_mod.update('CommercialLedger', {'_id': '1'}, {'_id': '1'}))
+        _run(_crud_mod.update("CommercialLedger", {"_id": "1"}, {"_id": "1"}))
     except RuntimeError as e:
-        assert '没有提供要更新的字段' in str(e)
+        assert "没有提供要更新的字段" in str(e)
     else:
-        raise AssertionError('应抛出 RuntimeError')
+        raise AssertionError("应抛出 RuntimeError")
 
 
 def test_crud_update_many_raw_and_set():
-    _crud_w_mock([{'income': 1.0}])
-    r1 = _run(_crud_mod.update_many('CommercialLedger', {'income': 1.0}, {'$inc': {'income': 1}}))
-    assert r1['modifiedCount'] == 1
-    r2 = _run(_crud_mod.update_many('CommercialLedger', {'income': 1.0}, {'income': 2.0}))
-    assert r2['modifiedCount'] == 1
+    _crud_w_mock([{"income": 1.0}])
+    r1 = _run(
+        _crud_mod.update_many(
+            "CommercialLedger", {"income": 1.0}, {"$inc": {"income": 1}}
+        )
+    )
+    assert r1["modifiedCount"] == 1
+    r2 = _run(
+        _crud_mod.update_many("CommercialLedger", {"income": 1.0}, {"income": 2.0})
+    )
+    assert r2["modifiedCount"] == 1
 
 
 def test_crud_remove_archives():
     # CommercialLedger 注册时已自动注册 CommercialLedgerDeleted，归档分支命中
-    coll = _crud_w_mock([{'_id': '1', 'unit': 'a', 'income': 1.0}])
-    r = _run(_crud_mod.remove('CommercialLedger', {'_id': '1'}))
-    assert r['deletedCount'] == 1
-    assert r['archivedCount'] == 1
-    coll.docs = [{'_id': '2', 'unit': 'b'}]
-    r2 = _run(_crud_mod.remove('CommercialLedger', {'_id': '2'}))
-    assert r2['archivedCount'] == 1
+    coll = _crud_w_mock([{"_id": "1", "unit": "a", "income": 1.0}])
+    r = _run(_crud_mod.remove("CommercialLedger", {"_id": "1"}))
+    assert r["deletedCount"] == 1
+    assert r["archivedCount"] == 1
+    coll.docs = [{"_id": "2", "unit": "b"}]
+    r2 = _run(_crud_mod.remove("CommercialLedger", {"_id": "2"}))
+    assert r2["archivedCount"] == 1
 
 
 def test_crud_exists_and_count():
-    _crud_w_mock([{'_id': '1'}])
-    assert _run(_crud_mod.exists('CommercialLedger', {'_id': '1'})) is True
-    assert _run(_crud_mod.count('CommercialLedger', {'_id': '1'})) == 1
+    _crud_w_mock([{"_id": "1"}])
+    assert _run(_crud_mod.exists("CommercialLedger", {"_id": "1"})) is True
+    assert _run(_crud_mod.count("CommercialLedger", {"_id": "1"})) == 1
 
 
 def test_crud_upsert_by_condition():
     _crud_w_mock()
-    out = _run(_crud_mod.upsert('CommercialLedger', {'_id': 'u1'}, {'unit': 'upserted'}))
-    assert out and out['unit'] == 'upserted'
+    out = _run(
+        _crud_mod.upsert("CommercialLedger", {"_id": "u1"}, {"unit": "upserted"})
+    )
+    assert out and out["unit"] == "upserted"
 
 
 def test_crud_upsert_generates_id():
     _crud_w_mock()
-    out = _run(_crud_mod.upsert('CommercialLedger', {'year': 2026}, {'unit': 'x'}))
-    assert out and out['_id'].startswith('CL')
+    out = _run(_crud_mod.upsert("CommercialLedger", {"year": 2026}, {"unit": "x"}))
+    assert out and out["_id"].startswith("CL")
 
 
 def test_crud_mutation_single_and_array():
     _crud_w_mock()
-    single = _run(_crud_mod.mutation('CommercialLedger', {'year': 2026, 'unit': 'solo'}))
-    assert single and single['_id'].startswith('CL')
-    arr = _run(_crud_mod.mutation('CommercialLedger', [{'unit': 'a'}, {'unit': 'b'}]))
+    single = _run(
+        _crud_mod.mutation("CommercialLedger", {"year": 2026, "unit": "solo"})
+    )
+    assert single and single["_id"].startswith("CL")
+    arr = _run(_crud_mod.mutation("CommercialLedger", [{"unit": "a"}, {"unit": "b"}]))
     assert isinstance(arr, list) and len(arr) == 2
 
 
 def test_crud_mutation_empty_array():
     _crud_w_mock()
-    assert _run(_crud_mod.mutation('CommercialLedger', [])) == []
+    assert _run(_crud_mod.mutation("CommercialLedger", [])) == []
 
 
 # ─────────────────────────────────────────────────────────────
 # 扩展守卫：timestamps 单位 / feedback 事件
 # ─────────────────────────────────────────────────────────────
 
+
 def test_schema_timestamp_unit_seconds_insert():
     # timestamps: 's' → Host 时钟注入秒级时间戳（< 10 位量级）
-    _sc.register({
-        'name': 'SecLedger', 'collection': 'sec_ledger', 'idPrefix': 'SEC', 'timestamps': 's',
-        'fields': {'unit': 'string'}, 'relations': {}, 'read': None, 'write': None,
-    })
-    assert _sc.get('SecLedger')['timestampUnit'] == 's'
+    _sc.register(
+        {
+            "name": "SecLedger",
+            "collection": "sec_ledger",
+            "idPrefix": "SEC",
+            "timestamps": "s",
+            "fields": {"unit": "string"},
+            "relations": {},
+            "read": None,
+            "write": None,
+        }
+    )
+    assert _sc.get("SecLedger")["timestampUnit"] == "s"
     _crud_w_mock()
-    doc = _run(_crud_mod.insert('SecLedger', {'unit': 'x'}))
-    assert 0 < doc['createdAt'] < 10 ** 10
-    assert 0 < doc['updatedAt'] < 10 ** 10
+    doc = _run(_crud_mod.insert("SecLedger", {"unit": "x"}))
+    assert 0 < doc["createdAt"] < 10**10
+    assert 0 < doc["updatedAt"] < 10**10
 
 
 def test_schema_timestamp_unit_ms_default():
     # 缺省 timestamps: true → 毫秒级（13 位量级）
     _crud_w_mock()
-    doc = _run(_crud_mod.insert('CommercialLedger', {'unit': 'x', 'income': 1.0}))
-    assert doc['createdAt'] >= 10 ** 12
+    doc = _run(_crud_mod.insert("CommercialLedger", {"unit": "x", "income": 1.0}))
+    assert doc["createdAt"] >= 10**12
 
 
 def test_schema_register_rejects_invalid_timestamps():
     # 行为收紧：原先任意非 false 值放行，现非法值注册即报错（core 校验）
     try:
-        _sc.register({
-            'name': 'BadLedger', 'collection': 'bad_ledger', 'timestamps': 'years',
-            'fields': {}, 'relations': {},
-        })
+        _sc.register(
+            {
+                "name": "BadLedger",
+                "collection": "bad_ledger",
+                "timestamps": "years",
+                "fields": {},
+                "relations": {},
+            }
+        )
     except Exception as e:
-        assert 'timestamps 仅支持' in str(e)
+        assert "timestamps 仅支持" in str(e)
     else:
-        raise AssertionError('非法 timestamps 应报错')
+        raise AssertionError("非法 timestamps 应报错")
 
 
 def test_schema_owner_key_mirror_and_default():
     # ownerKey 自定义键回显镜像（core N1：不得为 "_id"，须独立归属字段）；缺省 None（零破坏）
-    _sc.register({
-        'name': 'OwnDoc', 'collection': 'own_docs', 'ownerKey': 'ownerId',
-        'fields': {'title': 'string', 'ownerId': 'string'}, 'relations': {},
-    })
-    assert _sc.get('OwnDoc')['ownerKey'] == 'ownerId'
-    _sc.register({
-        'name': 'DefaultOwn', 'collection': 'default_own',
-        'fields': {'title': 'string'}, 'relations': {},
-    })
-    assert _sc.get('DefaultOwn')['ownerKey'] is None
+    _sc.register(
+        {
+            "name": "OwnDoc",
+            "collection": "own_docs",
+            "ownerKey": "ownerId",
+            "fields": {"title": "string", "ownerId": "string"},
+            "relations": {},
+        }
+    )
+    assert _sc.get("OwnDoc")["ownerKey"] == "ownerId"
+    _sc.register(
+        {
+            "name": "DefaultOwn",
+            "collection": "default_own",
+            "fields": {"title": "string"},
+            "relations": {},
+        }
+    )
+    assert _sc.get("DefaultOwn")["ownerKey"] is None
 
 
 def test_schema_register_rejects_invalid_owner_key():
     # 非法 ownerKey（空串/非字符串）注册即报错（core 校验透传）
-    for bad in ('', 123, True):
+    for bad in ("", 123, True):
         try:
-            _sc.register({
-                'name': 'BadOwn', 'collection': 'bad_own', 'ownerKey': bad,
-                'fields': {}, 'relations': {},
-            })
+            _sc.register(
+                {
+                    "name": "BadOwn",
+                    "collection": "bad_own",
+                    "ownerKey": bad,
+                    "fields": {},
+                    "relations": {},
+                }
+            )
         except Exception as e:
-            assert 'ownerKey' in str(e)
+            assert "ownerKey" in str(e)
         else:
-            raise AssertionError(f'非法 ownerKey 应报错: {bad!r}')
+            raise AssertionError(f"非法 ownerKey 应报错: {bad!r}")
 
 
 def test_feedback_sink_and_default_stderr():
     from py_store import feedback
+
     events = []
     feedback.set_sink(events.append)
-    feedback.emit({'type': 'federation_degraded', 'code': 'crossSourceSort',
-                   'layer': 'federation', 'message': 'm', 'hint': 'h'})
-    assert events and events[0]['code'] == 'crossSourceSort'
+    feedback.emit(
+        {
+            "type": "federation_degraded",
+            "code": "crossSourceSort",
+            "layer": "federation",
+            "message": "m",
+            "hint": "h",
+        }
+    )
+    assert events and events[0]["code"] == "crossSourceSort"
     feedback.set_sink(None)  # 恢复默认 stderr（验证不抛错即可）
-    feedback.emit({'code': 'x'})
+    feedback.emit({"code": "x"})
 
 
 def test_pushdown_unsupported_error_feedback():
     import py_store.datasource as ds
-    err = ds.PushdownUnsupportedError('mysql_a', 'mysql', ['lookupTopN'], ['每父 top-N 无法下推'])
+
+    err = ds.PushdownUnsupportedError(
+        "mysql_a", "mysql", ["lookupTopN"], ["每父 top-N 无法下推"]
+    )
     assert isinstance(err, RuntimeError)  # 旧调用方兼容
     ev = err.feedback()
-    assert ev['type'] == 'sql_pushdown_unsupported'
-    assert ev['code'] == 'pushdownUnsupported'
-    assert ev['layer'] == 'dialect'
-    assert ev['source'] == 'mysql_a'
+    assert ev["type"] == "sql_pushdown_unsupported"
+    assert ev["code"] == "pushdownUnsupported"
+    assert ev["layer"] == "dialect"
+    assert ev["source"] == "mysql_a"
 
 
 def test_exec_sql_unsupported_raises_and_emits():
@@ -460,20 +560,25 @@ def test_exec_sql_unsupported_raises_and_emits():
 
     class _FakeCore:
         def dialect_translate(self, kind, cmd):
-            return {'unsupported': [{'code': 'lookupTopN'}], 'warnings': ['w1']}
+            return {"unsupported": [{"code": "lookupTopN"}], "warnings": ["w1"]}
 
     old_core, old_sink = ds.get_core, feedback._sink
     events = []
     ds.get_core = _FakeCore
     feedback.set_sink(events.append)
     try:
-        _run(ds.exec_sql('mysql_a', {'kind': 'mysql', 'exec': None},
-                         {'collection': 'commercial_ledger'}))
+        _run(
+            ds.exec_sql(
+                "mysql_a",
+                {"kind": "mysql", "exec": None},
+                {"collection": "commercial_ledger"},
+            )
+        )
     except ds.PushdownUnsupportedError as e:
-        assert 'lookupTopN' in str(e)
+        assert "lookupTopN" in str(e)
     else:
-        raise AssertionError('应抛出 PushdownUnsupportedError')
+        raise AssertionError("应抛出 PushdownUnsupportedError")
     finally:
         ds.get_core = old_core
         feedback.set_sink(old_sink)
-    assert events and events[0]['type'] == 'sql_pushdown_unsupported'
+    assert events and events[0]["type"] == "sql_pushdown_unsupported"

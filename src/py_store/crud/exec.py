@@ -24,31 +24,33 @@ from ..naming import _to_logical, _to_mongo
 from ..permission import NoContextError, PermissionError, get_context
 from ..schema import get as _schema_get
 
-_PHASE1_IDS = re.compile(r'^\{\{phase1\.ids\}\}$')
-_STEP_PH = re.compile(r'^\{\{step\.(\d+)\._id\}\}$')
+_PHASE1_IDS = re.compile(r"^\{\{phase1\.ids\}\}$")
+_STEP_PH = re.compile(r"^\{\{step\.(\d+)\._id\}\}$")
 
 # 权限类错误识别：core 权限错误统一携带 `ERR_PERMISSION:` 稳定前缀（见 core
 # `command/mod.rs::ERR_PERM_PREFIX`），按**前缀**映射而非具体文案 —— core 文案
 # 可自由调整，映射不随文案漂移而静默失效。构造 PermissionError 时剥离前缀。
-_PERM_PREFIX = 'ERR_PERMISSION:'
+_PERM_PREFIX = "ERR_PERMISSION:"
 
 # 档位类错误识别：core text2query 档门禁统一携带 `ERR_TEXT2QUERY:` 稳定前缀
 # （见 core `command/mod.rs::ERR_TEXT2QUERY`），同上按前缀映射。命中即 emit
 # 反馈事件 `profile_blocked`（自动反馈原则：允许拦截，禁止静默）。
-_PROFILE_PREFIX = 'ERR_TEXT2QUERY:'
+_PROFILE_PREFIX = "ERR_TEXT2QUERY:"
 
 # 上下文缺失识别：core fail-secure（require_context / secure_mode）下无 ctx 时统一携带
 # `ERR_NO_CONTEXT:` 稳定前缀（见 core `command/mod.rs`），同上按前缀映射。命中即抛
 # `NoContextError`（与 PermissionError 同档 403；前缀剥离）。
-_NO_CONTEXT_PREFIX = 'ERR_NO_CONTEXT:'
+_NO_CONTEXT_PREFIX = "ERR_NO_CONTEXT:"
 
 # 从 core 文案 `... [$feature]（功能收缩）` 中提取门禁项名；无 `[..]` 时留白（None），
 # 不伪造 feature —— 缺值必须显式暴露（禁静默兜底）。
-_FEATURE_RE = re.compile(r'\[(.+?)\]')
+_FEATURE_RE = re.compile(r"\[(.+?)\]")
 
 # 档位拦截反馈的统一提示（反馈事件契约 §4.6 的一部分；单点定义防文案漂移）
-_PROFILE_HINT = ('上游（LLM 产出的 GQL / 调用方入参）越界；'
-                 'text2query 档白名单见 SKILL.md §后端无关性与边界')
+_PROFILE_HINT = (
+    "上游（LLM 产出的 GQL / 调用方入参）越界；"
+    "text2query 档白名单见 SKILL.md §后端无关性与边界"
+)
 
 
 class ProfileViolation(Exception):
@@ -80,8 +82,8 @@ def _get_db(source=None):
 
 def _now_for(schema_name):
     """按 schema 的 timestamps 单位产出当前时间戳（'s' → 秒，其余/未启用 → 毫秒）"""
-    unit = _schema_get(schema_name).get('timestampUnit')
-    return int(time.time()) if unit == 's' else int(time.time() * 1000)
+    unit = _schema_get(schema_name).get("timestampUnit")
+    return int(time.time()) if unit == "s" else int(time.time() * 1000)
 
 
 def _ctx():
@@ -103,26 +105,29 @@ def _call(fn):
     except Exception as e:
         msg = str(e)
         if msg.startswith(_PERM_PREFIX):
-            raise PermissionError(msg[len(_PERM_PREFIX):]) from e
+            raise PermissionError(msg[len(_PERM_PREFIX) :]) from e
         if msg.startswith(_NO_CONTEXT_PREFIX):
-            raise NoContextError(msg[len(_NO_CONTEXT_PREFIX):]) from e
+            raise NoContextError(msg[len(_NO_CONTEXT_PREFIX) :]) from e
         if msg.startswith(_PROFILE_PREFIX):
-            detail = msg[len(_PROFILE_PREFIX):]
+            detail = msg[len(_PROFILE_PREFIX) :]
             m = _FEATURE_RE.search(detail)
-            _emit_feedback({
-                'type': 'profile_blocked',
-                'code': 'profileBlocked',
-                'layer': 'core',
-                'profile': 'text2query',
-                'feature': m.group(1) if m else None,
-                'message': detail,
-                'hint': _PROFILE_HINT,
-            })
+            _emit_feedback(
+                {
+                    "type": "profile_blocked",
+                    "code": "profileBlocked",
+                    "layer": "core",
+                    "profile": "text2query",
+                    "feature": m.group(1) if m else None,
+                    "message": detail,
+                    "hint": _PROFILE_HINT,
+                }
+            )
             raise ProfileViolation(detail) from e
         raise
 
 
 # ─── 命令执行（唯一 IO 边界） ────────────────────────────────
+
 
 def _physical_for_driver(cmd):
     """逻辑命令 → 物理命令（逻辑名翻译为物理名，并剥离 core 内部元数据键
@@ -139,16 +144,20 @@ async def _exec_mongo_vector(db, cmd, session=None):
     取候选行 → core ``local_eval`` 精确打分；其余错误原样上抛。
     """
     try:
-        return _to_logical(await _exec_mongo(db, _physical_for_driver(cmd), session=session), cmd)
+        return _to_logical(
+            await _exec_mongo(db, _physical_for_driver(cmd), session=session), cmd
+        )
     except Exception as e:
-        if not _vector_scan.can_scan(cmd, 'mongo') or not _vector_scan.is_unsupported_stage_error(e):
+        if not _vector_scan.can_scan(
+            cmd, "mongo"
+        ) or not _vector_scan.is_unsupported_stage_error(e):
             raise
-        spec = cmd['pipeline'][0]['$vectorSearch']
+        spec = cmd["pipeline"][0]["$vectorSearch"]
         _degraded.vector_degraded(
-            backend='mongodb',
-            field=spec.get('path'),
-            metric=spec.get('metric'),
-            message=_vector_scan.DEGRADED_MESSAGES['mongodb'],
+            backend="mongodb",
+            field=spec.get("path"),
+            metric=spec.get("metric"),
+            message=_vector_scan.DEGRADED_MESSAGES["mongodb"],
             hint=_vector_scan.DEGRADED_HINT,
         )
         return await _vector_scan.scan(
@@ -160,36 +169,43 @@ async def _exec_mongo_vector(db, cmd, session=None):
 async def _exec_mongo_candidate(db, candidate, session=None):
     """降级候选命令执行：逻辑名 → 物理名 → 驱动 → 逆映射回逻辑名"""
     return _to_logical(
-        await _exec_mongo(db, _physical_for_driver(candidate), session=session), candidate)
+        await _exec_mongo(db, _physical_for_driver(candidate), session=session),
+        candidate,
+    )
 
 
 async def _exec_on(source, cmd):
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
-    connection = await _datasource.resolve_connection(source, _datasource.is_write_cmd(cmd))
+    connection = await _datasource.resolve_connection(
+        source, _datasource.is_write_cmd(cmd)
+    )
     if _datasource.is_embedded(connection):
         # 嵌入式载体（local / memory）：与 Mongo 同路径（复用 exec_mongo）
         # 按命令的 database 取该库分区手柄；缺省回落描述符自身 handle（向后兼容）
-        db = (connection['handle_for'](cmd.get('database'))
-              if callable(connection.get('handle_for')) else connection['handle'])
+        db = (
+            connection["handle_for"](cmd.get("database"))
+            if callable(connection.get("handle_for"))
+            else connection["handle"]
+        )
         # 嵌入式载体无原生近似索引：向量查询恒为应用层精确检索，须显式声明降级
         # （06 §4.6 C10；native 是静态能力，不因此改变）
         kind = _datasource.kind_of(connection)
         if _vector_scan.can_scan(cmd, kind):
-            spec = cmd['pipeline'][0]['$vectorSearch']
+            spec = cmd["pipeline"][0]["$vectorSearch"]
             _degraded.vector_degraded(
                 backend=kind,
-                field=spec.get('path'),
-                metric=spec.get('metric'),
+                field=spec.get("path"),
+                metric=spec.get("metric"),
                 message=_vector_scan.DEGRADED_MESSAGES[kind],
                 hint=_vector_scan.DEGRADED_HINT,
             )
         return _to_logical(await _exec_mongo(db, _to_mongo(cmd)), cmd)
-    if isinstance(connection, Mapping) and connection.get('kind') == 'mongo':
+    if isinstance(connection, Mapping) and connection.get("kind") == "mongo":
         # Mongo 事务视图：db 按命令 database 解析，session 透传给驱动
-        db = _datasource.mongo_db(connection['conn'], source, cmd.get('database'))
-        return await _exec_mongo_vector(db, cmd, session=connection.get('session'))
-    db = _datasource.mongo_db(connection, source, cmd.get('database'))
+        db = _datasource.mongo_db(connection["conn"], source, cmd.get("database"))
+        return await _exec_mongo_vector(db, cmd, session=connection.get("session"))
+    db = _datasource.mongo_db(connection, source, cmd.get("database"))
     if db is not None:
         # Mongo 物理名翻译（逻辑 → camelCase）；执行后按 schema 逆表回映射（物理 → 逻辑）
         return await _exec_mongo_vector(db, cmd)
@@ -198,7 +214,7 @@ async def _exec_on(source, cmd):
 
 async def _exec(cmd):
     """Command JSON → 按命令自带的 ``source`` 路由（不按 collection 反查）"""
-    return await _exec_on(cmd.get('source') or _datasource.DEFAULT_SOURCE, cmd)
+    return await _exec_on(cmd.get("source") or _datasource.DEFAULT_SOURCE, cmd)
 
 
 def _sources_of(plan):
@@ -208,19 +224,19 @@ def _sources_of(plan):
     源由 core 规划决定）。
     """
     out = set()
-    for key in ('needsProbe', 'command', 'findCommand', 'deleteCommand'):
+    for key in ("needsProbe", "command", "findCommand", "deleteCommand"):
         cmd = (plan or {}).get(key) or {}
         if cmd:
-            out.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
-    for step in (plan or {}).get('steps') or []:
-        cmd = (step or {}).get('command') or {}
+            out.add(cmd.get("source") or _datasource.DEFAULT_SOURCE)
+    for step in (plan or {}).get("steps") or []:
+        cmd = (step or {}).get("command") or {}
         if cmd:
-            out.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
+            out.add(cmd.get("source") or _datasource.DEFAULT_SOURCE)
     # 触发链命令的源（plan_insert 直接产出 triggers；plan_update 二次规划才产出）
-    for t in (plan or {}).get('triggers') or []:
-        cmd = (t or {}).get('command') or {}
+    for t in (plan or {}).get("triggers") or []:
+        cmd = (t or {}).get("command") or {}
         if cmd:
-            out.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
+            out.add(cmd.get("source") or _datasource.DEFAULT_SOURCE)
     return out or {_datasource.DEFAULT_SOURCE}
 
 
@@ -231,9 +247,9 @@ def declare_trigger_sources(base_sources, triggers):
     对齐 nodejs-store ``declareTriggerSources``。"""
     uniq = set(base_sources)
     for t in triggers or ():
-        cmd = (t or {}).get('command') or {}
+        cmd = (t or {}).get("command") or {}
         if cmd:
-            uniq.add(cmd.get('source') or _datasource.DEFAULT_SOURCE)
+            uniq.add(cmd.get("source") or _datasource.DEFAULT_SOURCE)
     if len(uniq) > 1 and _datasource.current_session() is None:
         _warn_multi_source(uniq)
     return uniq
@@ -242,15 +258,19 @@ def declare_trigger_sources(base_sources, triggers):
 def _warn_multi_source(sources):
     """多源写：无法原子 → 程序化声明 nonAtomic（允许顺序执行，禁止静默）"""
     listed = sorted(sources)
-    _emit_feedback({
-        'type': 'non_atomic_write',
-        'code': 'nonAtomic',
-        'layer': 'crud',
-        'message': ('本次写调用跨 %d 个数据源（%s）：无法原子，按顺序执行（非原子）'
-                    % (len(listed), ', '.join(listed))),
-        'hint': '把写操作收敛到单源；或在 store.session() 内执行以便跨源写被拒（fail-closed）',
-        'sources': listed,
-    })
+    _emit_feedback(
+        {
+            "type": "non_atomic_write",
+            "code": "nonAtomic",
+            "layer": "crud",
+            "message": (
+                "本次写调用跨 %d 个数据源（%s）：无法原子，按顺序执行（非原子）"
+                % (len(listed), ", ".join(listed))
+            ),
+            "hint": "把写操作收敛到单源；或在 store.session() 内执行以便跨源写被拒（fail-closed）",
+            "sources": listed,
+        }
+    )
 
 
 async def run_atomic(sources, fn):
@@ -269,7 +289,8 @@ async def run_atomic(sources, fn):
     if len(uniq) == 1:
         source = next(iter(uniq))
         if _datasource.has_connection(source) and (
-                _datasource.is_sql_source(source) or _datasource.is_mongo_source(source)):
+            _datasource.is_sql_source(source) or _datasource.is_mongo_source(source)
+        ):
             return await _datasource.run_in_transaction(source, fn)
     elif len(uniq) > 1:
         _warn_multi_source(uniq)
@@ -312,8 +333,8 @@ def resolve_placeholders(command, ids=None, steps=None):
     return _substitute(command, resolver)
 
 
-_CLAIMED_IDS = '___claimed_ids___'
-_MODE_ATOMIC = 'atomic_commands'
+_CLAIMED_IDS = "___claimed_ids___"
+_MODE_ATOMIC = "atomic_commands"
 
 
 def _fill_claimed(command, ids):
@@ -337,9 +358,8 @@ def _claimed_ids_of(env):
     SQLite 为 stmt2 同一子查询取回的完整行。行缺 ``_id`` 视为契约漂移——跳过而非
     静默顶替（禁伪造领取结果）。
     """
-    rows = env.get('rows') or [] if isinstance(env, Mapping) else []
-    return [r['_id'] for r in rows
-            if isinstance(r, Mapping) and '_id' in r]
+    rows = env.get("rows") or [] if isinstance(env, Mapping) else []
+    return [r["_id"] for r in rows if isinstance(r, Mapping) and "_id" in r]
 
 
 async def run_atomic_commands(source, plan):
@@ -354,12 +374,13 @@ async def run_atomic_commands(source, plan):
     - compareAndSet 为单命令 plan：直接执行并返回包络（matched 从 affectedRows 读，
       见 crud/claim.py）。
     """
-    mode = (plan or {}).get('mode')
+    mode = (plan or {}).get("mode")
     if mode != _MODE_ATOMIC:
         raise ValueError(
             f"run_atomic_commands 仅接受 mode='{_MODE_ATOMIC}'，实际 {mode!r}"
-            '（禁静默走通用路径：atomic_commands 的同事务语义不可降级）')
-    commands = plan.get('commands') or []
+            "（禁静默走通用路径：atomic_commands 的同事务语义不可降级）"
+        )
+    commands = plan.get("commands") or []
     if not commands:
         raise ValueError("atomic_commands plan 缺少 commands（禁静默空执行）")
 
@@ -369,7 +390,7 @@ async def run_atomic_commands(source, plan):
             return env
         # 方言已随领取语句取回完整还原行（如 SQLite 的 UPDATE … RETURNING，
         # docs = 领取后最新值）→ 直接作为领取结果，不再执行取行命令
-        docs = env.get('docs') if isinstance(env, Mapping) else None
+        docs = env.get("docs") if isinstance(env, Mapping) else None
         if docs is not None:
             return docs
         ids = _claimed_ids_of(env)

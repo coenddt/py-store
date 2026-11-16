@@ -27,48 +27,50 @@ def _guard_route_override(route_override):
     emit ``profile_blocked``，``layer='host'`` 本身即反馈：core 层未拦住，须回溯加固
     （自动反馈原则：允许拦截，禁止静默）。
     """
-    if route_override is None or get_profile() != 'text2query':
+    if route_override is None or get_profile() != "text2query":
         return
-    detail = 'text2query 档禁用 route_override（受信参数，禁 AI 侧指定）'
-    _emit_feedback({
-        'type': 'profile_blocked',
-        'code': 'profileBlocked',
-        'layer': 'host',
-        'profile': 'text2query',
-        'feature': 'route_override',
-        'message': detail,
-        'hint': _PROFILE_HINT,
-    })
+    detail = "text2query 档禁用 route_override（受信参数，禁 AI 侧指定）"
+    _emit_feedback(
+        {
+            "type": "profile_blocked",
+            "code": "profileBlocked",
+            "layer": "host",
+            "profile": "text2query",
+            "feature": "route_override",
+            "message": detail,
+            "hint": _PROFILE_HINT,
+        }
+    )
     raise ProfileViolation(detail)
 
 
 async def _run_query_plan(plan):
     """执行读命令序列"""
-    if plan['mode'] == 'two_phase':
-        id_docs = await _exec(plan['commands'][0])
-        ids = [d['_id'] for d in id_docs]
+    if plan["mode"] == "two_phase":
+        id_docs = await _exec(plan["commands"][0])
+        ids = [d["_id"] for d in id_docs]
         if not ids:
             return []
-        cmd2 = resolve_placeholders(plan['commands'][1], ids=ids)
+        cmd2 = resolve_placeholders(plan["commands"][1], ids=ids)
         items = await _exec(cmd2)
-        return get_core().restore_sort_order(items, ids, plan.get('sort'))['items']
-    return await _exec(plan['commands'][0])
+        return get_core().restore_sort_order(items, ids, plan.get("sort"))["items"]
+    return await _exec(plan["commands"][0])
 
 
 async def _finalize(plan, items):
     """读路径尾处理两段式：core 后处理 → Host 执行 asyncFn → core 剥离注入依赖"""
-    post = plan.get('postprocess')
+    post = plan.get("postprocess")
     if not post:
         return items
     prepared = get_core().prepare_query(post, items, _ctx())
-    for ref in prepared['fnRefs']:
+    for ref in prepared["fnRefs"]:
         fn = get_async_fn(ref)
         if not fn:
-            raise RuntimeError(f'asyncFn 计算列 {ref} 未注册实现')
-        out = fn(prepared['items'], _ctx())
+            raise RuntimeError(f"asyncFn 计算列 {ref} 未注册实现")
+        out = fn(prepared["items"], _ctx())
         if inspect.isawaitable(out):
             await out
-    return get_core().strip_query(post, prepared['items'])['items']
+    return get_core().strip_query(post, prepared["items"])["items"]
 
 
 async def query(gql, params=None, route_override=None):
@@ -83,15 +85,18 @@ async def query(gql, params=None, route_override=None):
     注意：``route_override`` 为**受信服务端参数**，禁止透传用户输入（否则可被用于跨源路由，CWE-639）。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: get_core().plan_query(
-        gql, params if params is not None else {}, _ctx(), route_override))
-    degraded.emit_plan(plan, 'plan_degraded')
+    plan = _call(
+        lambda: get_core().plan_query(
+            gql, params if params is not None else {}, _ctx(), route_override
+        )
+    )
+    degraded.emit_plan(plan, "plan_degraded")
 
     async def _selected():
         return await _finalize(plan, await _run_query_plan(plan))
 
     # 请求级记录本次选中链路（04 §4.4：只读透传 plan.links，不改 plan 语义）
-    return await run_with_selection(plan.get('links'), _selected)
+    return await run_with_selection(plan.get("links"), _selected)
 
 
 async def query_one(gql, params=None, route_override=None):
@@ -101,9 +106,12 @@ async def query_one(gql, params=None, route_override=None):
     大集合不再全量取回后取首条（对齐 PyMongo ``find_one`` 的 limit-1 语义）。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: get_core().plan_query_one(
-        gql, params if params is not None else {}, _ctx(), route_override))
-    degraded.emit_plan(plan, 'plan_degraded')
+    plan = _call(
+        lambda: get_core().plan_query_one(
+            gql, params if params is not None else {}, _ctx(), route_override
+        )
+    )
+    degraded.emit_plan(plan, "plan_degraded")
     items = await _finalize(plan, await _run_query_plan(plan))
     return items[0] if items else None
 
@@ -113,16 +121,16 @@ async def _run_federated_unit(unit):
 
     与单库 ``_run_query_plan`` 同形：只差路由键（单元自带 source，不按 collection 反查）。
     """
-    commands = unit.get('commands') or []
-    if unit.get('mode') == 'two_phase':
-        id_docs = await _exec_on(unit['source'], commands[0])
-        ids = [d['_id'] for d in id_docs]
+    commands = unit.get("commands") or []
+    if unit.get("mode") == "two_phase":
+        id_docs = await _exec_on(unit["source"], commands[0])
+        ids = [d["_id"] for d in id_docs]
         if not ids:
             return []
         cmd2 = resolve_placeholders(commands[1], ids=ids)
-        items = await _exec_on(unit['source'], cmd2)
-        return get_core().restore_sort_order(items, ids, unit.get('sort'))['items']
-    return await _exec_on(unit['source'], commands[0])
+        items = await _exec_on(unit["source"], cmd2)
+        return get_core().restore_sort_order(items, ids, unit.get("sort"))["items"]
+    return await _exec_on(unit["source"], commands[0])
 
 
 async def query_federated(gql, params=None):
@@ -136,20 +144,24 @@ async def query_federated(gql, params=None):
     每源取数上限 ``MAX_FEDERATION_ROWS`` 由 core 强制（超限即报错，拒绝静默全表拉取）；
     无法下推的分页/排序进 ``plan['degraded']`` 并告警，不阻断查询。
     """
-    plan = _call(lambda: get_core().plan_federated(
-        gql, params if params is not None else {}, _ctx()))
+    plan = _call(
+        lambda: get_core().plan_federated(
+            gql, params if params is not None else {}, _ctx()
+        )
+    )
 
     # 降级事件走请求容器 + 统一反馈通道（core 事件通常不带 type，兜底 federation_degraded）
-    degraded.emit_plan(plan, 'federation_degraded')
+    degraded.emit_plan(plan, "federation_degraded")
 
     async def _selected():
         results = await asyncio.gather(
-            *(_run_federated_unit(u) for u in plan.get('sources') or []))
+            *(_run_federated_unit(u) for u in plan.get("sources") or [])
+        )
         merged = _call(lambda: get_core().merge_federated(plan, results))
         return await _finalize(plan, merged)
 
     # 请求级记录本次选中链路（04 §4.4：只读透传 plan.links，不改 plan 语义）
-    return await run_with_selection(plan.get('links'), _selected)
+    return await run_with_selection(plan.get("links"), _selected)
 
 
 async def query_with_count(gql, params=None, route_override=None):
@@ -162,15 +174,18 @@ async def query_with_count(gql, params=None, route_override=None):
     pageSize 上限 5000，防止拖库。
     """
     _guard_route_override(route_override)
-    plan = _call(lambda: get_core().plan_query_with_count(
-        gql, params if params is not None else {}, _ctx(), None, route_override))
-    degraded.emit_plan(plan, 'plan_degraded')
+    plan = _call(
+        lambda: get_core().plan_query_with_count(
+            gql, params if params is not None else {}, _ctx(), None, route_override
+        )
+    )
+    degraded.emit_plan(plan, "plan_degraded")
     items = await _finalize(plan, await _run_query_plan(plan))
-    total = await _exec(plan['countCommand'])
+    total = await _exec(plan["countCommand"])
     return {
-        'items': items,
-        'total': total,
-        'hasMore': (plan['page'] + 1) * plan['pageSize'] < total,
-        'page': plan['page'],
-        'pageSize': plan['pageSize'],
+        "items": items,
+        "total": total,
+        "hasMore": (plan["page"] + 1) * plan["pageSize"] < total,
+        "page": plan["page"],
+        "pageSize": plan["pageSize"],
     }

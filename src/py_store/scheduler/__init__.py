@@ -30,46 +30,46 @@ from ..schema import core as _core
 
 # 各段取值范围（周 0-7：0 与 7 均为周日，归一到 0）
 _RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-_INT = re.compile(r'^\d+$')
+_INT = re.compile(r"^\d+$")
 
 
 def _bad(msg):
-    return ValueError(f'ERR_CRON:{msg}')
+    return ValueError(f"ERR_CRON:{msg}")
 
 
 def _parse_field(spec, idx):
     """解析单段为取值集合（``*`` | ``n`` | ``a-b`` | ``*/s`` | ``a-b/s`` | ``a/s``；列表 ``,``）"""
     lo_min, hi_max = _RANGES[idx]
     out = set()
-    for part in str(spec).split(','):
+    for part in str(spec).split(","):
         if not part:
-            raise _bad(f'第 {idx + 1} 段存在空项：「{spec}」')
-        slash = part.split('/')
+            raise _bad(f"第 {idx + 1} 段存在空项：「{spec}」")
+        slash = part.split("/")
         if len(slash) > 2:
-            raise _bad(f'步长段非法：「{part}」')
+            raise _bad(f"步长段非法：「{part}」")
         base = slash[0]
         step = 1
         if len(slash) == 2:
             if not _INT.match(slash[1]) or int(slash[1]) < 1:
-                raise _bad(f'步长非法：「{part}」')
+                raise _bad(f"步长非法：「{part}」")
             step = int(slash[1])
-        if base == '*':
+        if base == "*":
             lo, hi = lo_min, hi_max
-        elif '-' in base:
-            a, b = base.split('-', 1)
+        elif "-" in base:
+            a, b = base.split("-", 1)
             if not _INT.match(a) or not _INT.match(b):
-                raise _bad(f'范围非法：「{part}」')
+                raise _bad(f"范围非法：「{part}」")
             lo, hi = int(a), int(b)
             if lo > hi:
-                raise _bad(f'范围起点大于终点：「{part}」')
+                raise _bad(f"范围起点大于终点：「{part}」")
         else:
             if not _INT.match(base):
-                raise _bad(f'非法字符：「{part}」')
+                raise _bad(f"非法字符：「{part}」")
             lo = int(base)
             # ``a/s`` 等价 ``a-max/s``（从 a 起按步长到段末）
             hi = hi_max if len(slash) == 2 else lo
         if lo < lo_min or hi > hi_max:
-            raise _bad(f'超出范围（{lo_min}-{hi_max}）：「{part}」')
+            raise _bad(f"超出范围（{lo_min}-{hi_max}）：「{part}」")
         v = lo
         while v <= hi:
             out.add(0 if idx == 4 and v == 7 else v)
@@ -81,19 +81,19 @@ def parse_cron(expr):
     """解析 5 段 cron → ``{'sets', 'any_dom', 'any_dow'}``（cron_matches 消费）"""
     segs = str(expr).split()
     if len(segs) != 5:
-        raise _bad(f'必须为 5 段（分 时 日 月 周）：「{expr}」')
+        raise _bad(f"必须为 5 段（分 时 日 月 周）：「{expr}」")
     return {
-        'sets': [_parse_field(s, i) for i, s in enumerate(segs)],
+        "sets": [_parse_field(s, i) for i, s in enumerate(segs)],
         # 日/周组合（Vixie 语义）：两段都限定（非 ``*``）时任一命中即触发，否则都要命中
-        'any_dom': segs[2] != '*',
-        'any_dow': segs[4] != '*',
+        "any_dom": segs[2] != "*",
+        "any_dow": segs[4] != "*",
     }
 
 
 def cron_matches(expr, dt):
     """cron 与时刻（本地时间分量）是否匹配"""
     p = parse_cron(expr)
-    sets = p['sets']
+    sets = p["sets"]
     if dt.minute not in sets[0]:
         return False
     if dt.hour not in sets[1]:
@@ -103,7 +103,7 @@ def cron_matches(expr, dt):
     dom_ok = dt.day in sets[2]
     # weekday()：0=周一 → cron 语义（0=周日）：(weekday + 1) % 7
     dow_ok = ((dt.weekday() + 1) % 7) in sets[4]
-    if p['any_dom'] and p['any_dow']:
+    if p["any_dom"] and p["any_dow"]:
         return dom_ok or dow_ok
     return dom_ok and dow_ok
 
@@ -122,12 +122,13 @@ async def tick_once(now_ms=None):
     entries = _core.expand_schedule_triggers(_ctx())
     fired = []
     for entry in entries:
-        if not cron_matches(entry['cron'], dt):
+        if not cron_matches(entry["cron"], dt):
             continue
         # 每条独立去重集合：跨条目同名 step 互不去重（去重键不含 schema，撞键会误跳）
-        await run_triggers([entry['step']], root=None, before=None, now=now, ctx=_ctx(),
-                           executed=set())
-        fired.append({'schema': entry['schema'], 'name': entry['name']})
+        await run_triggers(
+            [entry["step"]], root=None, before=None, now=now, ctx=_ctx(), executed=set()
+        )
+        fired.append({"schema": entry["schema"], "name": entry["name"]})
     return fired
 
 
@@ -150,13 +151,15 @@ async def _loop():
         try:
             await tick_once()
         except Exception as e:
-            _emit_feedback({
-                'type': 'schedule_tick_failed',
-                'code': 'scheduleTickFailed',
-                'layer': 'host',
-                'message': f'定时触发器执行失败：{e}',
-                'hint': 'schedule step 执行失败已上抛并在循环内告警；修复触发器声明或回调实现后重启循环',
-            })
+            _emit_feedback(
+                {
+                    "type": "schedule_tick_failed",
+                    "code": "scheduleTickFailed",
+                    "layer": "host",
+                    "message": f"定时触发器执行失败：{e}",
+                    "hint": "schedule step 执行失败已上抛并在循环内告警；修复触发器声明或回调实现后重启循环",
+                }
+            )
         await asyncio.sleep(_ms_to_next_minute() / 1000)
 
 

@@ -15,39 +15,64 @@ import pathlib
 import sys
 from datetime import datetime
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / 'src'))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from py_store.core import native
 from py_store.scheduler import cron_matches
 
-FIXTURE = (pathlib.Path(__file__).resolve().parent.parent.parent
-           / 'rust-store' / 'fixtures' / 'triggers' / 'cases.json')
-fx = json.loads(FIXTURE.read_text(encoding='utf-8'))
+FIXTURE = (
+    pathlib.Path(__file__).resolve().parent.parent.parent
+    / "rust-store"
+    / "fixtures"
+    / "triggers"
+    / "cases.json"
+)
+fx = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 reg = native.Registry()
-for s in fx['schemas']:
+for s in fx["schemas"]:
     reg.register(s)
 
 out = {}
-for i, c in enumerate(fx['cases']):
-    if c['fn'] == 'planInsert':
-        plan = reg.plan_insert(c['schema'], c['input'], c['now'], c.get('newId') or '', None, None)
-        out[f'case{i}.triggers'] = plan.get('triggers')
-    elif c['fn'] == 'planUpdate':
+for i, c in enumerate(fx["cases"]):
+    if c["fn"] == "planInsert":
+        plan = reg.plan_insert(
+            c["schema"], c["input"], c["now"], c.get("newId") or "", None, None
+        )
+        out[f"case{i}.triggers"] = plan.get("triggers")
+    elif c["fn"] == "planUpdate":
         first = reg.plan_update(
-            c['schema'], c['condition'], c['input'], {}, c['now'], None, None, None, None)
-        out[f'case{i}.first'] = first
+            c["schema"],
+            c["condition"],
+            c["input"],
+            {},
+            c["now"],
+            None,
+            None,
+            None,
+            None,
+        )
+        out[f"case{i}.first"] = first
         plan = reg.plan_update(
-            c['schema'], c['condition'], c['input'], {}, c['now'], None,
-            c.get('found') is True, c.get('doc'), None)
-        out[f'case{i}.triggers'] = plan.get('triggers')
+            c["schema"],
+            c["condition"],
+            c["input"],
+            {},
+            c["now"],
+            None,
+            c.get("found") is True,
+            c.get("doc"),
+            None,
+        )
+        out[f"case{i}.triggers"] = plan.get("triggers")
     else:
         raise ValueError(f"未知 case.fn: {c['fn']}")
 
 # cron 匹配器对拍（A6）：同一组（cron, 时刻分量）两宿主输出必须一致
-for i, c in enumerate(fx.get('cronCases') or ()):
-    a = c['at']
-    out[f'cron{i}'] = cron_matches(
-        c['cron'], datetime(a['y'], a['mo'], a['d'], a['h'], a['mi']))
+for i, c in enumerate(fx.get("cronCases") or ()):
+    a = c["at"]
+    out[f"cron{i}"] = cron_matches(
+        c["cron"], datetime(a["y"], a["mo"], a["d"], a["h"], a["mi"])
+    )
 
-print(json.dumps(out, sort_keys=True, separators=(',', ':'), ensure_ascii=False))
+print(json.dumps(out, sort_keys=True, separators=(",", ":"), ensure_ascii=False))

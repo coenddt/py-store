@@ -70,25 +70,25 @@ def _group_indexes(rows):
         entry = by_key.get(key)
         if entry is None:
             entry = {
-                'table': r['table'],
-                'name': r['name'],
-                'columns': [],
-                'unique': int(r['unique']),
+                "table": r["table"],
+                "name": r["name"],
+                "columns": [],
+                "unique": int(r["unique"]),
             }
             by_key[key] = entry
-        entry['columns'].append(r['column'])
+        entry["columns"].append(r["column"])
     return list(by_key.values())
 
 
 async def introspect(driver, options=None):
-    if driver is None or not hasattr(driver, 'fetch'):
-        raise TypeError('postgres introspection 需要 asyncpg 的连接或连接池')
+    if driver is None or not hasattr(driver, "fetch"):
+        raise TypeError("postgres introspection 需要 asyncpg 的连接或连接池")
 
     opts = options or {}
     # 查询按 schema 过滤（缺省 public）；显式传入 schema 时作为 schema 透出到 def
     # （缺省不透出 = 连接默认 search_path，保持既有行为零变更）。
-    explicit = 'schema' in opts
-    schema = opts.get('schema') or 'public'
+    explicit = "schema" in opts
+    schema = opts.get("schema") or "public"
 
     tables = await driver.fetch(_TABLES, schema)
     columns = await driver.fetch(_COLUMNS, schema)
@@ -96,18 +96,19 @@ async def introspect(driver, options=None):
     index_rows = await driver.fetch(_INDEXES, schema)
 
     return {
-        'tables': [dict(r, schema=schema) for r in tables]
-        if explicit else [dict(r) for r in tables],
-        'columns': [
+        "tables": [dict(r, schema=schema) for r in tables]
+        if explicit
+        else [dict(r) for r in tables],
+        "columns": [
             {
-                'table': c['table'],
-                'name': c['name'],
-                'type': c['type'] or '',
-                'notnull': 1 if c['nullable'] == 'NO' else 0,
-                'pk': int(c['pk']) or 0,
+                "table": c["table"],
+                "name": c["name"],
+                "type": c["type"] or "",
+                "notnull": 1 if c["nullable"] == "NO" else 0,
+                "pk": int(c["pk"]) or 0,
             }
             for c in columns
         ],
-        'fks': [dict(r) for r in fks],
-        'indexes': _group_indexes(index_rows),
+        "fks": [dict(r) for r in fks],
+        "indexes": _group_indexes(index_rows),
     }

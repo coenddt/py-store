@@ -32,7 +32,7 @@ from typing import Any
 from .handle import create_db
 from .store import _dir_for, read_snapshot, with_dir_lock, write_collections
 
-LOCAL_KIND = 'local'
+LOCAL_KIND = "local"
 
 
 def connect(options: dict | None = None) -> dict:
@@ -43,9 +43,9 @@ def connect(options: dict | None = None) -> dict:
     """
     options = options or {}
     root = pathlib.Path(
-        options.get('dir') or options.get('base_dir') or '.store-local'
+        options.get("dir") or options.get("base_dir") or ".store-local"
     ).resolve()
-    database = options.get('database')
+    database = options.get("database")
 
     def _io_for(db):
         """按库构造 IO（load/save 与写锁键均以 ``_dir_for(root, db)`` 为落点）。"""
@@ -55,7 +55,9 @@ def connect(options: dict | None = None) -> dict:
             return read_snapshot(root, db)
 
         def _save(changed, collections):
-            with_dir_lock(target, lambda: write_collections(root, changed, collections, db))
+            with_dir_lock(
+                target, lambda: write_collections(root, changed, collections, db)
+            )
 
         return _load, _save
 
@@ -64,11 +66,11 @@ def connect(options: dict | None = None) -> dict:
         return create_db(load, save, db)
 
     desc = {
-        'kind': LOCAL_KIND,
-        'dir': str(root),
-        'database': database,
-        'handle': handle_for(database),
-        'handle_for': handle_for,
+        "kind": LOCAL_KIND,
+        "dir": str(root),
+        "database": database,
+        "handle": handle_for(database),
+        "handle_for": handle_for,
     }
 
     async def open_transaction(db=None):
@@ -78,35 +80,35 @@ def connect(options: dict | None = None) -> dict:
         """
         db = database if db is None else db
         target = _dir_for(root, db)
-        state: dict[str, Any] = {'staged': read_snapshot(root, db), 'closed': False}
+        state: dict[str, Any] = {"staged": read_snapshot(root, db), "closed": False}
 
         def _tx_load():
-            return state['staged']
+            return state["staged"]
 
         def _tx_save(_changed, collections):
-            state['staged'] = collections
+            state["staged"] = collections
 
         async def commit():
-            if state['closed']:
+            if state["closed"]:
                 return
-            state['closed'] = True
-            staged = state['staged']
+            state["closed"] = True
+            staged = state["staged"]
             with_dir_lock(
                 target, lambda: write_collections(root, list(staged.keys()), staged, db)
             )
 
         async def rollback():
-            state['closed'] = True
+            state["closed"] = True
 
         async def release():
-            state['closed'] = True
+            state["closed"] = True
 
         return {
-            'session': {'snapshot': lambda: state['staged']},
-            'handle': create_db(_tx_load, _tx_save, db),
-            'commit': commit,
-            'rollback': rollback,
-            'release': release,
+            "session": {"snapshot": lambda: state["staged"]},
+            "handle": create_db(_tx_load, _tx_save, db),
+            "commit": commit,
+            "rollback": rollback,
+            "release": release,
         }
 
     async def with_transaction(fn, db=None):
@@ -114,17 +116,17 @@ def connect(options: dict | None = None) -> dict:
         tx = await open_transaction(db if db is not None else database)
         try:
             out = await fn(None, tx)
-            await tx['commit']()
+            await tx["commit"]()
             return out
-        except BaseException:
-            await tx['rollback']()
+        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+            await tx["rollback"]()
             raise
         finally:
-            await tx['release']()
+            await tx["release"]()
 
-    desc['open_transaction'] = open_transaction
-    desc['with_transaction'] = with_transaction
+    desc["open_transaction"] = open_transaction
+    desc["with_transaction"] = with_transaction
     return desc
 
 
-__all__ = ['LOCAL_KIND', 'connect']
+__all__ = ["LOCAL_KIND", "connect"]

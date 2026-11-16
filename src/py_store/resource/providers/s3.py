@@ -1,4 +1,5 @@
 """S3 兼容 provider（OSS / MinIO / AWS 共用）；boto3 懒加载（可选依赖）。"""
+
 import asyncio
 
 
@@ -73,7 +74,13 @@ def create(options=None):
     async def exists(key, opts=None):
         return await asyncio.to_thread(_exists, key)
 
-    return {"kind": options.get("kind", "s3"), "put": put, "get": get, "remove": remove, "exists": exists}
+    return {
+        "kind": options.get("kind", "s3"),
+        "put": put,
+        "get": get,
+        "remove": remove,
+        "exists": exists,
+    }
 
 
 def _boto_config(addressing):

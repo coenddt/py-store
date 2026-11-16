@@ -64,6 +64,7 @@ def get_base():
     """
     return core
 
+
 # Host 侧元数据镜像
 _schemas: dict = {}
 
@@ -76,23 +77,24 @@ _fn_impls: dict = {}
 
 def _norm_key(name) -> str:
     """归一 key：用 core 透出算法（禁宿主自实现，总纲 §5）。"""
-    return ''.join(native.canonical(str(name)))
+    return "".join(native.canonical(str(name)))
 
 
 def _logical_fn_ref(schema_name, key, comp):
     """逻辑 fnRef：显式优先，否则 ``<schema.name>.<key>``（§6.5）。"""
-    return (comp or {}).get('fnRef') or f"{schema_name}.{key}"
+    return (comp or {}).get("fnRef") or f"{schema_name}.{key}"
 
 
 def _core_fn_key(key, comp):
     """core 侧回调查找键：显式 fnRef 优先，否则 key（保持 core 语义，cache.rs:47）。"""
-    return (comp or {}).get('fnRef') or key
+    return (comp or {}).get("fnRef") or key
+
 
 # 内部标记：表示「该键需剔除」（对齐 JS JSON round-trip 中函数型 default 被移除）
 _DROP = object()
 
 # 落点键：由 `_loc_of` 显式注入 Location，不进 core 定义（01 起定义零落点）
-_LOCATION_KEYS = ('database', 'schema')
+_LOCATION_KEYS = ("database", "schema")
 
 
 def _to_core_defn(defn):
@@ -106,7 +108,7 @@ def _to_core_defn(defn):
     def walk(value, key=None):
         if callable(value):
             # fn/asyncFn 声明占位（core 按 `fn: True` 识别）；函数型 default 无法跨 FFI，剔除
-            return True if key in ('fn', 'asyncFn') else _DROP
+            return True if key in ("fn", "asyncFn") else _DROP
         if isinstance(value, dict):
             out = {}
             for k, v in value.items():
@@ -138,9 +140,9 @@ def _loc_of(defn):
     ``default``、多源路由失效。缺省（无 ``datasource``）⇒ ``default``。
     """
     return {
-        'source': (defn or {}).get('datasource') or None,
-        'database': (defn or {}).get('database') or None,
-        'schema': (defn or {}).get('schema') or None,
+        "source": (defn or {}).get("datasource") or None,
+        "database": (defn or {}).get("database") or None,
+        "schema": (defn or {}).get("schema") or None,
     }
 
 
@@ -160,7 +162,7 @@ def register(defn, ctx=None):
     解析定义内 ``datasource``/``database``/``schema``，须经 Location 传入否则 source 恒 default。
     """
     get_core().register_batch(
-        [{'defn': _to_core_defn(defn), 'location': _loc_of(defn)}],
+        [{"defn": _to_core_defn(defn), "location": _loc_of(defn)}],
         ctx,
     )
     return _mirror(defn)
@@ -170,72 +172,78 @@ def _mirror(defn):
     """Host 侧元数据镜像 + 内嵌回调绑定（``register`` 与 ``register_batch`` 共用）"""
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
-    for key, val in (defn.get('computes') or {}).items():
-        core_key = _core_fn_key(key, val)          # core 查找键（本步不改 core 语义）
+    for key, val in (defn.get("computes") or {}).items():
+        core_key = _core_fn_key(key, val)  # core 查找键（本步不改 core 语义）
         # 注2：仅「可调用」才走内嵌绑定；纯 JSON `"fn": true`（bool）不在此绑定，
         #      由 assert_fns_covered 从 L2 实现池解析绑定（否则会绑定出坏回调）。
-        if callable(val.get('fn')):
-            get_core().set_fn(core_key, val['fn'])
-        if callable(val.get('asyncFn')):
-            _async_fns[core_key] = val['asyncFn']
+        if callable(val.get("fn")):
+            get_core().set_fn(core_key, val["fn"])
+        if callable(val.get("asyncFn")):
+            _async_fns[core_key] = val["asyncFn"]
         # 镜像保留声明元数据（callable 白名单外天然剔除）：
         # agg 形态与 read 白名单供 AI 摘要（ask.describe_for_ai）等消费者读取，
         # 可执行物（fn/asyncFn）不入镜像（执行判决唯一在 core 规划 + Host 尾处理）
-        computes[key] = {k: val[k] for k in ('type', 'depends', 'agg', 'read') if k in val}
-        computes[key]['fnRef'] = _logical_fn_ref(defn['name'], key, val)
+        computes[key] = {
+            k: val[k] for k in ("type", "depends", "agg", "read") if k in val
+        }
+        computes[key]["fnRef"] = _logical_fn_ref(defn["name"], key, val)
 
-    _schemas[defn['name']] = {
-        'name': defn['name'],
-        'collection': defn.get('collection') or defn['name'],
+    _schemas[defn["name"]] = {
+        "name": defn["name"],
+        "collection": defn.get("collection") or defn["name"],
         # 落点定位（定义文件零落点；由装载器注入 defn）：database = 连接内库
         # （Mongo/MySQL/SQLite/PG），schema = 仅 PG 的 schema 层
-        'database': defn.get('database') or None,
-        'schema': defn.get('schema') or None,
-        'idPrefix': defn.get('idPrefix') or '',
-        'timestamps': defn.get('timestamps') is not False,
+        "database": defn.get("database") or None,
+        "schema": defn.get("schema") or None,
+        "idPrefix": defn.get("idPrefix") or "",
+        "timestamps": defn.get("timestamps") is not False,
         # 时间戳单位（'ms'/'s'/None=不维护）；值合法性由 core.register 校验
-        'timestampUnit': 's' if defn.get('timestamps') == 's' else (
-            None if defn.get('timestamps') is False else 'ms'),
-        'fields': defn.get('fields') or {},
-        'relations': defn.get('relations') or {},
-        'computes': computes,
-        'indexes': defn.get('indexes') or [],
-        'read': defn.get('read'),
-        'write': defn.get('write'),
+        "timestampUnit": "s"
+        if defn.get("timestamps") == "s"
+        else (None if defn.get("timestamps") is False else "ms"),
+        "fields": defn.get("fields") or {},
+        "relations": defn.get("relations") or {},
+        "computes": computes,
+        "indexes": defn.get("indexes") or [],
+        "read": defn.get("read"),
+        "write": defn.get("write"),
         # 归属键元数据镜像（漉金Core 接入扩展 01）：creator 伪角色判定/注入的键，
         # 判决唯一在 core（缺省 createdBy 由 core 兜底）；值合法性由 core.register 校验
-        'ownerKey': defn.get('ownerKey'),
+        "ownerKey": defn.get("ownerKey"),
         # 行级权限声明镜像（accessKeys）：判决唯一在 core，Host 仅镜像元数据供摘要/调试；
         # 归档镜像不继承（与 ownerKey 现状一致）
-        'accessKeys': defn.get('accessKeys'),
+        "accessKeys": defn.get("accessKeys"),
         # 数据源绑定（缺省视为 default，见 datasource.py）— Phase 3/4 多后端路由
-        'datasource': defn.get('datasource'),
+        "datasource": defn.get("datasource"),
     }
 
     # 归档表镜像（形状对齐 core archive_defn：registry.rs:395-417）
     # —— 字段 + deletedAt、collection=<c>_deleted、idPrefix=''、timestamps 默认 true
     # archive:False（漉金Core 接入扩展 02）→ 归档模型在 core 注册期即不派生，
     # Host 镜像同步跳过（与 core 模型表保持一致，禁出现「core 无归档模型而 Host 有镜像」的中间态）
-    if (not defn.get('_isArchive') and not defn['name'].endswith('Deleted')
-            and defn.get('archive') is not False):
+    if (
+        not defn.get("_isArchive")
+        and not defn["name"].endswith("Deleted")
+        and defn.get("archive") is not False
+    ):
         _schemas[f"{defn['name']}Deleted"] = {
-            'name': f"{defn['name']}Deleted",
-            'collection': f"{defn.get('collection') or defn['name']}_deleted",
-            'database': defn.get('database') or None,
-            'schema': defn.get('schema') or None,
-            'idPrefix': '',
-            'timestamps': True,
-            'timestampUnit': 'ms',
-            'fields': {**(defn.get('fields') or {}), 'deletedAt': {'type': 'number'}},
-            'relations': {},
-            'computes': {},
-            'indexes': defn.get('indexes') or [],
-            'read': None,
-            'write': None,
-            'datasource': defn.get('datasource'),
+            "name": f"{defn['name']}Deleted",
+            "collection": f"{defn.get('collection') or defn['name']}_deleted",
+            "database": defn.get("database") or None,
+            "schema": defn.get("schema") or None,
+            "idPrefix": "",
+            "timestamps": True,
+            "timestampUnit": "ms",
+            "fields": {**(defn.get("fields") or {}), "deletedAt": {"type": "number"}},
+            "relations": {},
+            "computes": {},
+            "indexes": defn.get("indexes") or [],
+            "read": None,
+            "write": None,
+            "datasource": defn.get("datasource"),
         }
 
-    return _schemas[defn['name']]
+    return _schemas[defn["name"]]
 
 
 def register_batch(items, ctx=None):
@@ -246,13 +254,18 @@ def register_batch(items, ctx=None):
     落点**不进 defn**（定义文件零落点）。
     """
     get_core().register_batch(
-        [{'defn': _to_core_defn(it['defn']),
-          'location': it.get('location') or _loc_of(it['defn'])} for it in items],
+        [
+            {
+                "defn": _to_core_defn(it["defn"]),
+                "location": it.get("location") or _loc_of(it["defn"]),
+            }
+            for it in items
+        ],
         ctx,
     )
     for it in items:
-        defn = it.get('defn')
-        if defn and not defn.get('replica'):
+        defn = it.get("defn")
+        if defn and not defn.get("replica"):
             _mirror(defn)
 
 
@@ -264,21 +277,22 @@ def unregister(name):
     派生项，使 ``has`` / ``list`` 与 core 一致。
     """
     core = get_core()
-    fn = getattr(core, 'unregister', None)
+    fn = getattr(core, "unregister", None)
     if fn is None:
         raise RuntimeError(
-            '当前 rust-store-py 绑定未导出 Registry.unregister（core 源码已实现，'
-            '需重建绑定后生效）；无法执行注销，未做任何 Host 镜像改动')
+            "当前 rust-store-py 绑定未导出 Registry.unregister（core 源码已实现，"
+            "需重建绑定后生效）；无法执行注销，未做任何 Host 镜像改动"
+        )
     fn(name)
     _schemas.pop(name, None)
-    _schemas.pop(f'{name}Deleted', None)
+    _schemas.pop(f"{name}Deleted", None)
 
 
 def get(name):
     """按名称获取 Host 侧元数据"""
     s = _schemas.get(name)
     if not s:
-        raise KeyError(f'Schema 未注册: {name}')
+        raise KeyError(f"Schema 未注册: {name}")
     return s
 
 
@@ -299,6 +313,7 @@ def clear_schemas():
     _async_fns.clear()
     _dup_signatures.clear()
     from . import naming as _naming  # 局部导入规避包内循环导入
+
     _naming.clear_cache()
 
 
@@ -324,15 +339,19 @@ def list():
         sig = tuple(names)
         if sig not in _dup_signatures:
             _dup_signatures.add(sig)
-            _emit_feedback({
-                'type': 'schema_duplicate_name',
-                'code': 'schemaDuplicateName',
-                'layer': 'host',
-                'message': f'schema 注册表存在重复名（多 {len(names) - len(out)} 条），已顺序去重',
-                'hint': ('上游注册逻辑失守（core.order 同名两次）；'
-                         '核查 register 是否重复调用 core.register，或 core.register 未对同名去重'),
-                'names': names,
-            })
+            _emit_feedback(
+                {
+                    "type": "schema_duplicate_name",
+                    "code": "schemaDuplicateName",
+                    "layer": "host",
+                    "message": f"schema 注册表存在重复名（多 {len(names) - len(out)} 条），已顺序去重",
+                    "hint": (
+                        "上游注册逻辑失守（core.order 同名两次）；"
+                        "核查 register 是否重复调用 core.register，或 core.register 未对同名去重"
+                    ),
+                    "names": names,
+                }
+            )
     return out
 
 
@@ -401,7 +420,7 @@ def text2query():
     与 ``permission.scoped_roles`` 同构（ContextVar token-set/reset，嵌套安全）。
     进入档位即等效强制携带用户上下文（core `ensure_profile_ctx`，见执行文档 §4.2）。
     """
-    view = get_core().with_policy({'profile': 'text2query'})
+    view = get_core().with_policy({"profile": "text2query"})
     with with_scope(view):
         yield
 
@@ -424,23 +443,28 @@ def set_fn(impl_name, impl):
     k = _norm_key(impl_name)
     prev = _fn_impls.get(k)
     if prev and prev[0] != impl_name:
-        raise ValueError(f'ERR_FN_CONFLICT:实现名 "{impl_name}" 与 "{prev[0]}" 归一后相同（{k}）')
+        raise ValueError(
+            f'ERR_FN_CONFLICT:实现名 "{impl_name}" 与 "{prev[0]}" 归一后相同（{k}）'
+        )
     _fn_impls[k] = (impl_name, impl)
 
 
 def _bind_one(schema_name, key, comp):
     """解析单个回调计算列的实现并绑定 core；无实现返回 False。"""
-    embedded = comp and (comp.get('fn') or comp.get('asyncFn'))
+    embedded = comp and (comp.get("fn") or comp.get("asyncFn"))
     if callable(embedded):
         impl = embedded
     else:
-        impl = (_fn_impls.get(_norm_key(_logical_fn_ref(schema_name, key, comp))) or (None, None))[1]
+        impl = (
+            _fn_impls.get(_norm_key(_logical_fn_ref(schema_name, key, comp)))
+            or (None, None)
+        )[1]
     if not callable(impl):
         return False
     core_key = _core_fn_key(key, comp)
-    if comp.get('fn'):
+    if comp.get("fn"):
         get_core().set_fn(core_key, impl)
-    if comp.get('asyncFn'):
+    if comp.get("asyncFn"):
         _async_fns[core_key] = impl
     return True
 
@@ -452,10 +476,10 @@ def assert_fns_covered(defns):
     """
     missing = []
     for defn in defns or ():
-        for key, val in ((defn or {}).get('computes') or {}).items():
-            if val and val.get('agg'):
+        for key, val in ((defn or {}).get("computes") or {}).items():
+            if val and val.get("agg"):
                 continue
-            if not _bind_one(defn['name'], key, val):
-                missing.append(_logical_fn_ref(defn['name'], key, val))
+            if not _bind_one(defn["name"], key, val):
+                missing.append(_logical_fn_ref(defn["name"], key, val))
     if missing:
         raise RuntimeError(f"ERR_FN_MISSING:未注入回调实现 {', '.join(missing)}")

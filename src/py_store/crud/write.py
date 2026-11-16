@@ -18,8 +18,8 @@ from .triggers import run_triggers
 async def _plan_with_probe(plan_fn):
     """creator 写权限探针：先规划，若 needsProbe 则执行探针命令后重入"""
     out = plan_fn(None, None)
-    if out.get('needsProbe'):
-        probe_doc = await _exec(out['needsProbe'])
+    if out.get("needsProbe"):
+        probe_doc = await _exec(out["needsProbe"])
         out = plan_fn(probe_doc is not None, probe_doc)
     return out
 
@@ -28,28 +28,40 @@ async def insert(schema_name, data, route_override=None):
     """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``）"""
     s = _get_schema(schema_name)
     now = _now_for(schema_name)
-    plan = _call(lambda: get_core().plan_insert(
-        schema_name, data, now, _generate_id(s) if s['idPrefix'] else '', _ctx(),
-        route_override))
+    plan = _call(
+        lambda: get_core().plan_insert(
+            schema_name,
+            data,
+            now,
+            _generate_id(s) if s["idPrefix"] else "",
+            _ctx(),
+            route_override,
+        )
+    )
 
     def _finish(result):
-        returns = plan['returns']
+        returns = plan["returns"]
         # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
-        if (isinstance(returns, dict) and not returns.get('_id')
-                and isinstance(result, dict) and result.get('_id') is not None):
-            return {**returns, '_id': result['_id']}
+        if (
+            isinstance(returns, dict)
+            and not returns.get("_id")
+            and isinstance(result, dict)
+            and result.get("_id") is not None
+        ):
+            return {**returns, "_id": result["_id"]}
         return returns
 
     # 无触发器：保持原路径（零回归）
-    if not plan.get('triggers'):
-        return _finish(await _exec(plan['command']))
+    if not plan.get("triggers"):
+        return _finish(await _exec(plan["command"]))
     # 有触发器：主写 + 触发链同一原子作用域（单源真事务 / 跨源发 non_atomic_write）
     ctx = _ctx()
 
     async def _do():
-        result = await _exec(plan['command'])
-        await run_triggers(plan['triggers'], root=result, before=None, now=now, ctx=ctx,
-                           executed=set())
+        result = await _exec(plan["command"])
+        await run_triggers(
+            plan["triggers"], root=result, before=None, now=now, ctx=ctx, executed=set()
+        )
         return _finish(result)
 
     return await run_atomic(_sources_of(plan), _do)
@@ -63,23 +75,28 @@ async def insert_many(schema_name, docs, route_override=None):
     s = _get_schema(schema_name)
     # 阶段2（no-error-masking）：autoincrement 的批量自增值回读不可靠（MySQL 批量
     # lastrowid 仅首行、且并发插入会留间隙）→ 显式报错，不静默产出错误 _id
-    id_fdef = (s.get('fields') or {}).get('_id') or {}
-    if id_fdef.get('strategy') == 'autoincrement' and any(not (d or {}).get('_id') for d in docs):
+    id_fdef = (s.get("fields") or {}).get("_id") or {}
+    if id_fdef.get("strategy") == "autoincrement" and any(
+        not (d or {}).get("_id") for d in docs
+    ):
         raise ValueError(
-            'AUTOINCREMENT_NOT_SUPPORTED: insert_many 不支持 autoincrement schema'
-            '（批量自增值回读不可靠）；请逐条 insert 或显式提供 _id')
-    plan = _call(lambda: get_core().plan_insert_many(
-        schema_name,
-        docs,
-        _now_for(schema_name),
-        # core 按需消费（仅无 _id 的文档取用），多备无害
-        [_generate_id(s) if s['idPrefix'] else '' for _ in docs],
-        _ctx(),
-        route_override,
-    ))
-    if plan.get('command'):
-        await _exec(plan['command'])
-    return plan['returns']
+            "AUTOINCREMENT_NOT_SUPPORTED: insert_many 不支持 autoincrement schema"
+            "（批量自增值回读不可靠）；请逐条 insert 或显式提供 _id"
+        )
+    plan = _call(
+        lambda: get_core().plan_insert_many(
+            schema_name,
+            docs,
+            _now_for(schema_name),
+            # core 按需消费（仅无 _id 的文档取用），多备无害
+            [_generate_id(s) if s["idPrefix"] else "" for _ in docs],
+            _ctx(),
+            route_override,
+        )
+    )
+    if plan.get("command"):
+        await _exec(plan["command"])
+    return plan["returns"]
 
 
 async def update(schema_name, condition, data, options=None, route_override=None):
@@ -94,26 +111,47 @@ async def update(schema_name, condition, data, options=None, route_override=None
     """
     now = _now_for(schema_name)
     ctx = _ctx()
-    first = _call(lambda: get_core().plan_update(
-        schema_name, condition, data, options, now, ctx, None, None, route_override))
+    first = _call(
+        lambda: get_core().plan_update(
+            schema_name, condition, data, options, now, ctx, None, None, route_override
+        )
+    )
     sources = _sources_of(first)
 
     async def _do():
         out = first
         before = None
-        if out.get('needsProbe'):
-            before = await _exec(out['needsProbe'])          # 探针文档 = before（含 onFields 投影）
-            out = _call(lambda: get_core().plan_update(
-                schema_name, condition, data, options, now, ctx,
-                before is not None, before, route_override))
+        if out.get("needsProbe"):
+            before = await _exec(
+                out["needsProbe"]
+            )  # 探针文档 = before（含 onFields 投影）
+            out = _call(
+                lambda: get_core().plan_update(
+                    schema_name,
+                    condition,
+                    data,
+                    options,
+                    now,
+                    ctx,
+                    before is not None,
+                    before,
+                    route_override,
+                )
+            )
         # 触发链触及源并入原子性声明（update 的 triggers 二次规划才产出；跨源 → non_atomic_write）
-        if out.get('triggers'):
-            declare_trigger_sources(sources, out['triggers'])
-        result = await _exec(out['command'])
+        if out.get("triggers"):
+            declare_trigger_sources(sources, out["triggers"])
+        result = await _exec(out["command"])
         # 主写有命中才触发（0 行命中 = 无 after，无从引用；配触发器的 update 由 core 强制发探针）
-        if out.get('triggers') and result:
-            await run_triggers(out['triggers'], root=result, before=before, now=now, ctx=ctx,
-                               executed=set())
+        if out.get("triggers") and result:
+            await run_triggers(
+                out["triggers"],
+                root=result,
+                before=before,
+                now=now,
+                ctx=ctx,
+                executed=set(),
+            )
         return await apply_write_computes(schema_name, result) if result else None
 
     return await run_atomic(sources, _do)
@@ -126,13 +164,13 @@ async def _exec_with_pre(command):
     filter 的 `_id.$in` 占位（core 规划注入 ``"__REL_PRED_IDS__"``）。空集 → `$in: []`，
     各后端语义一致 = 不命中任何行。同批可传 ``extra_targets``：其他携带同一占位的
     命令（如 remove 的归档 findCommand）一并回填，避免二次执行 preCommand。"""
-    pre = command.get('preCommand')
+    pre = command.get("preCommand")
     if not pre:
         return await _exec(command)
     ids = []
     for doc in await _exec(pre):
-        if isinstance(doc, dict) and '_id' in doc:
-            ids.append(doc['_id'])
+        if isinstance(doc, dict) and "_id" in doc:
+            ids.append(doc["_id"])
     return await _fill_pre_ids(command, ids)
 
 
@@ -140,30 +178,33 @@ def _fill_pre_ids(command, ids):
     """把 preCommand 取得的 `_id` 列表回填进命令 filter 的 `$in` 占位（递归查找后执行）。
 
     core 注入的占位可能位于 `$and` 数组内（改写条件已有其他键时），故递归遍历。"""
-    main = {k: v for k, v in command.items() if k != 'preCommand'}
+    main = {k: v for k, v in command.items() if k != "preCommand"}
 
     def _walk(node):
         if isinstance(node, dict):
             for k, v in list(node.items()):
-                if isinstance(v, dict) and v.get('$in') == '__REL_PRED_IDS__':
-                    node[k] = {'$in': list(ids)}
+                if isinstance(v, dict) and v.get("$in") == "__REL_PRED_IDS__":
+                    node[k] = {"$in": list(ids)}
                 else:
                     _walk(v)
         elif isinstance(node, list):
             for it in node:
                 _walk(it)
 
-    if 'filter' in main:
-        _walk(main['filter'])
+    if "filter" in main:
+        _walk(main["filter"])
     return _exec(main)
 
 
 async def update_many(schema_name, condition, data, route_override=None):
     """批量更新（支持原生操作符）"""
-    out = _call(lambda: get_core().plan_update_many(
-        schema_name, condition, data, _now_for(schema_name), _ctx(), route_override))
-    result = await _exec_with_pre(out['command'])
-    return {'modifiedCount': result.modified_count}
+    out = _call(
+        lambda: get_core().plan_update_many(
+            schema_name, condition, data, _now_for(schema_name), _ctx(), route_override
+        )
+    )
+    result = await _exec_with_pre(out["command"])
+    return {"modifiedCount": result.modified_count}
 
 
 async def remove(schema_name, condition, route_override=None, options=None):
@@ -180,38 +221,59 @@ async def remove(schema_name, condition, route_override=None, options=None):
     """
     # 归档判定（漉金Core 接入扩展 02）：调用级 options.archive 显式 False → 跳过归档段；
     # schema 级裁决在 core 注册期（archive:False 不派生归档模型 → plan_remove 无 findCommand）
-    do_archive = not (isinstance(options, dict) and options.get('archive') is False)
-    out = await _plan_with_probe(lambda found, doc: _call(lambda: get_core().plan_remove(
-        schema_name, condition, _ctx(), found, doc, route_override)))
+    do_archive = not (isinstance(options, dict) and options.get("archive") is False)
+    out = await _plan_with_probe(
+        lambda found, doc: _call(
+            lambda: get_core().plan_remove(
+                schema_name, condition, _ctx(), found, doc, route_override
+            )
+        )
+    )
 
     async def _do_remove():
         archived_count = 0
         docs = []
         # 关系谓词：先执行 deleteCommand.preCommand 取命中 _id（归档 find 与删除共用同一列表）
-        pre = (out.get('deleteCommand') or {}).get('preCommand')
+        pre = (out.get("deleteCommand") or {}).get("preCommand")
         ids = None
         if pre:
-            ids = [d['_id'] for d in await _exec(pre) if isinstance(d, dict) and '_id' in d]
-        if do_archive and out.get('findCommand'):
-            find_cmd = out['findCommand']
-            docs = await (_fill_pre_ids(find_cmd, ids) if ids is not None else _exec(find_cmd))
+            ids = [
+                d["_id"] for d in await _exec(pre) if isinstance(d, dict) and "_id" in d
+            ]
+        if do_archive and out.get("findCommand"):
+            find_cmd = out["findCommand"]
+            docs = await (
+                _fill_pre_ids(find_cmd, ids) if ids is not None else _exec(find_cmd)
+            )
             if docs:
-                arch = _call(lambda: get_core().plan_archive_docs(
-                    schema_name, docs, _now_for(schema_name), route_override))
-                await _exec(arch['command'])
+                arch = _call(
+                    lambda: get_core().plan_archive_docs(
+                        schema_name, docs, _now_for(schema_name), route_override
+                    )
+                )
+                await _exec(arch["command"])
                 archived_count = len(docs)
 
-        result = await (_fill_pre_ids(out['deleteCommand'], ids)
-                        if ids is not None else _exec(out['deleteCommand']))
-        if out.get('triggers') and docs:
-            await run_triggers(out['triggers'], root=None, before=docs[0],
-                               now=_now_for(schema_name), ctx=_ctx(), executed=set())
-        return {'deletedCount': result.deleted_count, 'archivedCount': archived_count}
+        result = await (
+            _fill_pre_ids(out["deleteCommand"], ids)
+            if ids is not None
+            else _exec(out["deleteCommand"])
+        )
+        if out.get("triggers") and docs:
+            await run_triggers(
+                out["triggers"],
+                root=None,
+                before=docs[0],
+                now=_now_for(schema_name),
+                ctx=_ctx(),
+                executed=set(),
+            )
+        return {"deletedCount": result.deleted_count, "archivedCount": archived_count}
 
     sources = _sources_of(out)
     # 触发链触及源并入原子性声明（跨源 → non_atomic_write）
-    if out.get('triggers'):
-        declare_trigger_sources(sources, out['triggers'])
+    if out.get("triggers"):
+        declare_trigger_sources(sources, out["triggers"])
     return await run_atomic(sources, _do_remove)
 
 
@@ -221,8 +283,11 @@ async def exists(schema_name, condition, route_override=None):
     ``read: []`` / 字段白名单 / RBAC enforce 均经 ``plan_exists_with_ctx`` 生效，
     被拒时抛 ``PermissionError``）。"""
     core = get_core()
-    cmd = _call(lambda: core.plan_exists_with_ctx(
-        schema_name, condition, _ctx(), route_override))
+    cmd = _call(
+        lambda: core.plan_exists_with_ctx(
+            schema_name, condition, _ctx(), route_override
+        )
+    )
     doc = await _exec(cmd)
     return doc is not None
 
@@ -241,5 +306,7 @@ async def apply_write_computes(schema_name, doc):
 
 async def count(schema_name, filter=None, route_override=None):
     """统计符合条件的文档数量"""
-    cmd = _call(lambda: get_core().plan_count(schema_name, filter, _ctx(), route_override))
+    cmd = _call(
+        lambda: get_core().plan_count(schema_name, filter, _ctx(), route_override)
+    )
     return await _exec(cmd)

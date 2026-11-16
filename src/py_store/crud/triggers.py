@@ -13,7 +13,7 @@ from typing import Set
 
 from .exec import _exec
 
-_store = None                 # 装配期由 py_store.__init__ 注入（避免循环导入）
+_store = None  # 装配期由 py_store.__init__ 注入（避免循环导入）
 _trigger_fns: dict = {}
 _fn_refs: Set[str] = set()
 
@@ -27,9 +27,9 @@ def set_store(s):
 def set_trigger_fn(fn_ref, impl):
     """回调注入：``fn_ref → impl(args, ctx, {'store': store})``（可为 async）"""
     if not isinstance(fn_ref, str) or not fn_ref:
-        raise ValueError('ERR_TRIGGER_FN_REF:fnRef 须为非空字符串')
+        raise ValueError("ERR_TRIGGER_FN_REF:fnRef 须为非空字符串")
     if not callable(impl):
-        raise ValueError('ERR_TRIGGER_FN_IMPL:impl 须为函数')
+        raise ValueError("ERR_TRIGGER_FN_IMPL:impl 须为函数")
     _trigger_fns[fn_ref] = impl
     _fn_refs.add(fn_ref)
 
@@ -42,20 +42,22 @@ def assert_trigger_fns_covered(defns):
     """
     missing = []
     for defn in defns or ():
-        for trigger_list in ((defn or {}).get('triggers') or {}).values():
+        for trigger_list in ((defn or {}).get("triggers") or {}).values():
             for t in trigger_list or ():
-                ref = t.get('fnRef') if isinstance(t, dict) else None
+                ref = t.get("fnRef") if isinstance(t, dict) else None
                 if isinstance(ref, str) and ref and ref not in _fn_refs:
                     missing.append(ref)
     if missing:
-        raise RuntimeError(f'ERR_TRIGGER_FN_MISSING:未注入触发器回调实现 {", ".join(missing)}')
+        raise RuntimeError(
+            f"ERR_TRIGGER_FN_MISSING:未注入触发器回调实现 {', '.join(missing)}"
+        )
 
 
 # ─── 占位符（整值替换；禁内嵌拼接） ───────────────────────────
 
-_ROOT_PH = re.compile(r'^\{\{root\.([A-Za-z0-9_.]+)\}\}$')
-_BEFORE_PH = re.compile(r'^\{\{before\.([A-Za-z0-9_.]+)\}\}$')
-_NOW_PH = re.compile(r'^\{\{now\}\}$')
+_ROOT_PH = re.compile(r"^\{\{root\.([A-Za-z0-9_.]+)\}\}$")
+_BEFORE_PH = re.compile(r"^\{\{before\.([A-Za-z0-9_.]+)\}\}$")
+_NOW_PH = re.compile(r"^\{\{now\}\}$")
 
 
 def _dig(obj, path):
@@ -63,7 +65,7 @@ def _dig(obj, path):
     if obj is None:
         return None
     cur = obj
-    for seg in str(path).split('.'):
+    for seg in str(path).split("."):
         if cur is None:
             return None
         if not isinstance(cur, dict):
@@ -91,16 +93,17 @@ def resolve_trigger_placeholders(value, scope):
     """
     if isinstance(value, str):
         if _NOW_PH.match(value):
-            return scope['now']
+            return scope["now"]
         m = _ROOT_PH.match(value)
         if m:
-            return _dig(scope['root'], m.group(1))
+            return _dig(scope["root"], m.group(1))
         m = _BEFORE_PH.match(value)
         if m:
-            return _dig(scope['before'], m.group(1))
-        if '{{root.' in value or '{{before.' in value or '{{now}}' in value:
+            return _dig(scope["before"], m.group(1))
+        if "{{root." in value or "{{before." in value or "{{now}}" in value:
             raise ValueError(
-                f'ERR_TRIGGER_PLACEHOLDER:占位符必须独占字符串值（不支持内嵌拼接）：{value}')
+                f"ERR_TRIGGER_PLACEHOLDER:占位符必须独占字符串值（不支持内嵌拼接）：{value}"
+            )
         return value
     if isinstance(value, list):
         return [resolve_trigger_placeholders(v, scope) for v in value]
@@ -111,7 +114,7 @@ def resolve_trigger_placeholders(value, scope):
 
 # ─── when 求值（极简文法；未知算子显式 Err） ──────────────────
 
-_WHEN_OPS = frozenset({'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in', 'and', 'or', 'not'})
+_WHEN_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "and", "or", "not"})
 
 
 def eval_when(when, scope):
@@ -119,49 +122,52 @@ def eval_when(when, scope):
         return True
     keys = list(when.keys())
     if len(keys) != 1:
-        raise ValueError('ERR_TRIGGER_WHEN:when 必须且只能有一个算子键')
+        raise ValueError("ERR_TRIGGER_WHEN:when 必须且只能有一个算子键")
     op = keys[0]
     if op not in _WHEN_OPS:
-        raise ValueError(f'ERR_TRIGGER_WHEN:未知算子 {op}')
+        raise ValueError(f"ERR_TRIGGER_WHEN:未知算子 {op}")
     arg = when[op]
 
     def rv(v):
         return resolve_trigger_placeholders(v, scope)
 
-    if op == 'eq':
+    if op == "eq":
         return rv(arg[0]) == rv(arg[1])
-    if op == 'ne':
+    if op == "ne":
         return rv(arg[0]) != rv(arg[1])
-    if op == 'gt':
+    if op == "gt":
         return rv(arg[0]) > rv(arg[1])
-    if op == 'gte':
+    if op == "gte":
         return rv(arg[0]) >= rv(arg[1])
-    if op == 'lt':
+    if op == "lt":
         return rv(arg[0]) < rv(arg[1])
-    if op == 'lte':
+    if op == "lte":
         return rv(arg[0]) <= rv(arg[1])
-    if op == 'in':
+    if op == "in":
         return rv(arg[0]) in (rv(arg[1]) or [])
-    if op == 'and':
+    if op == "and":
         return all(eval_when(w, scope) for w in (arg or []))
-    if op == 'or':
+    if op == "or":
         return any(eval_when(w, scope) for w in (arg or []))
     return not eval_when(arg, scope)  # not
 
 
 # ─── 命中判定 + 执行器 ───────────────────────────────────────
 
+
 def hit_trigger(step, *, before, after, scope):
     """命中判定：``onFields 值真的变化`` → ``when 成立``。
 
     ``onFields`` 为空（记录级）或事件为 insert（无 before）时跳过字段级检查。
     """
-    on = step.get('onFields') or []
+    on = step.get("onFields") or []
     if on and before is not None:
-        changed = any(not _deep_eq(_dig(before, f), _dig(after, f)) for f in on)   # no-op 抑制
+        changed = any(
+            not _deep_eq(_dig(before, f), _dig(after, f)) for f in on
+        )  # no-op 抑制
         if not changed:
             return False
-    return eval_when(step.get('when'), scope)
+    return eval_when(step.get("when"), scope)
 
 
 async def run_triggers(steps, *, root, before, now, ctx, executed):
@@ -171,21 +177,21 @@ async def run_triggers(steps, *, root, before, now, ctx, executed):
     （键 ``name#_id``）；``_store`` 为门面，回调经 ``host['store']`` 消费。
     """
     for step in steps or ():
-        rid = _dig(root, '_id')
+        rid = _dig(root, "_id")
         key = f"{step['name']}#{'' if rid is None else rid}"
         if key in executed:
-            continue                                        # 同事务去重
-        scope = {'root': root, 'before': before, 'now': now}
+            continue  # 同事务去重
+        scope = {"root": root, "before": before, "now": now}
         if not hit_trigger(step, before=before, after=root, scope=scope):
             continue
         executed.add(key)
-        if step.get('command'):
-            await _exec(resolve_trigger_placeholders(step['command'], scope))
-        elif step.get('callback'):
-            fn_ref = step['callback'].get('fnRef')
+        if step.get("command"):
+            await _exec(resolve_trigger_placeholders(step["command"], scope))
+        elif step.get("callback"):
+            fn_ref = step["callback"].get("fnRef")
             impl = _trigger_fns.get(fn_ref)
             if impl is None:
-                raise RuntimeError(f'ERR_TRIGGER_FN_MISSING:未注入触发器回调 {fn_ref}')
-            args = resolve_trigger_placeholders(step['callback'].get('args'), scope)
+                raise RuntimeError(f"ERR_TRIGGER_FN_MISSING:未注入触发器回调 {fn_ref}")
+            args = resolve_trigger_placeholders(step["callback"].get("args"), scope)
             # 回调内 store.* 经 resolve_connection 落到当前事务连接 → 与主写同事务
-            await impl(args, ctx, {'store': _store})
+            await impl(args, ctx, {"store": _store})

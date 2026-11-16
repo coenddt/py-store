@@ -29,7 +29,7 @@ from py_store import schema as _sc
 from py_store import workflow as _wf
 
 
-@pytest.fixture(scope='module', autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _isolated_schema_registry(request):
     """模块级注册表隔离（schema + workflow 注册表；进入清场 + 重放本模块注册 + 退出清场）
 
@@ -39,7 +39,7 @@ def _isolated_schema_registry(request):
     _sc.clear_schemas()
     _wf.clear_workflows()
     _wf.ensure_builtin()  # 内建 __workflowRun 随注册表重建恢复（幂等自举）
-    register_own = getattr(request.module, '_register_test_schemas', None)
+    register_own = getattr(request.module, "_register_test_schemas", None)
     if register_own is not None:
         register_own()
     yield

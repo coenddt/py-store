@@ -31,9 +31,9 @@ def _secure_overrides(admin_roles):
     报 ``ERR_POLICY_VIEW_READONLY: 未知策略覆盖键``（03 §8.2 的键名核对）。
     """
     return {
-        'requireContext': True,
-        'roleRules': {'unconfigured': 'closed'},
-        'metaPolicy': {'closed': True, 'roles': admin_roles},
+        "requireContext": True,
+        "roleRules": {"unconfigured": "closed"},
+        "metaPolicy": {"closed": True, "roles": admin_roles},
     }
 
 
@@ -50,12 +50,12 @@ def secure_mode(admin_roles: list[str] | None = None) -> dict:
         # 作用域内：派生叠加视图并更新本作用域（视图只读守卫拦的是注册/清空，非策略叠加）
         s.view = s.view.with_policy(_secure_overrides(roles))
         s.secure = True
-        return {'secure': True}
+        return {"secure": True}
     schema.get_core().set_require_context(True)
-    permission.set_unconfigured_policy('closed')
+    permission.set_unconfigured_policy("closed")
     schema.get_core().set_meta_policy(True, roles)
     _secure = True
-    return {'secure': True}
+    return {"secure": True}
 
 
 def is_secure() -> bool:
@@ -81,15 +81,17 @@ def relax_mode() -> dict:
     global _secure
     s = current_scope()
     if s is not None:
-        s.view = s.view.with_policy({
-            'requireContext': False,
-            'roleRules': {'unconfigured': 'open'},
-            'metaPolicy': {'closed': False, 'roles': []},
-        })
+        s.view = s.view.with_policy(
+            {
+                "requireContext": False,
+                "roleRules": {"unconfigured": "open"},
+                "metaPolicy": {"closed": False, "roles": []},
+            }
+        )
         s.secure = False
-        return {'secure': False}
+        return {"secure": False}
     schema.get_core().set_require_context(False)
-    permission.set_unconfigured_policy('open')
+    permission.set_unconfigured_policy("open")
     schema.get_core().set_meta_policy(False, [])
     _secure = False
-    return {'secure': False}
+    return {"secure": False}

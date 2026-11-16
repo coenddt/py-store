@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable
 
-__all__ = ['HttpAdapterError', 'create_http_adapter']
+__all__ = ["HttpAdapterError", "create_http_adapter"]
 
 
 class HttpAdapterError(Exception):
@@ -28,20 +29,23 @@ class HttpAdapterError(Exception):
 
     def __init__(self, message: str, status: int | None = None, url: str | None = None):
         super().__init__(message)
-        self.name = 'HttpAdapterError'
+        self.name = "HttpAdapterError"
         self.status = status
         self.url = url
 
 
 def _default_fetch(url, method, headers, body, timeout):
     """标准库同步实现（由调用方经 ``asyncio.to_thread`` 执行）；返回 ``(status, text)``。"""
-    data = body.encode('utf-8') if body is not None else None
+    # scheme 白名单：禁 file:// / ftp:// 等非 HTTP 传输面（SSRF 面 = HTTP/HTTPS 本身）
+    if urllib.parse.urlparse(url).scheme.lower() not in ("http", "https"):
+        raise HttpAdapterError(f"仅支持 http/https scheme，收到：{url!r}", 400, url)
+    data = body.encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode('utf-8', 'replace')
+            return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode('utf-8', 'replace')
+        return e.code, e.read().decode("utf-8", "replace")
 
 
 def create_http_adapter(spec: dict) -> dict:
@@ -51,16 +55,16 @@ def create_http_adapter(spec: dict) -> dict:
         'pick'(json)->list, 'map'(row)->dict, 'fetch_impl', 'timeout_ms'}``
     :returns: ``{'fetch': async (params=None) -> list[dict]}``
     """
-    if not spec or not spec.get('base_url'):
-        raise TypeError('create_http_adapter 需要 spec.base_url')
-    base_url = spec['base_url']
-    method = spec.get('method', 'GET')
-    headers = spec.get('headers')
-    path_fn: Callable | None = spec.get('path')
-    pick: Callable | None = spec.get('pick')
-    map_fn: Callable | None = spec.get('map')
-    fetch_impl: Callable | None = spec.get('fetch_impl')
-    timeout_ms = spec.get('timeout_ms') or 0
+    if not spec or not spec.get("base_url"):
+        raise TypeError("create_http_adapter 需要 spec.base_url")
+    base_url = spec["base_url"]
+    method = spec.get("method", "GET")
+    headers = spec.get("headers")
+    path_fn: Callable | None = spec.get("path")
+    pick: Callable | None = spec.get("pick")
+    map_fn: Callable | None = spec.get("map")
+    fetch_impl: Callable | None = spec.get("fetch_impl")
+    timeout_ms = spec.get("timeout_ms") or 0
     fetch = fetch_impl or _default_fetch
 
     async def fetch_docs(params: dict | None = None) -> list:
@@ -68,32 +72,38 @@ def create_http_adapter(spec: dict) -> dict:
         url = path_fn(params) if path_fn else base_url
         hdrs = dict(headers or {})
         body = None
-        if method == 'POST':
-            hdrs.setdefault('content-type', 'application/json')
+        if method == "POST":
+            hdrs.setdefault("content-type", "application/json")
             body = json.dumps(params)
         timeout = timeout_ms / 1000 if timeout_ms else None
 
         try:
-            status, text = await asyncio.to_thread(fetch, url, method, hdrs, body, timeout)
+            status, text = await asyncio.to_thread(
+                fetch, url, method, hdrs, body, timeout
+            )
         except HttpAdapterError:
             raise
         except Exception as e:  # 网络层错误 ⇒ 显式 Err（禁静默）
-            raise HttpAdapterError(f'HTTP 请求失败 {url}: {e}', None, url) from e
+            raise HttpAdapterError(f"HTTP 请求失败 {url}: {e}", None, url) from e
 
         if not (200 <= status < 300):
-            raise HttpAdapterError(f'HTTP {status} {url}', status, url)
+            raise HttpAdapterError(f"HTTP {status} {url}", status, url)
 
         try:
             payload = json.loads(text)
         except (ValueError, TypeError) as e:
             raise HttpAdapterError(
-                f'HTTP 响应非 JSON {url}: {str(text)[:200]}', status, url) from e
+                f"HTTP 响应非 JSON {url}: {str(text)[:200]}", status, url
+            ) from e
 
         rows = pick(payload) if pick else payload
         if not isinstance(rows, list):
             raise HttpAdapterError(
-                f'HTTP 响应结构非数组 {url}: pick 返回 {type(rows).__name__}', status, url)
+                f"HTTP 响应结构非数组 {url}: pick 返回 {type(rows).__name__}",
+                status,
+                url,
+            )
 
         return [map_fn(r) for r in rows] if map_fn else rows
 
-    return {'fetch': fetch_docs}
+    return {"fetch": fetch_docs}

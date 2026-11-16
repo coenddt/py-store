@@ -31,7 +31,9 @@ def test_fixture_identical():
     node_m = re.search(r"const FIXTURE_JSON = `([\s\S]*?)`;", node_text)
     assert py_m, "py 侧 FIXTURE_JSON 提取失败"
     assert node_m, "node 侧 FIXTURE_JSON 提取失败"
-    assert py_m.group(1) == node_m.group(1), "两侧 fixture 文本不一致（禁各写一份场景定义）"
+    assert py_m.group(1) == node_m.group(1), (
+        "两侧 fixture 文本不一致（禁各写一份场景定义）"
+    )
 
 
 def test_py_output_valid_standalone():

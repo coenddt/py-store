@@ -25,13 +25,21 @@ NODE_SCRIPT = ROOT.parent / "nodejs-store" / "scripts" / "parity-scope.js"
 
 def _run_py():
     return subprocess.run(
-        [sys.executable, str(PY_SCRIPT)], capture_output=True, text=True, encoding="utf-8", check=True
+        [sys.executable, str(PY_SCRIPT)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     ).stdout
 
 
 def _run_node():
     return subprocess.run(
-        ["node", str(NODE_SCRIPT)], capture_output=True, text=True, encoding="utf-8", check=True
+        ["node", str(NODE_SCRIPT)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     ).stdout
 
 
@@ -58,14 +66,20 @@ def test_fixture_identical():
 
 def test_py_output_valid_and_discriminating():
     out = _run_py()
-    assert not out.startswith("ERR:"), f"py 侧不得以错误输出结束（开发期须 LOCAL_CORE=1）: {out}"
+    assert not out.startswith("ERR:"), (
+        f"py 侧不得以错误输出结束（开发期须 LOCAL_CORE=1）: {out}"
+    )
     lines = out.strip().split("\n")
     assert len(lines) == 1, "py 侧必须输出单行 JSON"
     parsed = json.loads(lines[0])
 
     # 视图集合与 fixture 对齐
     assert [v["view"] for v in parsed["views"]] == [
-        "standard", "text2query", "rbacGranted", "rbacDenied", "locked",
+        "standard",
+        "text2query",
+        "rbacGranted",
+        "rbacDenied",
+        "locked",
     ]
 
     # 判别力①：档位随视图变化
@@ -73,13 +87,23 @@ def test_py_output_valid_and_discriminating():
     assert _snapshot(parsed, "text2query")["profile"] == "text2query"
 
     # 判别力②：rbac 判决随视图变化（同一 ctx）
-    assert _snapshot(parsed, "rbacGranted")["rbac:ScopePost:read:viewer"] == {"ok": True, "value": True}
-    assert _snapshot(parsed, "rbacDenied")["rbac:ScopePost:read:viewer"] == {"ok": True, "value": False}
+    assert _snapshot(parsed, "rbacGranted")["rbac:ScopePost:read:viewer"] == {
+        "ok": True,
+        "value": True,
+    }
+    assert _snapshot(parsed, "rbacDenied")["rbac:ScopePost:read:viewer"] == {
+        "ok": True,
+        "value": False,
+    }
 
     # 判别力③：三开关视图（requireContext + unconfigured closed）确实拦截
     locked = _snapshot(parsed, "locked")
-    assert locked["plan:condition:viewer"]["ok"] is False, "closed 策略下无授权模型须被拦"
-    assert locked["plan:condition:viewer"]["error"].startswith("ERR_"), locked["plan:condition:viewer"]
+    assert locked["plan:condition:viewer"]["ok"] is False, (
+        "closed 策略下无授权模型须被拦"
+    )
+    assert locked["plan:condition:viewer"]["error"].startswith("ERR_"), locked[
+        "plan:condition:viewer"
+    ]
 
     # 判别力④：plan 为规范化 JSON 文本（非空命令）
     plan = json.loads(_snapshot(parsed, "standard")["plan:condition:viewer"]["value"])
@@ -87,7 +111,11 @@ def test_py_output_valid_and_discriminating():
 
     # 判别力⑤：非法覆盖逐条被拒，文案原文非空
     assert [b["view"] for b in parsed["badViews"]] == [
-        "unknownKey", "badProfile", "unknownRoleRule", "unknownMetaPolicy", "notObject",
+        "unknownKey",
+        "badProfile",
+        "unknownRoleRule",
+        "unknownMetaPolicy",
+        "notObject",
     ]
     for b in parsed["badViews"]:
         assert b["ok"] is False, f"{b['view']} 应被拒（禁静默派生）"

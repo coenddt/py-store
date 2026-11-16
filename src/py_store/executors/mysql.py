@@ -15,12 +15,12 @@ from ._values import normalize_rows
 @asynccontextmanager
 async def acquire(driver):
     """兼容连接池与单连接：池用 ``acquire()``，单连接直接复用"""
-    acquire_fn = getattr(driver, 'acquire', None)
+    acquire_fn = getattr(driver, "acquire", None)
     if acquire_fn is None:
         yield driver
         return
     got = acquire_fn()
-    if hasattr(got, '__aenter__'):
+    if hasattr(got, "__aenter__"):
         async with got as conn:
             yield conn
         return
@@ -29,7 +29,7 @@ async def acquire(driver):
     try:
         yield conn
     finally:
-        release = getattr(driver, 'release', None)
+        release = getattr(driver, "release", None)
         if release is not None:
             await release(conn)
 
@@ -54,27 +54,27 @@ def _to_pyformat(text):
     out = []
     quote = None
     for ch in text:
-        if ch in ("'", '"', '`'):
+        if ch in ("'", '"', "`"):
             if quote is None:
                 quote = ch
             elif ch == quote:
                 quote = None
             out.append(ch)
-        elif ch == '?':
+        elif ch == "?":
             # 引号内是字符串字面量里的问号，不是占位符
-            out.append('?' if quote is not None else '%s')
-        elif ch == '%':
+            out.append("?" if quote is not None else "%s")
+        elif ch == "%":
             # 字面 % 在 pyformat 下必须转义为 %%（引号内外均如此）
-            out.append('%%')
+            out.append("%%")
         else:
             out.append(ch)
-    return ''.join(out)
+    return "".join(out)
 
 
 def create(driver, options=None):
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
     if driver is None:
-        raise TypeError('mysql 执行器需要 asyncmy 的连接或连接池')
+        raise TypeError("mysql 执行器需要 asyncmy 的连接或连接池")
 
     from asyncmy.cursors import DictCursor
 
@@ -85,11 +85,13 @@ def create(driver, options=None):
         affected_rows = 0
         insert_id = None
         async with conn.cursor(DictCursor) as cur:
-            for stmt in plan.get('stmts') or []:
-                await cur.execute(_to_pyformat(stmt['text']), list(stmt.get('params') or []))
+            for stmt in plan.get("stmts") or []:
+                await cur.execute(
+                    _to_pyformat(stmt["text"]), list(stmt.get("params") or [])
+                )
                 if cur.description is not None:
                     rows = normalize_rows([_plain(r) for r in await cur.fetchall()])
-                    shape = stmt.get('rowShape')
+                    shape = stmt.get("rowShape")
                     if shape:
                         docs = _core.restore_rows(shape, rows)
                 else:
@@ -97,8 +99,13 @@ def create(driver, options=None):
                     # 阶段2：autoincrement 主键写后自增值回读（MySQL 无 RETURNING，
                     # lastrowid = 本连接最近一次 INSERT 生成的自增值；
                     # getattr 防御：无该属性的驱动/测试桩等价「无自增值」）
-                    insert_id = getattr(cur, 'lastrowid', None)
-        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows, 'insertId': insert_id}
+                    insert_id = getattr(cur, "lastrowid", None)
+        return {
+            "docs": docs,
+            "rows": rows,
+            "affectedRows": affected_rows,
+            "insertId": insert_id,
+        }
 
     async def exec_(plan):
         """非事务路径：整个 plan 固定在同一连接执行，成功后显式 commit
@@ -107,7 +114,7 @@ def create(driver, options=None):
         async with acquire(driver) as conn:
             try:
                 out = await run_stmts(conn, plan)
-            except BaseException:
+            except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
                 await conn.rollback()
                 raise
             await conn.commit()
@@ -123,7 +130,7 @@ def create(driver, options=None):
 
         conn, release = await open_acquire(driver)
         async with conn.cursor() as cur:
-            await cur.execute('BEGIN')
+            await cur.execute("BEGIN")
         closed = False
 
         async def commit():
@@ -143,24 +150,24 @@ def create(driver, options=None):
         async def savepoint(name):
             """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
             async with conn.cursor() as cur:
-                await cur.execute('SAVEPOINT %s' % name)
+                await cur.execute("SAVEPOINT %s" % name)
 
         async def release_savepoint(name):
             async with conn.cursor() as cur:
-                await cur.execute('RELEASE SAVEPOINT %s' % name)
+                await cur.execute("RELEASE SAVEPOINT %s" % name)
 
         async def rollback_to_savepoint(name):
             async with conn.cursor() as cur:
-                await cur.execute('ROLLBACK TO SAVEPOINT %s' % name)
+                await cur.execute("ROLLBACK TO SAVEPOINT %s" % name)
 
         return {
-            'exec': lambda plan: run_stmts(conn, plan),
-            'commit': commit,
-            'rollback': rollback,
-            'release': release,
-            'savepoint': savepoint,
-            'release_savepoint': release_savepoint,
-            'rollback_to_savepoint': rollback_to_savepoint,
+            "exec": lambda plan: run_stmts(conn, plan),
+            "commit": commit,
+            "rollback": rollback,
+            "release": release,
+            "savepoint": savepoint,
+            "release_savepoint": release_savepoint,
+            "rollback_to_savepoint": rollback_to_savepoint,
         }
 
     async def with_transaction(body):
@@ -169,18 +176,18 @@ def create(driver, options=None):
         第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数"""
         tx = await open_transaction()
         try:
-            out = await body(tx['exec'], tx)
-            await tx['commit']()
+            out = await body(tx["exec"], tx)
+            await tx["commit"]()
             return out
-        except BaseException:
-            await tx['rollback']()
+        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+            await tx["rollback"]()
             raise
         finally:
-            await tx['release']()
+            await tx["release"]()
 
     return {
-        'kind': 'mysql',
-        'exec': exec_,
-        'with_transaction': with_transaction,
-        'open_transaction': open_transaction,
+        "kind": "mysql",
+        "exec": exec_,
+        "with_transaction": with_transaction,
+        "open_transaction": open_transaction,
     }

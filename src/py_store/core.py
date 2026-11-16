@@ -18,22 +18,25 @@ import sys
 # 相邻 rust-store 仓库的 cargo/maturin 产物目录（含 rust_store_py.pyd）
 _DEV_DIST = (
     pathlib.Path(__file__).resolve().parent.parent.parent.parent
-    / 'rust-store'
-    / 'core-py'
-    / 'dist'
+    / "rust-store"
+    / "core-py"
+    / "dist"
 )
 
 
 def _dev_fallback():
     """开发期兜底：仅 LOCAL_CORE=1 且非 production 时启用，避免生产环境从相邻目录加载。"""
-    if os.environ.get('LOCAL_CORE') != '1' or os.environ.get('NODE_ENV') == 'production':
+    if (
+        os.environ.get("LOCAL_CORE") != "1"
+        or os.environ.get("NODE_ENV") == "production"
+    ):
         return None
     if str(_DEV_DIST) not in sys.path:
         sys.path.insert(0, str(_DEV_DIST))
     try:
-        return importlib.import_module('rust_store_py')
+        return importlib.import_module("rust_store_py")
     except Exception as e:
-        return {'__error': f'{_DEV_DIST}: {e}'}
+        return {"__error": f"{_DEV_DIST}: {e}"}
 
 
 def _load():
@@ -43,17 +46,17 @@ def _load():
     if dev is not None and not isinstance(dev, dict):
         return dev
     try:
-        return importlib.import_module('rust_store_py')
+        return importlib.import_module("rust_store_py")
     except ImportError as e:
-        hints = [f'rust_store_py: {e}']
+        hints = [f"rust_store_py: {e}"]
         if isinstance(dev, dict):
-            hints.append(dev['__error'])
+            hints.append(dev["__error"])
         raise ImportError(
-            '无法加载 rust-store 原生核心（rust-store-py 绑定产物）。\n'
-            '请安装 pip 依赖 rust-store-py；开发期如需从相邻 rust-store 仓库加载，\n'
+            "无法加载 rust-store 原生核心（rust-store-py 绑定产物）。\n"
+            "请安装 pip 依赖 rust-store-py；开发期如需从相邻 rust-store 仓库加载，\n"
             "请设置 LOCAL_CORE=1（且 NODE_ENV != 'production'）并在 rust-store 仓库构建：\n"
-            '  python -m maturin develop --manifest-path rust-store/core-py/Cargo.toml\n'
-            + '\n'.join(hints)
+            "  python -m maturin develop --manifest-path rust-store/core-py/Cargo.toml\n"
+            + "\n".join(hints)
         ) from e
 
 

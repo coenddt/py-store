@@ -26,48 +26,84 @@ def _run(coro):
 
 DOCS = [
     # 满：3 条记录、最大 300、bidderId 去重（u1 重复）→ 3 / 300 / 2
-    {'_id': 'ila_1', 'title': 'a1', 'bidders': [
-        {'bidderId': 'u1', 'amount': 100},
-        {'bidderId': 'u2', 'amount': 300},
-        {'bidderId': 'u1', 'amount': 200},
-    ]},
+    {
+        "_id": "ila_1",
+        "title": "a1",
+        "bidders": [
+            {"bidderId": "u1", "amount": 100},
+            {"bidderId": "u2", "amount": 300},
+            {"bidderId": "u1", "amount": 200},
+        ],
+    },
     # 空数组：长度 0、max 内建 None、去重集空 → 0 / None / 0
-    {'_id': 'ila_2', 'title': 'a2', 'bidders': []},
+    {"_id": "ila_2", "title": "a2", "bidders": []},
     # 缺字段：同空数组语义（$ifNull 兜底为 []）→ 0 / None / 0
-    {'_id': 'ila_3', 'title': 'a3'},
+    {"_id": "ila_3", "title": "a3"},
 ]
 
-GQL = 'IlAuction($sort:@s0){ _id biddersCount maxBid bidderCount }'
-PARAMS = {'s0': {'_id': 1}}
+GQL = "IlAuction($sort:@s0){ _id biddersCount maxBid bidderCount }"
+PARAMS = {"s0": {"_id": 1}}
 
 
 def test_inline_agg_local(tmp_path):
-    _sc.register({
-        'name': 'IlAuction', 'collection': 'il_auctions', 'idPrefix': 'ila_', 'timestamps': False,
-        'fields': {'title': {'type': 'string'}, 'bidders': {'type': 'array'}},
-        'relations': {},
-        'computes': {
-            'biddersCount': {'type': 'int', 'depends': ['bidders'], 'agg': {'$size': 'bidders'}},
-            'maxBid': {'type': 'number', 'depends': ['bidders'], 'agg': {'$max': 'bidders.amount'}},
-            'bidderCount': {'type': 'int', 'depends': ['bidders'], 'agg': {'$countDistinct': 'bidders.bidderId'}},
-        },
-    })
+    _sc.register(
+        {
+            "name": "IlAuction",
+            "collection": "il_auctions",
+            "idPrefix": "ila_",
+            "timestamps": False,
+            "fields": {"title": {"type": "string"}, "bidders": {"type": "array"}},
+            "relations": {},
+            "computes": {
+                "biddersCount": {
+                    "type": "int",
+                    "depends": ["bidders"],
+                    "agg": {"$size": "bidders"},
+                },
+                "maxBid": {
+                    "type": "number",
+                    "depends": ["bidders"],
+                    "agg": {"$max": "bidders.amount"},
+                },
+                "bidderCount": {
+                    "type": "int",
+                    "depends": ["bidders"],
+                    "agg": {"$countDistinct": "bidders.bidderId"},
+                },
+            },
+        }
+    )
 
     rows = []
 
     try:
-        _run(init(connect_local({'dir': str(tmp_path)})))
+        _run(init(connect_local({"dir": str(tmp_path)})))
 
         async def _main():
             for d in DOCS:
-                await store.insert('IlAuction', d)
+                await store.insert("IlAuction", d)
             return await store.query(GQL, PARAMS)
 
         rows = _run(_main())
     finally:
         _ds.set_connections({})
 
-    assert len(rows) == len(DOCS), '读回行数应一致'
-    assert rows[0] == {'_id': 'ila_1', 'biddersCount': 3, 'maxBid': 300, 'bidderCount': 2}
-    assert rows[1] == {'_id': 'ila_2', 'biddersCount': 0, 'maxBid': None, 'bidderCount': 0}
-    assert rows[2] == {'_id': 'ila_3', 'biddersCount': 0, 'maxBid': None, 'bidderCount': 0}
+    assert len(rows) == len(DOCS), "读回行数应一致"
+    assert rows[0] == {
+        "_id": "ila_1",
+        "biddersCount": 3,
+        "maxBid": 300,
+        "bidderCount": 2,
+    }
+    assert rows[1] == {
+        "_id": "ila_2",
+        "biddersCount": 0,
+        "maxBid": None,
+        "bidderCount": 0,
+    }
+    assert rows[2] == {
+        "_id": "ila_3",
+        "biddersCount": 0,
+        "maxBid": None,
+        "bidderCount": 0,
+    }

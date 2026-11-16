@@ -34,15 +34,15 @@ def _dir_for(root, database=None):
 
     非法 ``database``（含 ``/``、``\\``、``..``，防目录穿越）⇒ 抛 ``ValueError``。
     """
-    if database is None or database == '':
+    if database is None or database == "":
         return os.fspath(root)
     if (
         not isinstance(database, str)
-        or '/' in database
-        or '\\' in database
-        or '..' in database
+        or "/" in database
+        or "\\" in database
+        or ".." in database
     ):
-        raise ValueError(f'ERR:LOCAL database 非法: {database}')
+        raise ValueError(f"ERR:LOCAL database 非法: {database}")
     return os.path.join(os.fspath(root), database)
 
 
@@ -58,15 +58,15 @@ def read_snapshot(root, database=None) -> dict:
     out = {}
     for name in sorted(os.listdir(root)):
         # `.` 前缀（含 `.tmp` 中间文件）与后缀非 `.json` 的一律跳过
-        if not name.endswith('.json') or name.startswith('.'):
+        if not name.endswith(".json") or name.startswith("."):
             continue
         path = os.path.join(root, name)
         if not os.path.isfile(path):
             continue
-        with open(path, encoding='utf-8') as fh:
+        with open(path, encoding="utf-8") as fh:
             docs = json.load(fh)
         if not isinstance(docs, list):
-            raise ValueError(f'本地集合文件非法（须为文档数组）: {name}')
+            raise ValueError(f"本地集合文件非法（须为文档数组）: {name}")
         out[name[:-5]] = docs
     return out
 
@@ -82,9 +82,9 @@ def write_collections(root, changed, collections, database=None) -> None:
         return
     os.makedirs(root, exist_ok=True)
     for name in names:
-        path = os.path.join(root, f'{name}.json')
-        tmp = os.path.join(root, f'.{name}.json.tmp')
-        with open(tmp, 'w', encoding='utf-8') as fh:
+        path = os.path.join(root, f"{name}.json")
+        tmp = os.path.join(root, f".{name}.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(collections.get(name) or [], fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
 

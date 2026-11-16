@@ -21,38 +21,44 @@ from py_store import schema as sc
 from py_store.core import native
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NODE_EXAMPLE = os.path.join(os.path.dirname(ROOT), 'nodejs-store', 'example', 'resource-hub')
+NODE_EXAMPLE = os.path.join(
+    os.path.dirname(ROOT), "nodejs-store", "example", "resource-hub"
+)
 
-_BASE_URL = 'https://cdn.example.com'
+_BASE_URL = "https://cdn.example.com"
 
 
 def _load_ddl():
-    path = os.path.join(NODE_EXAMPLE, 'ddl', 'sqlite.sql')
+    path = os.path.join(NODE_EXAMPLE, "ddl", "sqlite.sql")
     if not os.path.exists(path):
-        pytest.skip(f'缺少 node 侧 DDL: {path}（需同时 clone nodejs-store 仓库）')
-    with open(path, encoding='utf-8') as f:
+        pytest.skip(f"缺少 node 侧 DDL: {path}（需同时 clone nodejs-store 仓库）")
+    with open(path, encoding="utf-8") as f:
         text = f.read()
-    body = '\n'.join(line for line in text.split('\n') if not line.strip().startswith('--'))
-    return [s.strip() for s in body.split(';') if s.strip()]
+    body = "\n".join(
+        line for line in text.split("\n") if not line.strip().startswith("--")
+    )
+    return [s.strip() for s in body.split(";") if s.strip()]
 
 
 def _load_schemas():
-    path = os.path.join(NODE_EXAMPLE, 'schema.json')
+    path = os.path.join(NODE_EXAMPLE, "schema.json")
     if not os.path.exists(path):
-        pytest.skip(f'缺少 node 侧 schema: {path}（需同时 clone nodejs-store 仓库）')
-    with open(path, encoding='utf-8') as f:
+        pytest.skip(f"缺少 node 侧 schema: {path}（需同时 clone nodejs-store 仓库）")
+    with open(path, encoding="utf-8") as f:
         arr = json.load(f)
 
     def cover_url(item):
-        cid = item.get('coverId') if isinstance(item, dict) else None
+        cid = item.get("coverId") if isinstance(item, dict) else None
         if not cid:
             return None
-        return native.resource_compose_url(cid, {'baseUrl': _BASE_URL, 'pathTemplate': '/{contentPath}'})
+        return native.resource_compose_url(
+            cid, {"baseUrl": _BASE_URL, "pathTemplate": "/{contentPath}"}
+        )
 
     for d in arr:
-        for _k, c in (d.get('computes') or {}).items():
-            if c.get('fn') is True:
-                c['fn'] = cover_url
+        for _k, c in (d.get("computes") or {}).items():
+            if c.get("fn") is True:
+                c["fn"] = cover_url
     return arr
 
 
@@ -66,7 +72,7 @@ class _MemoryProvider:
 
         async def get(key, opts=None):
             if key not in writes:
-                raise KeyError('miss')
+                raise KeyError("miss")
             return writes[key]
 
         async def remove(key, opts=None):
@@ -75,30 +81,40 @@ class _MemoryProvider:
         async def exists(key, opts=None):
             return key in writes
 
-        return {'kind': 'memory', 'put': put, 'get': get, 'remove': remove, 'exists': exists}
+        return {
+            "kind": "memory",
+            "put": put,
+            "get": get,
+            "remove": remove,
+            "exists": exists,
+        }
 
 
 async def _cascade_by_business(business_table, business_id):
     bindings = await store.query(
-        'ResourceBinding($condition: @c0) { _id, resourceId }',
-        {'c0': {'businessTable': business_table, 'businessId': str(business_id)}})
-    summary = {'total': len(bindings), 'kept': 0, 'removed': 0}
+        "ResourceBinding($condition: @c0) { _id, resourceId }",
+        {"c0": {"businessTable": business_table, "businessId": str(business_id)}},
+    )
+    summary = {"total": len(bindings), "kept": 0, "removed": 0}
     for b in bindings:
-        await store.remove('ResourceBinding', {'_id': b['_id']})
-        others = await store.query('ResourceBinding($condition: @c0) { _id }',
-                                   {'c0': {'resourceId': b['resourceId']}})
+        await store.remove("ResourceBinding", {"_id": b["_id"]})
+        others = await store.query(
+            "ResourceBinding($condition: @c0) { _id }",
+            {"c0": {"resourceId": b["resourceId"]}},
+        )
         if others:
-            summary['kept'] += 1
+            summary["kept"] += 1
             continue
-        await resource.remove(b['resourceId'])
-        summary['removed'] += 1
+        await resource.remove(b["resourceId"])
+        summary["removed"] += 1
     return summary
 
 
 def test_resource_e2e():
     async def scenario():
         import aiosqlite
-        db = await aiosqlite.connect(':memory:')
+
+        db = await aiosqlite.connect(":memory:")
         try:
             await _run_e2e(db)
         finally:
@@ -110,60 +126,97 @@ def test_resource_e2e():
         await db.commit()
         for defn in _load_schemas():
             sc.register(defn)
-        await init({'default': executors.create_connection('sqlite', db)})
+        await init({"default": executors.create_connection("sqlite", db)})
 
-        resource.register_provider('memory', _MemoryProvider)
-        resource.configure({
-            'providers': [
-                {'kind': 'local', 'options': {'baseDir': tempfile.mkdtemp(prefix='res-e2e-')}},
-                {'kind': 'memory'},
-            ],
-            'url': {'baseUrl': _BASE_URL, 'pathTemplate': '/{contentPath}'},
-        })
+        resource.register_provider("memory", _MemoryProvider)
+        resource.configure(
+            {
+                "providers": [
+                    {
+                        "kind": "local",
+                        "options": {"baseDir": tempfile.mkdtemp(prefix="res-e2e-")},
+                    },
+                    {"kind": "memory"},
+                ],
+                "url": {"baseUrl": _BASE_URL, "pathTemplate": "/{contentPath}"},
+            }
+        )
 
-        data = b'hello-resource'
-        up = await resource.put(bytes=data, file_name='a.txt', mime='text/plain', kind='file',
-                                bind={'businessTable': 'Doc', 'businessId': 'd1', 'userId': 'u1'})
-        assert re.match(r'^[0-9a-f]{40}$', up['resourceId'])
-        assert len(up['locations']) == 2
-        assert all(loc['status'] == 'ok' for loc in up['locations'])
+        data = b"hello-resource"
+        up = await resource.put(
+            bytes=data,
+            file_name="a.txt",
+            mime="text/plain",
+            kind="file",
+            bind={"businessTable": "Doc", "businessId": "d1", "userId": "u1"},
+        )
+        assert re.match(r"^[0-9a-f]{40}$", up["resourceId"])
+        assert len(up["locations"]) == 2
+        assert all(loc["status"] == "ok" for loc in up["locations"])
 
-        locs = await store.query('ResourceLocation($condition: @c0) { _id, backend, status }',
-                                 {'c0': {'resourceId': up['resourceId']}})
+        locs = await store.query(
+            "ResourceLocation($condition: @c0) { _id, backend, status }",
+            {"c0": {"resourceId": up["resourceId"]}},
+        )
         assert len(locs) == 2
 
         # A9：唯一索引 —— 重复插入同 (resourceId, backend) 显式报错
         with pytest.raises(sqlite3.IntegrityError):
-            await store.insert('ResourceLocation', {'resourceId': up['resourceId'], 'backend': 'local',
-                                                    'key': 'dup', 'status': 'ok', 'priority': 0})
+            await store.insert(
+                "ResourceLocation",
+                {
+                    "resourceId": up["resourceId"],
+                    "backend": "local",
+                    "key": "dup",
+                    "status": "ok",
+                    "priority": 0,
+                },
+            )
 
         # 内容寻址去重：同内容二次上传不新增 Resource 行
-        again = await resource.put(bytes=data, file_name='copy.txt', mime='text/plain')
-        assert again['resourceId'] == up['resourceId']
+        again = await resource.put(bytes=data, file_name="copy.txt", mime="text/plain")
+        assert again["resourceId"] == up["resourceId"]
 
-        got = await resource.open(up['resourceId'])
-        assert got['backend'] == 'local'
-        assert got['bytes'] == b'hello-resource'
+        got = await resource.open(up["resourceId"])
+        assert got["backend"] == "local"
+        assert got["bytes"] == b"hello-resource"
 
-        await resource.put(bytes=b'cover-x', file_name='c.png', mime='image/png', kind='image',
-                           bind={'businessTable': 'Doc', 'businessId': 'd1', 'userId': 'u1'})
+        await resource.put(
+            bytes=b"cover-x",
+            file_name="c.png",
+            mime="image/png",
+            kind="image",
+            bind={"businessTable": "Doc", "businessId": "d1", "userId": "u1"},
+        )
 
         # A9：ResourceBinding 三元组唯一 —— 重复插入显式报错
         with pytest.raises(sqlite3.IntegrityError):
-            await store.insert('ResourceBinding', {'resourceId': up['resourceId'], 'businessTable': 'Doc',
-                                                   'businessId': 'd1', 'userId': 'u1'})
+            await store.insert(
+                "ResourceBinding",
+                {
+                    "resourceId": up["resourceId"],
+                    "businessTable": "Doc",
+                    "businessId": "d1",
+                    "userId": "u1",
+                },
+            )
 
-        await store.insert('Doc', {'_id': 'd1', 'title': 'D', 'coverId': up['resourceId'], 'createdBy': 'u1'})
-        read = await store.query_one('Doc($condition: @c0) { _id, title, coverId, coverUrl }',
-                                     {'c0': {'_id': 'd1'}})
-        sha1 = up['sha1']
-        assert read['coverUrl'] == f'https://cdn.example.com/objects/{sha1[:2]}/{sha1}'
+        await store.insert(
+            "Doc",
+            {"_id": "d1", "title": "D", "coverId": up["resourceId"], "createdBy": "u1"},
+        )
+        read = await store.query_one(
+            "Doc($condition: @c0) { _id, title, coverId, coverUrl }",
+            {"c0": {"_id": "d1"}},
+        )
+        sha1 = up["sha1"]
+        assert read["coverUrl"] == f"https://cdn.example.com/objects/{sha1[:2]}/{sha1}"
 
-        summary = await _cascade_by_business('Doc', 'd1')
-        assert summary['total'] == 2
-        assert summary['removed'] == 2
-        assert summary['kept'] == 0
-        after = await store.query('Resource($condition: @c0) { _id }', {'c0': {}})
+        summary = await _cascade_by_business("Doc", "d1")
+        assert summary["total"] == 2
+        assert summary["removed"] == 2
+        assert summary["kept"] == 0
+        after = await store.query("Resource($condition: @c0) { _id }", {"c0": {}})
         assert len(after) == 0
 
     asyncio.run(scenario())

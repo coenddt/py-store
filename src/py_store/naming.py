@@ -19,35 +19,39 @@ from .core import native as _native
 from .schema import get as _schema_get
 from .schema import list as _schema_list
 
-_MONGO = 'mongodb'
+_MONGO = "mongodb"
 
 
 def is_reserved(name):
     """保留物理名（I3）：``_id``、``_score``（向量检索评分列）、``__``/``^__`` 前缀内部合成名不翻译"""
     return isinstance(name, str) and (
-        name == '_id' or name == '_score'
-        or name.startswith('__') or name.startswith('^__'))
+        name == "_id"
+        or name == "_score"
+        or name.startswith("__")
+        or name.startswith("^__")
+    )
 
 
 def physical(logical):
     """逻辑名 → Mongo 物理名（camelCase）；保留名原样（单点：core::naming.translate_name）"""
-    if not isinstance(logical, str) or logical == '':
+    if not isinstance(logical, str) or logical == "":
         return logical
     return logical if is_reserved(logical) else _native.translate_name(logical, _MONGO)
 
 
 # ─── 正向：逻辑命令 → 物理命令 ───────────────────────────────
 
+
 def _tr_key(key, rels):
     """键名 / 点号路径翻译（关系名与内部别名不翻译；段级处理）"""
-    if not isinstance(key, str) or key == '':
+    if not isinstance(key, str) or key == "":
         return key
-    if key.startswith('$'):
+    if key.startswith("$"):
         return key
     if is_reserved(key):
         return key
-    if '.' in key:
-        return '.'.join(_tr_seg(seg, rels) for seg in key.split('.'))
+    if "." in key:
+        return ".".join(_tr_seg(seg, rels) for seg in key.split("."))
     return key if key in rels else physical(key)
 
 
@@ -68,9 +72,13 @@ def physical_path(logical):
 
 def _tr_ref(value, rels):
     """``$fieldRef`` 字符串值翻译（``$$var`` 系统变量保留）"""
-    if not isinstance(value, str) or not value.startswith('$') or value.startswith('$$'):
+    if (
+        not isinstance(value, str)
+        or not value.startswith("$")
+        or value.startswith("$$")
+    ):
         return value
-    return '$' + _tr_key(value[1:], rels)
+    return "$" + _tr_key(value[1:], rels)
 
 
 def _walk(node, rels, transform_refs):
@@ -84,16 +92,16 @@ def _walk(node, rels, transform_refs):
     if isinstance(node, dict):
         out = {}
         for k, v in node.items():
-            if k == '$literal':
+            if k == "$literal":
                 out[k] = v
                 continue
-            if k == '$expr':
+            if k == "$expr":
                 out[k] = _walk(v, rels, True)
                 continue
-            if k == '$lookup' and isinstance(v, dict):
+            if k == "$lookup" and isinstance(v, dict):
                 out[k] = _tr_lookup(v, rels)
                 continue
-            if k == '$vectorSearch' and isinstance(v, dict):
+            if k == "$vectorSearch" and isinstance(v, dict):
                 out[k] = _tr_vector_search(v, rels)
                 continue
             out[_tr_key(k, rels)] = _walk(v, rels, transform_refs)
@@ -106,7 +114,7 @@ def _tr_vector_search(obj, rels):
     其余键（index / metric 等）逐项走通用翻译"""
     out = {}
     for k, v in obj.items():
-        if k == 'path':
+        if k == "path":
             out[k] = _tr_key(v, rels) if isinstance(v, str) else v
         else:
             out[k] = _walk(v, rels, False)
@@ -118,13 +126,13 @@ def _tr_lookup(obj, rels):
     ``localField``/``foreignField``=关系字段（译）"""
     out = {}
     for k, v in obj.items():
-        if k == 'from':
+        if k == "from":
             out[k] = physical(v) if isinstance(v, str) else v
-        elif k in ('localField', 'foreignField'):
+        elif k in ("localField", "foreignField"):
             out[k] = physical(v) if isinstance(v, str) else v
-        elif k == 'as':
+        elif k == "as":
             out[k] = v
-        elif k == 'let':
+        elif k == "let":
             m = {}
             for vk, vv in (v or {}).items():
                 m[vk] = _walk(vv, rels, True)
@@ -136,7 +144,7 @@ def _tr_lookup(obj, rels):
 
 def _collect_rels(info, pipeline):
     """收集关系名：schema 声明的 relations + pipeline 内全部 ``$lookup.as``"""
-    rels = set((info or {}).get('relations') or {})
+    rels = set((info or {}).get("relations") or {})
     _collect_as(pipeline, rels)
     return rels
 
@@ -149,8 +157,8 @@ def _collect_as(node, rels):
     if not isinstance(node, dict):
         return
     for k, v in node.items():
-        if k == '$lookup' and isinstance(v, dict) and isinstance(v.get('as'), str):
-            rels.add(v['as'])
+        if k == "$lookup" and isinstance(v, dict) and isinstance(v.get("as"), str):
+            rels.add(v["as"])
         _collect_as(v, rels)
 
 
@@ -160,16 +168,16 @@ def _to_mongo(cmd):
     ``database`` / ``options`` 等非数据标识符原样透传。"""
     if not isinstance(cmd, dict):
         return cmd
-    info = _info_for_collection(cmd.get('collection'))
-    rels = _collect_rels(info, cmd.get('pipeline'))
+    info = _info_for_collection(cmd.get("collection"))
+    rels = _collect_rels(info, cmd.get("pipeline"))
     out = dict(cmd)
-    if isinstance(cmd.get('collection'), str):
-        out['collection'] = physical(cmd['collection'])
-    for k in ('filter', 'projection', 'update', 'doc', 'docs'):
+    if isinstance(cmd.get("collection"), str):
+        out["collection"] = physical(cmd["collection"])
+    for k in ("filter", "projection", "update", "doc", "docs"):
         if cmd.get(k) is not None:
             out[k] = _walk(cmd[k], rels, False)
-    if cmd.get('pipeline') is not None:
-        out['pipeline'] = _walk(cmd['pipeline'], rels, True)
+    if cmd.get("pipeline") is not None:
+        out["pipeline"] = _walk(cmd["pipeline"], rels, True)
     return out
 
 
@@ -185,14 +193,14 @@ def clear_cache():
 
 def _inverse_table(info):
     """逐 schema 逆表：physical → logical（fields ∪ computes ∪ timestamps ∪ ``_id``）"""
-    name = info.get('name')
+    name = info.get("name")
     cached = _INV_CACHE.get(name)
     if cached is not None:
         return cached
-    t = {'_id': '_id', 'createdAt': 'createdAt', 'updatedAt': 'updatedAt'}
-    for f in (info.get('fields') or {}):
+    t = {"_id": "_id", "createdAt": "createdAt", "updatedAt": "updatedAt"}
+    for f in info.get("fields") or {}:
         t[physical(f)] = f
-    for c in (info.get('computes') or {}):
+    for c in info.get("computes") or {}:
         t[physical(c)] = c
     _INV_CACHE[name] = t
     return t
@@ -207,13 +215,13 @@ def _info_for_collection(collection):
             s = _schema_get(name)
         except KeyError:
             continue
-        if s and s.get('collection') == collection:
+        if s and s.get("collection") == collection:
             return s
     return None
 
 
 def _info_for_name(name):
-    if not isinstance(name, str) or name == '':
+    if not isinstance(name, str) or name == "":
         return None
     try:
         return _schema_get(name)
@@ -228,11 +236,11 @@ def _map_doc(value, info):
     if not isinstance(value, dict):
         return value
     inv = _inverse_table(info)
-    relations = info.get('relations') or {}
+    relations = info.get("relations") or {}
     out = {}
     for k, v in value.items():
         if k in relations:
-            target = _info_for_name((relations[k] or {}).get('model'))
+            target = _info_for_name((relations[k] or {}).get("model"))
             out[k] = _map_doc(v, target) if target else v
         elif k in inv:
             out[inv[k]] = v
@@ -244,7 +252,7 @@ def _map_doc(value, info):
 def _to_logical(result, cmd):
     """物理结果 → 逻辑结果。按命令 collection 定位 schema；未注册（无法建逆表）时原样返回
     （绝不臆测 camelCase 反推）。"""
-    info = _info_for_collection((cmd or {}).get('collection'))
+    info = _info_for_collection((cmd or {}).get("collection"))
     if not info:
         return result
     return _map_doc(result, info)

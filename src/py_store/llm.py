@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
@@ -43,14 +44,14 @@ _REGISTRY: dict[str, LlmClient] = {}
 def register_llm(name: str, client: LlmClient) -> None:
     """注册一个 LLM 客户端；同名重复注册显式报错（禁静默覆盖）"""
     if name in _REGISTRY:
-        raise ValueError(f'LLM 客户端重复注册: {name}')
+        raise ValueError(f"LLM 客户端重复注册: {name}")
     _REGISTRY[name] = client
 
 
 def get_llm(name: str) -> LlmClient:
     """按注册名取客户端；未注册显式报错（禁静默回落默认厂商）"""
     if name not in _REGISTRY:
-        raise KeyError(f'LLM 客户端未注册: {name}（已注册: {sorted(_REGISTRY)}）')
+        raise KeyError(f"LLM 客户端未注册: {name}（已注册: {sorted(_REGISTRY)}）")
     return _REGISTRY[name]
 
 
@@ -60,7 +61,7 @@ def make_openai_compat(
     model: str,
     api_key: str,
     json_mode: bool = True,
-    effort: str | None = 'low',
+    effort: str | None = "low",
     max_tokens: int = 4096,
     timeout_s: int = 90,
 ) -> LlmClient:
@@ -69,70 +70,83 @@ def make_openai_compat(
     失败全部显式抛错（``RuntimeError(dict)`` 结构化），禁静默返回空串——
     空 content 的实证成因与防御见模块 docstring 与设计文档 W3。
     """
+    # scheme 白名单（工厂期一次校验）：禁 file:// 等非 HTTP 传输面
+    if urllib.parse.urlparse(base_url).scheme.lower() not in ("http", "https"):
+        raise RuntimeError(
+            {
+                "code": "llmBaseUrlUnsupported",
+                "base_url": base_url,
+                "message": "base_url 仅支持 http/https scheme",
+            }
+        )
 
     async def llm(messages: list[dict]) -> str:
-        body: dict = {'model': model, 'messages': messages, 'max_tokens': max_tokens}
+        body: dict = {"model": model, "messages": messages, "max_tokens": max_tokens}
         if json_mode:
             # 契约预检：json_object 要求 prompt 含 "json" 字样（DeepSeek 实测 400 实证）。
             # 缺失显式报错交上游装配修复，禁静默改写调用方消息面（no-error-masking）
-            joined = ' '.join(str(m.get('content', '')) for m in messages).lower()
-            if 'json' not in joined:
+            joined = " ".join(str(m.get("content", "")) for m in messages).lower()
+            if "json" not in joined:
                 raise RuntimeError(
                     {
-                        'code': 'llmJsonPromptMissing',
-                        'model': model,
-                        'message': "json_mode=True 要求 messages（system/user）中包含 'json' 字样",
-                        'hint': "ask() 的 system 输出契约模板已固定含 'JSON' 措辞；"
-                                '自定义 knowledge 时须保留',
+                        "code": "llmJsonPromptMissing",
+                        "model": model,
+                        "message": "json_mode=True 要求 messages（system/user）中包含 'json' 字样",
+                        "hint": "ask() 的 system 输出契约模板已固定含 'JSON' 措辞；"
+                        "自定义 knowledge 时须保留",
                     }
                 )
-            body['response_format'] = {'type': 'json_object'}
+            body["response_format"] = {"type": "json_object"}
         if effort is not None:
-            body['reasoning_effort'] = effort
+            body["reasoning_effort"] = effort
 
         req = urllib.request.Request(
             f"{base_url.rstrip('/')}/chat/completions",
-            data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}',
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
                 # 默认 UA「Python-urllib/N」被 DeepSeek 网关断连（curl 同参 200 实证），显式覆盖
-                'User-Agent': 'py-store-ask/0.1',
+                "User-Agent": "py-store-ask/0.1",
             },
-            method='POST',
+            method="POST",
         )
 
         def _call():
             try:
                 with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                    return json.loads(resp.read().decode('utf-8'))
+                    return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
-                detail = e.read().decode('utf-8', errors='replace')
+                detail = e.read().decode("utf-8", errors="replace")
                 raise RuntimeError(
-                    {'code': 'llmHttpError', 'status': e.code, 'model': model,
-                     'body': detail[:500]}
+                    {
+                        "code": "llmHttpError",
+                        "status": e.code,
+                        "model": model,
+                        "body": detail[:500],
+                    }
                 ) from None
             except OSError as e:
                 # RemoteDisconnected / ConnectionReset 等网络层失败，同样结构化暴露
                 raise RuntimeError(
-                    {'code': 'llmNetworkError', 'model': model, 'detail': str(e)}
+                    {"code": "llmNetworkError", "model": model, "detail": str(e)}
                 ) from None
 
         data = await asyncio.to_thread(_call)
-        choice = (data.get('choices') or [{}])[0]
-        content = (choice.get('message') or {}).get('content')
+        choice = (data.get("choices") or [{}])[0]
+        content = (choice.get("message") or {}).get("content")
         if not content:
             raise RuntimeError(
                 {
-                    'code': 'llmEmptyContent',
-                    'model': model,
-                    'finish_reason': choice.get('finish_reason'),
-                    'reasoning_tokens': (
-                        data.get('usage', {}).get('completion_tokens_details', {}) or {}
-                    ).get('reasoning_tokens'),
-                    'message': (
-                        'LLM 返回空 content（多为 max_tokens 被推理耗尽，'
-                        '调大 max_tokens 或降 effort）'
+                    "code": "llmEmptyContent",
+                    "model": model,
+                    "finish_reason": choice.get("finish_reason"),
+                    "reasoning_tokens": (
+                        data.get("usage", {}).get("completion_tokens_details", {}) or {}
+                    ).get("reasoning_tokens"),
+                    "message": (
+                        "LLM 返回空 content（多为 max_tokens 被推理耗尽，"
+                        "调大 max_tokens 或降 effort）"
                     ),
                 }
             )

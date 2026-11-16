@@ -34,7 +34,7 @@ from typing import Any
 
 from ..local.handle import create_db
 
-MEMORY_KIND = 'memory'
+MEMORY_KIND = "memory"
 
 # 进程内键空间：``<database>/<collection>``（``database`` 空则 ``<collection>``）→ 文档数组
 _DEFAULT_STORE: dict[str, list] = {}
@@ -46,20 +46,20 @@ def _clone(value: Any) -> Any:
 
 
 def _key(database: str | None, collection: str) -> str:
-    return f'{database}/{collection}' if database else collection
+    return f"{database}/{collection}" if database else collection
 
 
 def _map_io(store: dict) -> dict:
     """默认 io：进程内分区 dict（按 ``<database>/<collection>`` 界定分区）。"""
 
     def load(database):
-        prefix = f'{database}/' if database else ''
+        prefix = f"{database}/" if database else ""
         out: dict[str, list] = {}
         for k, docs in store.items():
             if not k.startswith(prefix):
                 continue
-            coll = k[len(prefix):]
-            if database and '/' in coll:
+            coll = k[len(prefix) :]
+            if database and "/" in coll:
                 continue  # 同前缀但不属本库分区（如 db='a' 不命中 'a/b/c'）
             out[coll] = _clone(docs)
         return out
@@ -69,15 +69,15 @@ def _map_io(store: dict) -> dict:
             value = collections.get(name)
             store[_key(database, name)] = _clone([] if value is None else value)
 
-    return {'load': load, 'save': save}
+    return {"load": load, "save": save}
 
 
 def _bind_io(io: dict, database: str | None):
     """把带 ``database`` 形参的整量 io 适配为 ``create_db`` 需要的 ``(load, save)`` 二元组"""
     db = database
     return (
-        lambda: io['load'](db),
-        lambda changed, collections: io['save'](db, changed, collections),
+        lambda: io["load"](db),
+        lambda changed, collections: io["save"](db, changed, collections),
     )
 
 
@@ -89,19 +89,21 @@ def connect(options: dict | None = None) -> dict:
         缺省用 ``store``（缺省进程内全局分区）构造内存 io。
     """
     options = options or {}
-    store: dict = options['store'] if options.get('store') is not None else _DEFAULT_STORE
-    io: dict = options.get('io') or _map_io(store)
-    database = options.get('database')
+    store: dict = (
+        options["store"] if options.get("store") is not None else _DEFAULT_STORE
+    )
+    io: dict = options.get("io") or _map_io(store)
+    database = options.get("database")
 
     def handle_for(db):
         load, save = _bind_io(io, db)
         return create_db(load, save, db)
 
     desc = {
-        'kind': MEMORY_KIND,
-        'database': database,
-        'handle': handle_for(database),
-        'handle_for': handle_for,
+        "kind": MEMORY_KIND,
+        "database": database,
+        "handle": handle_for(database),
+        "handle_for": handle_for,
     }
 
     async def open_transaction(db=None):
@@ -111,33 +113,33 @@ def connect(options: dict | None = None) -> dict:
         """
         db = database if db is None else db
         load, save = _bind_io(io, db)
-        state: dict[str, Any] = {'staged': load(), 'closed': False}
+        state: dict[str, Any] = {"staged": load(), "closed": False}
 
         def _tx_load():
-            return state['staged']
+            return state["staged"]
 
         def _tx_save(_changed, collections):
-            state['staged'] = collections
+            state["staged"] = collections
 
         async def commit():
-            if state['closed']:
+            if state["closed"]:
                 return
-            state['closed'] = True
-            staged = state['staged']
+            state["closed"] = True
+            staged = state["staged"]
             save(list(staged.keys()), staged)
 
         async def rollback():
-            state['closed'] = True
+            state["closed"] = True
 
         async def release():
-            state['closed'] = True
+            state["closed"] = True
 
         return {
-            'session': {'snapshot': lambda: state['staged']},
-            'handle': create_db(_tx_load, _tx_save, db),
-            'commit': commit,
-            'rollback': rollback,
-            'release': release,
+            "session": {"snapshot": lambda: state["staged"]},
+            "handle": create_db(_tx_load, _tx_save, db),
+            "commit": commit,
+            "rollback": rollback,
+            "release": release,
         }
 
     async def with_transaction(fn, db=None):
@@ -145,17 +147,17 @@ def connect(options: dict | None = None) -> dict:
         tx = await open_transaction(db if db is not None else database)
         try:
             out = await fn(None, tx)
-            await tx['commit']()
+            await tx["commit"]()
             return out
-        except BaseException:
-            await tx['rollback']()
+        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+            await tx["rollback"]()
             raise
         finally:
-            await tx['release']()
+            await tx["release"]()
 
-    desc['open_transaction'] = open_transaction
-    desc['with_transaction'] = with_transaction
+    desc["open_transaction"] = open_transaction
+    desc["with_transaction"] = with_transaction
     return desc
 
 
-__all__ = ['MEMORY_KIND', 'connect']
+__all__ = ["MEMORY_KIND", "connect"]

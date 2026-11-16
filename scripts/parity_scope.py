@@ -143,7 +143,9 @@ def _snapshot(fx):
         for c in fx["contexts"]:
             row[f"plan:{q['name']}:{c['name']}"] = _outcome(
                 lambda q=q, c=c: _canon(
-                    schema.get_core().plan_query(q["gql"], q["params"], c["value"], None)
+                    schema.get_core().plan_query(
+                        q["gql"], q["params"], c["value"], None
+                    )
                 )
             )
     return row

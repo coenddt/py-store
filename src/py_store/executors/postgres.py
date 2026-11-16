@@ -14,34 +14,34 @@ def _affected(tag):
     """命令标签（``INSERT 0 1`` / ``UPDATE 3`` / ``DELETE 2``）→ 影响行数"""
     if not tag:
         return 0
-    last = str(tag).rsplit(' ', 1)[-1]
+    last = str(tag).rsplit(" ", 1)[-1]
     return int(last) if last.isdigit() else 0
 
 
 def create(driver, options=None):
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
-    if driver is None or not hasattr(driver, 'fetch'):
-        raise TypeError('postgres 执行器需要 asyncpg 的连接或连接池')
+    if driver is None or not hasattr(driver, "fetch"):
+        raise TypeError("postgres 执行器需要 asyncpg 的连接或连接池")
 
     async def run_stmts(conn, plan):
         """在指定连接上依序执行 plan.stmts（事务内与池路径共用）"""
         docs = None
         rows = None
         affected_rows = 0
-        for stmt in plan.get('stmts') or []:
-            params = list(stmt.get('params') or [])
-            shape = stmt.get('rowShape')
-            if shape or not stmt.get('isWrite') or 'RETURNING' in stmt['text'].upper():
+        for stmt in plan.get("stmts") or []:
+            params = list(stmt.get("params") or [])
+            shape = stmt.get("rowShape")
+            if shape or not stmt.get("isWrite") or "RETURNING" in stmt["text"].upper():
                 # SELECT 或带 RETURNING 的写语句 → 取结果集（阶段2：autoincrement 的
                 #  无 rowShape，靠文本含 RETURNING 识别）；
                 # 无 rowShape 的读（Host 原生 SQL 逃生口 execute_raw）亦取行
-                records = await conn.fetch(stmt['text'], *params)
+                records = await conn.fetch(stmt["text"], *params)
                 rows = normalize_rows([dict(r) for r in records])
                 if shape:
                     docs = _core.restore_rows(shape, rows)
             else:
-                affected_rows = _affected(await conn.execute(stmt['text'], *params))
-        return {'docs': docs, 'rows': rows, 'affectedRows': affected_rows}
+                affected_rows = _affected(await conn.execute(stmt["text"], *params))
+        return {"docs": docs, "rows": rows, "affectedRows": affected_rows}
 
     async def exec_(plan):
         return await run_stmts(driver, plan)
@@ -75,22 +75,22 @@ def create(driver, options=None):
 
         async def savepoint(name):
             """保存点（嵌套事务用）；name 由 Host 生成（``sp_<n>``），非用户输入"""
-            await conn.execute('SAVEPOINT %s' % name)
+            await conn.execute("SAVEPOINT %s" % name)
 
         async def release_savepoint(name):
-            await conn.execute('RELEASE SAVEPOINT %s' % name)
+            await conn.execute("RELEASE SAVEPOINT %s" % name)
 
         async def rollback_to_savepoint(name):
-            await conn.execute('ROLLBACK TO SAVEPOINT %s' % name)
+            await conn.execute("ROLLBACK TO SAVEPOINT %s" % name)
 
         return {
-            'exec': lambda plan: run_stmts(conn, plan),
-            'commit': commit,
-            'rollback': rollback,
-            'release': release,
-            'savepoint': savepoint,
-            'release_savepoint': release_savepoint,
-            'rollback_to_savepoint': rollback_to_savepoint,
+            "exec": lambda plan: run_stmts(conn, plan),
+            "commit": commit,
+            "rollback": rollback,
+            "release": release,
+            "savepoint": savepoint,
+            "release_savepoint": release_savepoint,
+            "rollback_to_savepoint": rollback_to_savepoint,
         }
 
     async def with_transaction(body):
@@ -99,18 +99,18 @@ def create(driver, options=None):
         第二参数为事务句柄（供上层读保存点原语）；py 位置参数语义下调用方必须接收该参数"""
         tx = await open_transaction()
         try:
-            out = await body(tx['exec'], tx)
-            await tx['commit']()
+            out = await body(tx["exec"], tx)
+            await tx["commit"]()
             return out
-        except BaseException:
-            await tx['rollback']()
+        except BaseException:  # 收尾路径必须覆盖取消/中断：先回滚再原样重抛，禁吞异常（语义与 datasource 收尾一致）
+            await tx["rollback"]()
             raise
         finally:
-            await tx['release']()
+            await tx["release"]()
 
     return {
-        'kind': 'postgres',
-        'exec': exec_,
-        'with_transaction': with_transaction,
-        'open_transaction': open_transaction,
+        "kind": "postgres",
+        "exec": exec_,
+        "with_transaction": with_transaction,
+        "open_transaction": open_transaction,
     }

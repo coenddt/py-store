@@ -11,10 +11,18 @@
 from typing import Any, Iterable
 
 
-async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
-                     fns: dict | None = None, ctx: Any = None,
-                     feedback: bool = True, tenant: str = "", env: str = "",
-                     config: Any = None, config_base_dir: str | None = None):
+async def create_app(
+    *,
+    datasource: Any,
+    schemas: Iterable[dict] = (),
+    fns: dict | None = None,
+    ctx: Any = None,
+    feedback: bool = True,
+    tenant: str = "",
+    env: str = "",
+    config: Any = None,
+    config_base_dir: str | None = None,
+):
     from . import init, schema, store  # 延迟导入，规避包内循环导入
 
     if datasource is None:
@@ -24,7 +32,7 @@ async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
     #   - 否则维持 schemas 逐条 register。
     if config:
         items = store.load_defs(config, ctx, config_base_dir)
-        defns = [it['defn'] for it in items]
+        defns = [it["defn"] for it in items]
     else:
         for defn in schemas:
             store.register(defn, ctx)
@@ -34,7 +42,7 @@ async def create_app(*, datasource: Any, schemas: Iterable[dict] = (),
         schema.set_fn(ref, impl)
     schema.assert_fns_covered(defns)  # A3：缺实现即抛，进程不启动
     if feedback:
-        store.set_feedback_meta(tenant or "", env or "")   # py 侧签名：(tenant, env)
-        store.enable_feedback_table()                      # 内建 __feedback + sink 落库（幂等）
+        store.set_feedback_meta(tenant or "", env or "")  # py 侧签名：(tenant, env)
+        store.enable_feedback_table()  # 内建 __feedback + sink 落库（幂等）
     # 关闭：await store.flush_feedback()（py 侧为 async）收口在途落库
     return {"store": store}
