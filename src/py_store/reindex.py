@@ -7,6 +7,7 @@
 import hashlib
 import inspect
 import time
+from typing import Any, cast
 
 from . import feedback
 from . import schema as schema_mod
@@ -17,7 +18,7 @@ MAX_PAGE = 1000
 SEP = "\u001e"
 
 
-def hash_text(source_fields, doc):
+def hash_text(source_fields: list[str], doc: dict[str, Any]) -> str:
     """按「字段名:字节长度:值」逐字段拼接（字段名排序，None 记空串）后 SHA-256，得到源内容指纹"""
     parts = []
     for f in sorted(source_fields):
@@ -27,14 +28,14 @@ def hash_text(source_fields, doc):
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def _meta(schema_name):
+def _meta(schema_name: str) -> dict[str, Any]:
     """取 schema 定义；不存在则抛 ERR_REINDEX_SCHEMA"""
     if not schema_mod.has(schema_name):
         raise ValueError(f"ERR_REINDEX_SCHEMA:未知 schema {schema_name}")
     return schema_mod.get(schema_name)
 
 
-def _opts(m, opts):
+def _opts(m: dict[str, Any], opts: dict[str, Any] | None) -> dict[str, Any]:
     """校验并补全回填选项：field 须为 vector 字段、hashField 须为 string、sourceFields 须为非空 string 数组、embed 须可调用、pageSize 限 1..MAX_PAGE；filter/force/dryRun/routeOverride 填默认值"""
     o = dict(opts or {})
     f = m["fields"].get(o.get("field"))
@@ -74,14 +75,20 @@ def _opts(m, opts):
     return o
 
 
-def _text(source_fields, doc):
+def _text(source_fields: list[str], doc: dict[str, Any]) -> str:
     """把源字段按序以分隔符 SEP 拼成待嵌入文本（None 记空串）"""
     return SEP.join(
         "" if doc.get(f) is None else str(doc.get(f)) for f in source_fields
     )
 
 
-async def _embed_and_write(store, m, o, todo, dim):
+async def _embed_and_write(
+    store: Any,
+    m: dict[str, Any],
+    o: dict[str, Any],
+    todo: list[dict[str, Any]],
+    dim: Any,
+) -> int:
     """对 todo 行调 embed（同步或协程）生成向量，逐条校验维度后 update 写回向量与源 hash；返回写入条数"""
     texts = [_text(o["sourceFields"], r) for r in todo]
     vecs = o["embed"](texts)
@@ -109,19 +116,19 @@ async def _embed_and_write(store, m, o, todo, dim):
 
 
 async def reindex_vectors(
-    store,
-    schema_name,
+    store: Any,
+    schema_name: str,
     *,
-    field,
-    hashField,
-    sourceFields,
-    embed,
-    filter=None,
-    pageSize=DEFAULT_PAGE,
-    force=False,
-    dryRun=False,
-    routeOverride=None,
-):
+    field: str,
+    hashField: str,
+    sourceFields: list[str],
+    embed: Any,
+    filter: dict[str, Any] | None = None,
+    pageSize: int = DEFAULT_PAGE,
+    force: bool = False,
+    dryRun: bool = False,
+    routeOverride: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """向量回填主入口：按 _id 游标分页扫描目标 schema，hash 与源内容一致的跳过，其余 embed 后写回；force 全量重算、dryRun 只统计不落库、routeOverride 路由覆盖，返回 scanned/embedded/skipped/pending/pages/elapsedMs 统计"""
     started = time.monotonic()
     m = _meta(schema_name)
@@ -203,7 +210,12 @@ async def reindex_vectors(
     return out
 
 
-async def reindex_one(store, schema_name, rid, opts):
+async def reindex_one(
+    store: Any,
+    schema_name: str,
+    rid: Any,
+    opts: dict[str, Any] | None,
+) -> dict[str, int]:
     """单条回填：按 _id 取行，hash 一致即跳过（返回 embedded=0, skipped=1），否则 embed 写回；记录不存在抛 ERR_REINDEX_NOT_FOUND"""
     m = _meta(schema_name)
     o = _opts(m, opts)
@@ -222,13 +234,15 @@ async def reindex_one(store, schema_name, rid, opts):
     return {"embedded": n, "skipped": 0}
 
 
-def register_vector_reindex(cfg):
+def register_vector_reindex(cfg: dict[str, Any]) -> str:
     """把回填注册为触发器函数 ``<schema>.vectorReindex``（校验 cfg 后固定单条回填选项），返回函数引用名"""
-    m = _meta(cfg.get("schema"))
+    m = _meta(cast(str, cfg.get("schema")))
     o = _opts(m, cfg)
     fn_ref = f"{m['name']}.vectorReindex"
 
-    async def _impl(args, _ctx, host):
+    async def _impl(
+        args: dict[str, Any] | None, _ctx: Any, host: dict[str, Any]
+    ) -> Any:
         """触发器实现：取 args._id（缺失抛 ERR_REINDEX_TRIGGER），用注册时固化的选项对该条回填"""
         rid = (args or {}).get("_id")
         if rid is None or rid == "":

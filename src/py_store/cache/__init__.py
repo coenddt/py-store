@@ -8,19 +8,21 @@ provider 由接入方在实现缓存时经 set_cache_status 注入，签名 (ctx
 以容纳 ``redis_io.py`` / ``provider.py``；对外 API 与行为不变，仅相对导入层级由 ``.`` 改为 ``..``。）
 """
 
+from typing import Any, cast
+
 from ..feedback import emit
 
 _VALUES = ("HIT", "MISS", "BYPASS")
 _provider = None
 
 
-def set_cache_status(fn):
+def set_cache_status(fn: Any) -> None:
     """注册缓存状态 provider；传 None / 非可调用恢复默认（恒 BYPASS）"""
     global _provider
     _provider = fn if callable(fn) else None
 
 
-def cache_status(ctx=None):
+def cache_status(ctx: dict[str, Any] | None = None) -> str:
     """取当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一；非法/异常 → BYPASS + 反馈留痕）"""
     if _provider is None:
         return "BYPASS"
@@ -48,4 +50,4 @@ def cache_status(ctx=None):
             }
         )
         return "BYPASS"
-    return v
+    return cast(str, v)

@@ -19,7 +19,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable
+from typing import Any, Callable
 
 __all__ = ["HttpAdapterError", "create_http_adapter"]
 
@@ -27,7 +27,9 @@ __all__ = ["HttpAdapterError", "create_http_adapter"]
 class HttpAdapterError(Exception):
     """HTTP 适配器错误（携 ``status`` / ``url``）。"""
 
-    def __init__(self, message: str, status: int | None = None, url: str | None = None):
+    def __init__(
+        self, message: str, status: int | None = None, url: str | None = None
+    ) -> None:
         """携 HTTP ``status``（网络层失败为 None）与请求 ``url`` 供上层矩阵化映射"""
         super().__init__(message)
         self.name = "HttpAdapterError"
@@ -35,7 +37,13 @@ class HttpAdapterError(Exception):
         self.url = url
 
 
-def _default_fetch(url, method, headers, body, timeout):
+def _default_fetch(
+    url: str,
+    method: str,
+    headers: dict[str, str] | None,
+    body: str | None,
+    timeout: float | None,
+) -> tuple[int, str]:
     """标准库同步实现（由调用方经 ``asyncio.to_thread`` 执行）；返回 ``(status, text)``。"""
     # scheme 白名单：禁 file:// / ftp:// 等非 HTTP 传输面（SSRF 面 = HTTP/HTTPS 本身）
     if urllib.parse.urlparse(url).scheme.lower() not in ("http", "https"):
@@ -49,7 +57,7 @@ def _default_fetch(url, method, headers, body, timeout):
         return e.code, e.read().decode("utf-8", "replace")
 
 
-def create_http_adapter(spec: dict) -> dict:
+def create_http_adapter(spec: dict[str, Any]) -> dict[str, Any]:
     """创建 HTTP 拉取适配器。
 
     :param spec: ``{'base_url', 'method'='GET', 'headers', 'path'(params)->str,
@@ -61,14 +69,14 @@ def create_http_adapter(spec: dict) -> dict:
     base_url = spec["base_url"]
     method = spec.get("method", "GET")
     headers = spec.get("headers")
-    path_fn: Callable | None = spec.get("path")
-    pick: Callable | None = spec.get("pick")
-    map_fn: Callable | None = spec.get("map")
-    fetch_impl: Callable | None = spec.get("fetch_impl")
+    path_fn: Callable[..., Any] | None = spec.get("path")
+    pick: Callable[..., Any] | None = spec.get("pick")
+    map_fn: Callable[..., Any] | None = spec.get("map")
+    fetch_impl: Callable[..., Any] | None = spec.get("fetch_impl")
     timeout_ms = spec.get("timeout_ms") or 0
     fetch = fetch_impl or _default_fetch
 
-    async def fetch_docs(params: dict | None = None) -> list:
+    async def fetch_docs(params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """拉取文档：拼 URL → to_thread 同步 fetch → 状态码/JSON/pick/map 校验，全部显式 Err"""
         params = params or {}
         url = path_fn(params) if path_fn else base_url

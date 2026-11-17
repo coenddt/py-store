@@ -21,7 +21,9 @@ from typing import Any, Callable
 from .context import current_selection
 
 
-def create_link_cache_provider(spec: dict | None = None) -> Callable[[Any], str]:
+def create_link_cache_provider(
+    spec: dict[str, Any] | None = None,
+) -> Callable[[Any], str]:
     """创建「链路选择驱动」的缓存状态 provider。
 
     :param spec: ``{'selection_of': <(ctx) -> links|None>}``；缺省读请求级

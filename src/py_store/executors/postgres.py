@@ -6,11 +6,15 @@
 由 ``./__init__.py#shape_result`` 塑形为 Mongo 驱动等价返回值。
 """
 
-from ..schema import core as _core
+from typing import Any
+
+from ..schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 from ._values import normalize_rows
 
 
-def _affected(tag):
+def _affected(tag: str | None) -> int:
     """命令标签（``INSERT 0 1`` / ``UPDATE 3`` / ``DELETE 2``）→ 影响行数"""
     if not tag:
         return 0
@@ -18,12 +22,12 @@ def _affected(tag):
     return int(last) if last.isdigit() else 0
 
 
-def create(driver, options=None):
+def create(driver: Any, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
     if driver is None or not hasattr(driver, "fetch"):
         raise TypeError("postgres 执行器需要 asyncpg 的连接或连接池")
 
-    async def run_stmts(conn, plan):
+    async def run_stmts(conn: Any, plan: dict[str, Any]) -> dict[str, Any]:
         """在指定连接上依序执行 plan.stmts（事务内与池路径共用）"""
         docs = None
         rows = None
@@ -43,11 +47,11 @@ def create(driver, options=None):
                 affected_rows = _affected(await conn.execute(stmt["text"], *params))
         return {"docs": docs, "rows": rows, "affectedRows": affected_rows}
 
-    async def exec_(plan):
+    async def exec_(plan: dict[str, Any]) -> dict[str, Any]:
         """非事务路径：整个 plan 直接在池取到的连接上执行（autocommit 语义）。"""
         return await run_stmts(driver, plan)
 
-    async def open_transaction():
+    async def open_transaction() -> dict[str, Any]:
         """显式事务句柄（asyncpg）
 
         必须用 ``conn.transaction()`` 的显式 ``start/commit/rollback``；

@@ -20,6 +20,8 @@ R2（03 §3.2）：``emit`` 的 sink 与 ns 标签**作用域优先**——作�
 import asyncio
 import sys
 import time
+from collections.abc import Callable
+from typing import Any, cast
 
 from .scope import current_scope
 
@@ -32,51 +34,51 @@ _meta = {"tenant": "", "env": ""}
 _fail_count = 0
 
 # 在途落库任务（进程级；graceful shutdown 前经 flush() 收口，消除 fire-and-forget 丢事件窗口 D8）
-_pending: set = set()
+_pending: set[asyncio.Future[None]] = set()
 
 
-def _current_sink():
+def _current_sink() -> Callable[[dict[str, Any]], Any] | None:
     """当前生效 sink（R2）：作用域 sink 优先，未进入作用域回退进程级 ``_sink``"""
     s = current_scope()
     return s.sink if s is not None and s.sink is not None else _sink
 
 
-def _current_meta():
+def _current_meta() -> dict[str, Any] | None:
     """当前生效 ns 标签（R2）：作用域 meta 优先，未进入作用域回退进程级 ``_meta``"""
     s = current_scope()
     return s.meta if s is not None and s.meta is not None else _meta
 
 
-def get_sink():
+def get_sink() -> Callable[[dict[str, Any]], Any] | None:
     """当前 sink（None = 默认 stderr 行为）；供接管方保存原值、退出时恢复（token-set/reset 同构）"""
     return _sink
 
 
-def set_sink(fn):
+def set_sink(fn: Callable[[dict[str, Any]], Any] | None) -> None:
     """注册反馈事件回调 ``fn(event: dict)``；传 None 恢复默认 stderr 行为"""
     global _sink
     _sink = fn
 
 
-def set_meta(meta):
+def set_meta(meta: dict[str, Any] | None) -> None:
     """注入进程级 ns 标签（tenant/env），供落库 sink 附加到事件"""
     global _meta
     _meta = {**_meta, **(meta or {})}
 
 
-def fail_count():
+def fail_count() -> int:
     """落库失败累计计数（进程级；>0 表示有事件未入表——可观测，不静默）"""
     return _fail_count
 
 
-def _fail(msg):
+def _fail(msg: str) -> None:
     """落库失败统一处置：进程级计数 +1 并向 stderr 打印（可观测，不静默）"""
     global _fail_count
     _fail_count += 1
     print(f"[py-store][feedback] {msg}", file=sys.stderr)
 
 
-async def _write_feedback(store, row):
+async def _write_feedback(store: Any, row: dict[str, Any]) -> None:
     """落库（internal 上下文——__feedback write 空名单仅放行 internal/admin）；失败不静默、不抛回 emit"""
     from . import metadef as _metadef
 
@@ -87,7 +89,7 @@ async def _write_feedback(store, row):
         _fail(f"__feedback 落库失败: {e}")
 
 
-def enable_feedback_table(store):
+def enable_feedback_table(store: Any) -> Callable[[], None]:
     """一键接线：注册内建 ``__feedback`` 并把 sink 指向落库；返回 disposer（恢复原 sink）
 
     落库为异步 fire-and-forget（有运行中事件循环时 ``create_task``）；失败走 stderr + 计数，
@@ -98,12 +100,12 @@ def enable_feedback_table(store):
     _metadef.ensure_builtins()  # 幂等（含 __feedback）
     prev = get_sink()
 
-    def _sink(event):
+    def _sink(event: dict[str, Any]) -> None:
         """落库 sink：事件 + 租户/env/时间戳组装成行，运行中事件循环内 create_task 异步写入 __feedback"""
         # fields 键空间完全开放、无字段名保留字：事件类别直接落库为 `type` 字段
         e = event or {}
         row = dict(e)
-        ns = _current_meta()
+        ns = cast(dict[str, Any], _current_meta())
         row.update(
             {
                 "tenant": ns.get("tenant", ""),
@@ -126,7 +128,7 @@ def enable_feedback_table(store):
     return lambda: set_sink(prev)
 
 
-async def flush():
+async def flush() -> None:
     """等待全部在途 `__feedback` 落库任务完成（graceful shutdown 前调用）。
 
     落库失败已由 ``_write_feedback`` 计为 ``fail_count``（不抛），故此处 ``gather`` 不冒泡。
@@ -135,7 +137,7 @@ async def flush():
         await asyncio.gather(*list(_pending), return_exceptions=True)
 
 
-def emit(event):
+def emit(event: dict[str, Any]) -> None:
     """产出一条反馈事件：作用域/进程级 sink 回调之；否则打印 stderr（允许拦截，禁止静默）"""
     sink = _current_sink()
     if sink is not None:

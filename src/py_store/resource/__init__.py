@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import inspect
-from typing import Any
+from typing import Any, cast
 
 from ..core import native
 from ..feedback import emit as _emit_feedback
@@ -58,7 +58,7 @@ _REQUIRED_ROLES = {
 }
 
 
-def _parse_fields(raw=None):
+def _parse_fields(raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """解析并校验 ``cfg["fields"]``：未知表 / 未知角色 → 抛错；
     必填角色须为非空字符串；可选角色为「非空字符串」或 ``None``（``None`` = 跳过该列）。
     """
@@ -100,15 +100,15 @@ _cfg: dict[str, Any] = {
     "url": {},
     "sign": None,
 }
-_pool: dict = {}
+_pool: dict[str, Any] = {}
 # 命名池注册表（C2）：池名 → {kind → provider}。默认池恒名 "default"；
 # _pool 保留为默认池别名（兼容既有 import，禁删/禁改名）
-_pools: dict[str, dict] = {}
+_pools: dict[str, dict[str, Any]] = {}
 
 _BYTES_TYPES = (bytes, bytearray)
 
 
-def _build_pool(sub, *, strict):
+def _build_pool(sub: dict[str, Any], *, strict: bool) -> dict[str, Any]:
     """单池构建：复用既有建池循环（create_provider 纯工厂 + priority 缺省按序）。
 
     strict=True（命名池子形状）时仅接受 ``providers`` 键——schema/fields/store/url/sign
@@ -123,7 +123,7 @@ def _build_pool(sub, *, strict):
                     f"configure_resource: pools.<名>.{k} 不被接受（{k} 为全局配置不得按池分化；"
                     "池级仅接受 providers）"
                 )
-    pool: dict = {}
+    pool: dict[str, Any] = {}
     for i, spec in enumerate(sub.get("providers") or []):
         p = providers.create_provider(spec["kind"], spec.get("options") or {})
         p["priority"] = spec.get("priority", i)
@@ -131,7 +131,7 @@ def _build_pool(sub, *, strict):
     return pool
 
 
-def configure(cfg=None):
+def configure(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """配置资源能力。cfg 两种形状（互斥——同 cfg 同时出现 ``providers`` 与 ``pools``
     键抛 ``ValueError``，禁静默合并）：
 
@@ -173,12 +173,12 @@ def configure(cfg=None):
     return {name: dict(p) for name, p in _pools.items()}
 
 
-def pool_names():
+def pool_names() -> list[str]:
     """已配置池名列表（旧形状配置 → 恒 ``["default"]``；只读快照）"""
     return list(_pools.keys())
 
 
-def _require_pool(name=None):
+def _require_pool(name: str | None = None) -> dict[str, Any]:
     """取池：``None`` = 默认池；未知池名抛 ``ValueError``（禁静默回落默认池）"""
     key = name or "default"
     if key not in _pools:
@@ -186,17 +186,17 @@ def _require_pool(name=None):
     return _pools[key]
 
 
-def fields():
+def fields() -> dict[str, dict[str, Any]]:
     """当前生效字段映射（深拷贝；只读快照）"""
     return copy.deepcopy(_cfg["fields"])
 
 
-def register_provider(kind, mod):
+def register_provider(kind: str, mod: Any) -> None:
     """注册存储后端 provider（透传 ``providers.register_provider``）。"""
     providers.register_provider(kind, mod)
 
 
-def _crud():
+def _crud() -> Any:
     """取资源落库用的 crud 通道：配置了 ``store`` 用之，否则用全局 ``crud``。"""
     if _cfg["store"] is not None:
         return _cfg["store"]
@@ -205,7 +205,7 @@ def _crud():
     return crud
 
 
-async def _call(fn, *a, **kw):
+async def _call(fn: Any, *a: Any, **kw: Any) -> Any:
     """调用 ``fn`` 并 await 其结果（同步/异步 provider 双兼容）。"""
     out = fn(*a, **kw)
     if inspect.isawaitable(out):
@@ -213,7 +213,9 @@ async def _call(fn, *a, **kw):
     return out
 
 
-def _loc_row(resource_id, backend, key, status, priority):
+def _loc_row(
+    resource_id: str, backend: str, key: str, status: str, priority: Any
+) -> dict[str, Any]:
     """location 落库行：仅写映射到的列（``None`` 角色跳过），``_id`` 由 store 生成"""
     f = _cfg["fields"]["location"]
     row = {}
@@ -230,14 +232,14 @@ def _loc_row(resource_id, backend, key, status, priority):
     return row
 
 
-def _loc_gql(schema):
+def _loc_gql(schema: str) -> str:
     """location 读投影 + 条件键：按映射生成（``_id`` 恒含）"""
     f = _cfg["fields"]["location"]
     cols = ["_id"] + [v for v in f.values() if isinstance(v, str) and v != ""]
     return f"{schema}($condition: @c0) {{ {', '.join(dict.fromkeys(cols))} }}"
 
 
-def _meta_gql(schema):
+def _meta_gql(schema: str) -> str:
     """Resource 元数据读投影：``_id`` + 映射到的 fileName/mime"""
     f = _cfg["fields"]["resource"]
     cols = ["_id"]
@@ -249,8 +251,14 @@ def _meta_gql(schema):
 
 
 async def put(
-    *, bytes=None, file_name=None, mime=None, kind=None, bind=None, pool=None
-):
+    *,
+    bytes: bytes | bytearray | str | None = None,
+    file_name: str | None = None,
+    mime: str | None = None,
+    kind: str | None = None,
+    bind: dict[str, Any] | None = None,
+    pool: str | None = None,
+) -> dict[str, Any]:
     """上传资源：按 sha1 寻址写入池内全部后端副本并登记 Resource/Location（可附 binding）。"""
     if bytes is None:
         raise ValueError("resource.put 需要 bytes")
@@ -344,7 +352,9 @@ async def put(
     return {"resourceId": resource_id, "sha1": sha1, "locations": locations}
 
 
-async def open(resource_id, *, order=None, pool=None):
+async def open(
+    resource_id: str, *, order: list[str] | None = None, pool: str | None = None
+) -> dict[str, Any]:
     """按优先级顺序逐副本读取资源字节，首个成功即返回（含元数据）；全部失败/缺失则响亮报错。"""
     crud = _crud()
     f = _cfg["fields"]
@@ -356,15 +366,15 @@ async def open(resource_id, *, order=None, pool=None):
     )
     seq = list(order) if order else list(pool_.keys())
 
-    def rank(b):
+    def rank(b: str) -> int:
         """后端在指定顺序 ``seq`` 中的位次（不在序列中的排在最后）。"""
         return seq.index(b) if b in seq else 2**31
 
-    def backend_of(r):
+    def backend_of(r: dict[str, Any]) -> str:
         """从 location 行取后端名（按字段映射列）。"""
-        return r[f["location"]["backend"]]
+        return cast(str, r[f["location"]["backend"]])
 
-    def prio_of(r):
+    def prio_of(r: dict[str, Any]) -> int:
         """从 location 行取副本优先级（未映射或缺失记 0）。"""
         return (
             (r.get(f["location"]["priority"]) or 0) if f["location"]["priority"] else 0
@@ -448,7 +458,7 @@ async def open(resource_id, *, order=None, pool=None):
     )
 
 
-async def remove(resource_id, *, pool=None):
+async def remove(resource_id: str, *, pool: str | None = None) -> dict[str, Any]:
     """删除资源：逐后端删副本（失败仅反馈不中断），并清空 Location 与 Resource 行。"""
     crud = _crud()
     f = _cfg["fields"]
@@ -488,7 +498,9 @@ async def remove(resource_id, *, pool=None):
     return {"removed": removed}
 
 
-async def url(reference, *, vars=None, pool=None):
+async def url(
+    reference: str, *, vars: dict[str, Any] | None = None, pool: str | None = None
+) -> Any:
     """按模板与签名配置合成资源访问 URL（``vars`` 可覆盖模板变量）。"""
     _require_pool(
         pool

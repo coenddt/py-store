@@ -18,7 +18,9 @@
 
 import contextvars
 import inspect
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any, cast
 
 from .schema import get_core
 
@@ -27,14 +29,14 @@ from .schema import get_core
 # （非 ``import schema``）以规避 ``_model(schema)`` 形参对模块名的遮蔽（node 侧同因改用
 # ``schemaMod``，见 03 步骤 3 偏差留痕）；禁模块级缓存 core 引用。
 
-_ctx: contextvars.ContextVar = contextvars.ContextVar("py_store_ctx", default=None)
+_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar("py_store_ctx", default=None)
 
 #: 可信标记：仅允许由 run_as_internal 等内部机制写入，禁止经请求上下文注入
 #: （core 读 ``ctx.internal`` 即放行，用户可控输入带上它 = 越权）。
 _TRUSTED_KEYS = ("internal",)
 
 
-def _assert_no_trusted_keys(ctx, where):
+def _assert_no_trusted_keys(ctx: Any, where: str) -> None:
     """校验 ctx 未携带可信标记（internal 等）：命中即抛 PermissionDeniedError（防越权注入）；非 dict 直接放行"""
     if not isinstance(ctx, dict):
         return
@@ -45,19 +47,19 @@ def _assert_no_trusted_keys(ctx, where):
             )
 
 
-def set_context(ctx):
+def set_context(ctx: dict[str, Any] | None) -> None:
     """设置当前请求的上下文，每次请求开始时调用一次"""
     _assert_no_trusted_keys(ctx, "set_context")
     _ctx.set(ctx)
 
 
-def get_context():
+def get_context() -> dict[str, Any] | None:
     """获取当前请求的上下文，无则 None"""
-    return _ctx.get()
+    return cast("dict[str, Any] | None", _ctx.get())
 
 
 @contextmanager
-def scoped_roles(roles):
+def scoped_roles(roles: list[str]) -> Iterator[None]:
     """以指定角色进入临时权限上下文（token-set/reset，嵌套安全），退出自动恢复原上下文。
 
     与 run_as_internal 同构，供 AI 查询执行等显式角色注入场景使用，
@@ -72,7 +74,7 @@ def scoped_roles(roles):
 
 
 @contextmanager
-def scoped_context(ctx):
+def scoped_context(ctx: dict[str, Any] | None) -> Iterator[None]:
     """以完整上下文 ``ctx`` 进入临时权限上下文（token-set/reset，嵌套安全），退出自动恢复。
 
     与 :func:`scoped_roles` 同构；区别在于整体替换 ctx（保留调用方原上下文于外层），
@@ -87,7 +89,7 @@ def scoped_context(ctx):
         _ctx.reset(token)
 
 
-async def run_as_internal(fn):
+async def run_as_internal(fn: Callable[..., Any]) -> Any:
     """在内部上下文中执行操作（绕过权限检查），结束后自动恢复上下文"""
     prev = get_context()
     token = _ctx.set({**(prev or {}), "internal": True})
@@ -105,87 +107,115 @@ async def run_as_internal(fn):
 # ─── core 权限方法包装 ────────────────────────────────────────
 
 
-def _model(schema):
+def _model(schema: dict[str, Any] | str) -> str:
     """接受 schema 字典或 schema 名称"""
     return schema["name"] if isinstance(schema, dict) else schema
 
 
-def can_read_schema(schema, ctx):
+def can_read_schema(schema: dict[str, Any] | str, ctx: dict[str, Any] | None) -> bool:
     """透传 core.can_read：当前上下文对模型是否有读权（schema 可传字典或名称）"""
-    return get_core().can_read(_model(schema), ctx)
+    return cast(bool, get_core().can_read(_model(schema), ctx))
 
 
-def can_write_schema(schema, ctx):
+def can_write_schema(schema: dict[str, Any] | str, ctx: dict[str, Any] | None) -> bool:
     """透传 core.can_write：当前上下文对模型是否有写权"""
-    return get_core().can_write(_model(schema), ctx)
+    return cast(bool, get_core().can_write(_model(schema), ctx))
 
 
-def should_inject_owner_condition(schema, ctx):
+def should_inject_owner_condition(
+    schema: dict[str, Any] | str, ctx: dict[str, Any] | None
+) -> bool:
     """透传 core.should_inject_owner：查询是否需注入所有者条件"""
-    return get_core().should_inject_owner(_model(schema), ctx)
+    return cast(bool, get_core().should_inject_owner(_model(schema), ctx))
 
 
-def merge_owner_condition(schema, ctx, condition):
+def merge_owner_condition(
+    schema: dict[str, Any] | str,
+    ctx: dict[str, Any] | None,
+    condition: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """透传 core.merge_owner_condition 合并所有者条件；core 不注入返回 None 时原样返回入参条件"""
     out = get_core().merge_owner_condition(_model(schema), ctx, condition)
     # core 在「不注入」时返回 null（无法区分原条件为 null）→ 原样返回入参条件
     return condition if out is None else out
 
 
-def get_readable_fields(schema, ctx):
+def get_readable_fields(
+    schema: dict[str, Any] | str, ctx: dict[str, Any] | None
+) -> Any:
     """透传 core.readable_fields：当前上下文在模型上的可读字段集"""
     return get_core().readable_fields(_model(schema), ctx)
 
 
-def get_readable_relations(schema, ctx):
+def get_readable_relations(
+    schema: dict[str, Any] | str, ctx: dict[str, Any] | None
+) -> Any:
     """透传 core.readable_relations：当前上下文可读的关联集合"""
     return get_core().readable_relations(_model(schema), ctx)
 
 
-def get_writable_fields(schema, ctx):
+def get_writable_fields(
+    schema: dict[str, Any] | str, ctx: dict[str, Any] | None
+) -> Any:
     """透传 core.writable_fields：当前上下文在模型上的可写字段集"""
     return get_core().writable_fields(_model(schema), ctx)
 
 
-def filter_writable_data(schema, ctx, data):
+def filter_writable_data(
+    schema: dict[str, Any] | str, ctx: dict[str, Any] | None, data: dict[str, Any]
+) -> dict[str, Any]:
     """透传 core.filter_writable_data：按可写字段集裁剪待写数据"""
-    return get_core().filter_writable_data(_model(schema), ctx, data)
+    return cast(
+        dict[str, Any], get_core().filter_writable_data(_model(schema), ctx, data)
+    )
 
 
 # ─── RBAC 动态策略（core 判决；本模块零判决，仅透传） ─────────
 
 
-def set_rbac(policy):
+def set_rbac(policy: dict[str, Any] | None) -> Any:
     """注入/清除 RBAC 策略。dict = 注入（解析失败 core 抛错）；None = 清除关闭"""
     return get_core().set_rbac(policy)
 
 
-def rbac_enabled():
+def rbac_enabled() -> bool:
     """RBAC 策略是否已注入"""
-    return get_core().rbac_enabled()
+    return cast(bool, get_core().rbac_enabled())
 
 
-def rbac_can(model, action, ctx=None):
+def rbac_can(
+    model: dict[str, Any] | str,
+    action: str,
+    ctx: dict[str, Any] | None = None,
+) -> bool:
     """RBAC 动作判决：action ∈ {read, insert, update, remove}；RBAC 不介入 → True"""
-    return get_core().rbac_can(_model(model), action, ctx)
+    return cast(bool, get_core().rbac_can(_model(model), action, ctx))
 
 
-def rbac_readable_fields(model, ctx=None):
+def rbac_readable_fields(
+    model: dict[str, Any] | str, ctx: dict[str, Any] | None = None
+) -> Any:
     """RBAC 叠加后的可读字段集（静态 ∩ readFields）；无 ctx → None 不裁剪"""
     return get_core().rbac_readable_fields(_model(model), ctx)
 
 
-def rbac_writable_fields(model, ctx=None):
+def rbac_writable_fields(
+    model: dict[str, Any] | str, ctx: dict[str, Any] | None = None
+) -> Any:
     """RBAC 叠加后的可写字段集（静态 ∩ writeFields）；无 ctx → None 不裁剪"""
     return get_core().rbac_writable_fields(_model(model), ctx)
 
 
-def rbac_row_condition(model, action, ctx=None):
+def rbac_row_condition(
+    model: dict[str, Any] | str,
+    action: str,
+    ctx: dict[str, Any] | None = None,
+) -> Any:
     """RBAC 行级条件（ownerOnly/condition 的 OR 合并体）；action ∈ {read, update, remove}"""
     return get_core().rbac_row_condition(_model(model), action, ctx)
 
 
-def set_exempt_roles(roles):
+def set_exempt_roles(roles: list[str]) -> Any:
     """豁免角色清单（命中者在一切判决环节直接放行）。
 
     判决唯一在 core：本层仅透传配置。默认空——无豁免（清单化语义，
@@ -194,12 +224,12 @@ def set_exempt_roles(roles):
     return get_core().set_exempt_roles(roles)
 
 
-def set_deny_write_roles(roles):
+def set_deny_write_roles(roles: list[str]) -> Any:
     """拒写角色清单（命中者一切写路径拒绝，读不受影响）。默认空——无拒写。"""
     return get_core().set_deny_write_roles(roles)
 
 
-def set_unconfigured_policy(policy):
+def set_unconfigured_policy(policy: str) -> Any:
     """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）。"""
     return get_core().set_unconfigured_policy(policy)
 
@@ -216,7 +246,7 @@ class PermissionDeniedError(Exception):
     ``store.PermissionError`` / ``except permission.PermissionError`` 调用面零破坏）。
     """
 
-    def __init__(self, message, status=403):
+    def __init__(self, message: str, status: int = 403) -> None:
         """构造权限拒绝错误：message 为错误文案，status 默认 403"""
         super().__init__(message)
         self.status = status
@@ -235,7 +265,7 @@ class NoContextError(Exception):
     对齐 nodejs-store ``NoContextError``。
     """
 
-    def __init__(self, message, status=403):
+    def __init__(self, message: str, status: int = 403) -> None:
         """构造上下文缺失错误：固定 code=no_context，status 默认 403"""
         super().__init__(message)
         self.code = "no_context"

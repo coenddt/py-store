@@ -18,13 +18,15 @@ R2（03 §4.3）：作用域内**并视图**——三开关叠加为派生视图
 
 from __future__ import annotations
 
+from typing import Any
+
 from . import permission, schema
 from .scope import current_scope
 
 _secure = False
 
 
-def _secure_overrides(admin_roles):
+def _secure_overrides(admin_roles: list[str]) -> dict[str, Any]:
     """三开关的策略覆盖对象（键名以 01 §4.3 ``PolicyOverrides`` JSON 契约为准，camelCase）。
 
     ``unconfigured`` 是 ``roleRules`` 的**子键**（非顶层）——写成顶层会被 core
@@ -37,7 +39,7 @@ def _secure_overrides(admin_roles):
     }
 
 
-def secure_mode(admin_roles: list[str] | None = None) -> dict:
+def secure_mode(admin_roles: list[str] | None = None) -> dict[str, Any]:
     """进入 fail-secure 模式（三个开关同时翻转）。
 
     :param admin_roles: 允许注册/覆盖定义的角色（配合 meta closed；默认仅 internal）
@@ -70,7 +72,7 @@ def is_secure() -> bool:
     return _secure
 
 
-def relax_mode() -> dict:
+def relax_mode() -> dict[str, Any]:
     """退出安全模式，恢复 core 默认的 fail-open 姿态（仅供本地脚本/测试；生产禁用）。
 
     不重置各 schema 自身声明的读/写白名单——那是定义的一部分。

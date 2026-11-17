@@ -33,7 +33,10 @@ Schema 管理 — 薄适配层
     })
 """
 
+import builtins
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any, cast
 
 from .core import core, native
 from .feedback import emit as _emit_feedback
@@ -43,7 +46,7 @@ from .scope import current_scope, with_scope
 _LIST_TYPES = (list, tuple)
 
 
-def get_core():
+def get_core() -> Any:
     """取当前生效的 core 门面（R2 双端宿主作用域）：作用域内回退该作用域的派生视图，否则 base。
 
     - 未进入作用域（无 ``with_scope``）→ 恒等 base ``core``（零行为变化，fail-open 姿态不变）；
@@ -56,7 +59,7 @@ def get_core():
     return s.view if s is not None else core
 
 
-def get_base():
+def get_base() -> Any:
     """取 base core 门面（恒 base，无视作用域）：协议皮派生视图的唯一合法起点。
 
     （R2-04 §4.1 ``store.base_view()``；皮侧禁自持 Registry——§7）
@@ -66,26 +69,26 @@ def get_base():
 
 
 # Host 侧元数据镜像
-_schemas: dict = {}
+_schemas: dict[str, dict[str, Any]] = {}
 
 # asyncFn 计算列回调映射（core_key → 原生异步函数）
-_async_fns: dict = {}
+_async_fns: dict[str, Callable[..., Any]] = {}
 
 # L2 实现池：归一 key → (name, impl)（§8.2 匹配靠归一；进程级状态，不进 clear_schemas）
-_fn_impls: dict = {}
+_fn_impls: dict[str, tuple[str, Callable[..., Any]]] = {}
 
 
-def _norm_key(name) -> str:
+def _norm_key(name: Any) -> str:
     """归一 key：用 core 透出算法（禁宿主自实现，总纲 §5）。"""
     return "".join(native.canonical(str(name)))
 
 
-def _logical_fn_ref(schema_name, key, comp):
+def _logical_fn_ref(schema_name: str, key: str, comp: dict[str, Any] | None) -> str:
     """逻辑 fnRef：显式优先，否则 ``<schema.name>.<key>``（§6.5）。"""
     return (comp or {}).get("fnRef") or f"{schema_name}.{key}"
 
 
-def _core_fn_key(key, comp):
+def _core_fn_key(key: str, comp: dict[str, Any] | None) -> str:
     """core 侧回调查找键：显式 fnRef 优先，否则 key（保持 core 语义，cache.rs:47）。"""
     return (comp or {}).get("fnRef") or key
 
@@ -97,7 +100,7 @@ _DROP = object()
 _LOCATION_KEYS = ("database", "schema")
 
 
-def _to_core_defn(defn):
+def _to_core_defn(defn: dict[str, Any]) -> dict[str, Any]:
     """生成可跨 FFI 的 schema 定义：fn/asyncFn → True 占位；函数型值剔除
 
     落点键（``database``/``schema``）不属 core 白名单（01 起「定义零落点」）：
@@ -105,7 +108,7 @@ def _to_core_defn(defn):
     「含未知顶层键」拒绝（既有 defn 兼容由本层承担，core 不再放行）。
     """
 
-    def walk(value, key=None):
+    def walk(value: Any, key: str | None = None) -> Any:
         """递归转 FFI 安全值：callable → fn/asyncFn 记 True 占位、其余剔除（_DROP）；数组内剔除项置 null；dict/list 递归"""
         if callable(value):
             # fn/asyncFn 声明占位（core 按 `fn: True` 识别）；函数型 default 无法跨 FFI，剔除
@@ -129,10 +132,10 @@ def _to_core_defn(defn):
     core_defn = walk(defn)
     for k in _LOCATION_KEYS:
         core_defn.pop(k, None)
-    return core_defn
+    return cast(dict[str, Any], core_defn)
 
 
-def _loc_of(defn):
+def _loc_of(defn: dict[str, Any] | None) -> dict[str, Any]:
     """单条 defn 的落点注入（Location）。
 
     发布契约是「定义零落点」；但**既有** defn 仍可能带 ``datasource``/``database``/``schema``
@@ -147,7 +150,7 @@ def _loc_of(defn):
     }
 
 
-def register(defn, ctx=None):
+def register(defn: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     """注册一个 schema（core 注册 + Host 侧元数据镜像）
 
     ``ctx``：可选定义层门禁上下文（``{'userId','roles',...}`` 或 ``{'internal': True}``）。
@@ -169,7 +172,7 @@ def register(defn, ctx=None):
     return _mirror(defn)
 
 
-def _mirror(defn):
+def _mirror(defn: dict[str, Any]) -> dict[str, Any]:
     """Host 侧元数据镜像 + 内嵌回调绑定（``register`` 与 ``register_batch`` 共用）"""
     # 计算列回调：fn → core 回调桥；asyncFn → Host 侧映射
     computes = {}
@@ -247,7 +250,9 @@ def _mirror(defn):
     return _schemas[defn["name"]]
 
 
-def register_batch(items, ctx=None):
+def register_batch(
+    items: builtins.list[dict[str, Any]], ctx: dict[str, Any] | None = None
+) -> None:
     """带定位批量注册（D13 批次唯一）：``items = [{'defn', 'location'}]``。
 
     判决唯一在 core（``core.register_batch``：分组 / 主唯一 / 链路 / 版本）；本层只转发 +
@@ -270,7 +275,7 @@ def register_batch(items, ctx=None):
             _mirror(defn)
 
 
-def unregister(name):
+def unregister(name: str) -> None:
     """注销一个 schema（core 幂等：未知 schema 返回成功，回滚清单可整份重放）。
 
     判决唯一在 core（``Registry::unregister``）：主项与其归档派生物
@@ -289,7 +294,7 @@ def unregister(name):
     _schemas.pop(f"{name}Deleted", None)
 
 
-def get(name):
+def get(name: str) -> dict[str, Any]:
     """按名称获取 Host 侧元数据"""
     s = _schemas.get(name)
     if not s:
@@ -297,12 +302,12 @@ def get(name):
     return s
 
 
-def has(name):
+def has(name: str) -> bool:
     """检查 schema 是否已注册（core 侧判定，含归档表）"""
-    return get_core().has(name)
+    return cast(bool, get_core().has(name))
 
 
-def clear_schemas():
+def clear_schemas() -> None:
     """清空 schema 注册表（core 注册表 + Host 镜像 + asyncFn 映射 + 去重告警签名）
 
     测试隔离 / 动态重建场景的注册表生命周期原语（绑定层 ``clear_schemas`` 同语义）：
@@ -319,10 +324,10 @@ def clear_schemas():
 
 
 # 去重告警签名（同一重复形态只告警一次，避免 list() 高频调用刷屏）
-_dup_signatures: set = set()
+_dup_signatures: set[tuple[Any, ...]] = set()
 
 
-def list():
+def list() -> builtins.list[str]:
     """所有已注册 schema 名称（core 侧，含归档表，按注册顺序；同名只保留首次出现）
 
     去重是纵深防御的第二层：一旦检出重复即说明上游（register/core）失守，
@@ -356,7 +361,7 @@ def list():
     return out
 
 
-def set_require_context(require=True):
+def set_require_context(require: bool = True) -> None:
     """
     开关「上下文强制」（默认关闭 = fail-open，与 JS 原版语义一致）。
 
@@ -367,22 +372,22 @@ def set_require_context(require=True):
     get_core().set_require_context(bool(require))
 
 
-def set_exempt_roles(roles):
+def set_exempt_roles(roles: builtins.list[str]) -> None:
     """豁免角色清单（命中者在一切判决环节直接放行）。默认空——无豁免（清单化语义）"""
     get_core().set_exempt_roles(roles)
 
 
-def set_deny_write_roles(roles):
+def set_deny_write_roles(roles: builtins.list[str]) -> None:
     """拒写角色清单（命中者一切写路径拒绝，读不受影响）。默认空——无拒写"""
     get_core().set_deny_write_roles(roles)
 
 
-def set_unconfigured_policy(policy):
+def set_unconfigured_policy(policy: str) -> None:
     """schema 白名单缺失/为空时的默认姿态："open"（默认，放行）| "closed"（全拒）"""
     get_core().set_unconfigured_policy(policy)
 
 
-def set_meta_policy(closed, roles):
+def set_meta_policy(closed: bool, roles: builtins.list[str]) -> None:
     """定义层门禁策略：`closed=True` 时仅 internal 或 `roles` 白名单可注册/覆盖。
 
     判决唯一在 core；默认 Open（`register` 无 ctx 亦放行，保既有兼容）。
@@ -390,12 +395,12 @@ def set_meta_policy(closed, roles):
     get_core().set_meta_policy(bool(closed), roles)
 
 
-def require_context():
+def require_context() -> bool:
     """「上下文强制」开关当前值"""
-    return get_core().require_context()
+    return cast(bool, get_core().require_context())
 
 
-def set_profile(profile):
+def set_profile(profile: str) -> None:
     """设置查询档位：'standard'（默认，功能最大化 + 跨 DB 对齐）/
     'text2query'（功能收缩 + 硬限制）
 
@@ -405,13 +410,13 @@ def set_profile(profile):
     get_core().set_profile(profile)
 
 
-def get_profile():
+def get_profile() -> str:
     """当前档位字符串（'standard' / 'text2query'）；作用域内取本作用域视图档位"""
-    return get_core().profile()
+    return cast(str, get_core().profile())
 
 
 @contextmanager
-def text2query():
+def text2query() -> Iterator[None]:
     """以 text2query 档位视图执行（功能收缩 + 硬限制），退出即回退 base 档位。
 
     R2（03 §3.2/§4.1）：档位随**作用域视图**隔离——入口一次性派生 text2query 档位视图，
@@ -426,12 +431,12 @@ def text2query():
         yield
 
 
-def get_async_fn(fn_ref):
+def get_async_fn(fn_ref: str) -> Callable[..., Any] | None:
     """取 asyncFn 计算列实现（入参为 core 侧 fnRefs 查找键，即 core_key）"""
     return _async_fns.get(fn_ref)
 
 
-def set_fn(impl_name, impl):
+def set_fn(impl_name: str, impl: Callable[..., Any]) -> None:
     """公开回调注入：``impl_name → impl(item, ctx)``（来自 L2 包扁平字典）。
 
     实现名与 schema 逻辑 fn_ref 由 ``_norm_key`` 归一后匹配（§6.5）；
@@ -450,7 +455,7 @@ def set_fn(impl_name, impl):
     _fn_impls[k] = (impl_name, impl)
 
 
-def _bind_one(schema_name, key, comp):
+def _bind_one(schema_name: str, key: str, comp: dict[str, Any] | None) -> bool:
     """解析单个回调计算列的实现并绑定 core；无实现返回 False。"""
     embedded = comp and (comp.get("fn") or comp.get("asyncFn"))
     if callable(embedded):
@@ -463,19 +468,21 @@ def _bind_one(schema_name, key, comp):
     if not callable(impl):
         return False
     core_key = _core_fn_key(key, comp)
-    if comp.get("fn"):
+    # comp 为 None 时上面 embedded 短路、impl 不可调用已提前 return；此处仅类型收窄（cast 运行时 no-op）
+    comp_d = cast(dict[str, Any], comp)
+    if comp_d.get("fn"):
         get_core().set_fn(core_key, impl)
-    if comp.get("asyncFn"):
+    if comp_d.get("asyncFn"):
         _async_fns[core_key] = impl
     return True
 
 
-def assert_fns_covered(defns):
+def assert_fns_covered(defns: builtins.list[dict[str, Any]] | None) -> None:
     """启动期：解析每个回调计算列的实现并绑定 core；缺实现 ⇒ 显式抛 ``ERR_FN_MISSING``（不静默）。
 
     关系聚合（``val['agg']``）由框架处理，无需回调，跳过。
     """
-    missing = []
+    missing: builtins.list[str] = []
     for defn in defns or ():
         for key, val in ((defn or {}).get("computes") or {}).items():
             if val and val.get("agg"):

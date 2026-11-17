@@ -6,14 +6,18 @@
 返回中立包络 ``{docs, rows, affectedRows}``，由 ``./__init__.py#shape_result`` 塑形。
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
-from ..schema import core as _core
+from ..schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 from ._values import normalize_rows
 
 
 @asynccontextmanager
-async def acquire(driver):
+async def acquire(driver: Any) -> AsyncIterator[Any]:
     """兼容连接池与单连接：池用 ``acquire()``，单连接直接复用"""
     acquire_fn = getattr(driver, "acquire", None)
     if acquire_fn is None:
@@ -34,12 +38,12 @@ async def acquire(driver):
             await release(conn)
 
 
-def _plain(row):
+def _plain(row: Any) -> dict[str, Any]:
     """驱动行（DictCursor 已是 dict）转纯 dict 后再交 core（绑定层只认纯 JSON）"""
     return dict(row)
 
 
-def _to_pyformat(text):
+def _to_pyformat(text: str) -> str:
     """core 的 MySQL 方言产出 ``?`` 占位符（对齐 Node 的 mysql2），
 
     但 asyncmy 沿用 PyMySQL 的 ``%s`` paramstyle，直接传 ``?`` 会抛
@@ -71,14 +75,14 @@ def _to_pyformat(text):
     return "".join(out)
 
 
-def create(driver, options=None):
+def create(driver: Any, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
     if driver is None:
         raise TypeError("mysql 执行器需要 asyncmy 的连接或连接池")
 
     from asyncmy.cursors import DictCursor
 
-    async def run_stmts(conn, plan):
+    async def run_stmts(conn: Any, plan: dict[str, Any]) -> dict[str, Any]:
         """在指定连接上依序执行 plan.stmts（事务内与池路径共用）"""
         docs = None
         rows = None
@@ -107,7 +111,7 @@ def create(driver, options=None):
             "insertId": insert_id,
         }
 
-    async def exec_(plan):
+    async def exec_(plan: dict[str, Any]) -> dict[str, Any]:
         """非事务路径：整个 plan 固定在同一连接执行，成功后显式 commit
         （池 autocommit=True 时为幂等 no-op；单连接 autocommit=False 时杜绝「只执行不提交」）；
         失败则 rollback 后上抛，绝不提交半截写入"""
@@ -120,7 +124,7 @@ def create(driver, options=None):
             await conn.commit()
             return out
 
-    async def open_transaction():
+    async def open_transaction() -> dict[str, Any]:
         """显式事务句柄（asyncmy）
 
         池形态经 ``open_acquire`` checkout 专用连接后 ``BEGIN``，
@@ -137,7 +141,7 @@ def create(driver, options=None):
             await cur.execute("BEGIN")
         commit, rollback = idempotent_tx_ops(conn.commit, conn.rollback)
 
-        async def exec_sql(sql):
+        async def exec_sql(sql: str) -> None:
             """单语句执行入口（asyncmy 需经 cursor 执行）"""
             async with conn.cursor() as cur:
                 await cur.execute(sql)

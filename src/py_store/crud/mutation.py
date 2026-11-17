@@ -1,5 +1,7 @@
 """Mutation / Upsert / 原生聚合 —— 规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
 
+from typing import Any, cast
+
 from ..feedback import emit as _emit_feedback
 from ..schema import get as _get_schema
 from ..schema import get_core
@@ -16,7 +18,12 @@ from .id import _generate_id, _new_id_pool
 from .write import apply_write_computes
 
 
-async def _mutation_one(schema_name, data, now, route_override=None):
+async def _mutation_one(
+    schema_name: str,
+    data: dict[str, Any],
+    now: int,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """mutation 单条：规划步骤序列 → 依序执行 + 父子 _id 占位符回填"""
     plan = _call(
         lambda: get_core().plan_mutation(
@@ -33,9 +40,9 @@ async def _mutation_one(schema_name, data, now, route_override=None):
     for d in plan.get("degraded") or []:
         _emit_feedback(dict(d or {}, type="mutation_degraded"))
 
-    async def _run_steps():
+    async def _run_steps() -> dict[str, Any] | None:
         """按规划顺序执行步骤：占位符用已得结果回填后逐条 _exec，首步结果作为根文档回填计算列"""
-        resolved: list = []
+        resolved: list[Any] = []
         root_result = None
         for i, step in enumerate(plan["steps"]):
             cmd = resolve_placeholders(step["command"], steps=resolved)
@@ -46,15 +53,22 @@ async def _mutation_one(schema_name, data, now, route_override=None):
 
         if not root_result:
             return None
-        return await apply_write_computes(schema_name, root_result)
+        return cast(
+            "dict[str, Any] | None",
+            await apply_write_computes(schema_name, root_result),
+        )
 
     # 单一 SQL 源 → 步骤序列整体事务化（同连接同事务，任一步失败整体回滚）；
     # Mongo 源 / 跨源步骤按原样顺序执行（非原子边界见 README「事务边界」）
     sources = _sources_of(plan)
-    return await run_atomic(sources, _run_steps)
+    return cast("dict[str, Any] | None", await run_atomic(sources, _run_steps))
 
 
-async def mutation(schema_name, data, route_override=None):
+async def mutation(
+    schema_name: str,
+    data: dict[str, Any] | list[dict[str, Any]],
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """
     mutation — 智能持久化
 
@@ -62,7 +76,7 @@ async def mutation(schema_name, data, route_override=None):
     ``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``。
     """
     is_array = isinstance(data, list)
-    items = data if is_array else [data]
+    items = cast("list[dict[str, Any]]", data if is_array else [data])
 
     if not items:
         return [] if is_array else None
@@ -78,7 +92,13 @@ async def mutation(schema_name, data, route_override=None):
     return results if is_array else results[0]
 
 
-async def upsert(schema_name, condition, data, options=None, route_override=None):
+async def upsert(
+    schema_name: str,
+    condition: dict[str, Any],
+    data: dict[str, Any],
+    options: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     upsert — 显式条件 upsert
 

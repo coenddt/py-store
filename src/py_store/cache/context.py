@@ -16,7 +16,7 @@ import contextvars
 import inspect
 from typing import Any, Callable
 
-_selection_var: contextvars.ContextVar = contextvars.ContextVar(
+_selection_var: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "store_link_selection", default=None
 )
 

@@ -3,6 +3,7 @@
 
 import asyncio
 import inspect
+from typing import Any
 
 from .. import degraded
 from ..cache.context import run_with_selection
@@ -19,7 +20,7 @@ from .exec import (
 )
 
 
-def _guard_route_override(route_override):
+def _guard_route_override(route_override: dict[str, Any] | None) -> None:
     """Host 兜底：text2query 档禁用 ``route_override``（受信参数，禁 AI 侧指定）
 
     判决唯一在 core（执行文档 §4.2 ⑤：各 ``plan_query*`` 入口已判并 Err）；此为
@@ -44,7 +45,7 @@ def _guard_route_override(route_override):
     raise ProfileViolation(detail)
 
 
-async def _run_query_plan(plan):
+async def _run_query_plan(plan: dict[str, Any]) -> Any:
     """执行读命令序列"""
     if plan["mode"] == "two_phase":
         id_docs = await _exec(plan["commands"][0])
@@ -57,7 +58,7 @@ async def _run_query_plan(plan):
     return await _exec(plan["commands"][0])
 
 
-async def _finalize(plan, items):
+async def _finalize(plan: dict[str, Any], items: Any) -> Any:
     """读路径尾处理两段式：core 后处理 → Host 执行 asyncFn → core 剥离注入依赖"""
     post = plan.get("postprocess")
     if not post:
@@ -73,7 +74,11 @@ async def _finalize(plan, items):
     return get_core().strip_query(post, prepared["items"])["items"]
 
 
-async def query(gql, params=None, route_override=None):
+async def query(
+    gql: str,
+    params: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """
     GQL 查询（返回数组）
 
@@ -92,7 +97,7 @@ async def query(gql, params=None, route_override=None):
     )
     degraded.emit_plan(plan, "plan_degraded")
 
-    async def _selected():
+    async def _selected() -> Any:
         """单库执行体：跑查询计划后过 _finalize 统一后处理（在链路选中上下文内调用）"""
         return await _finalize(plan, await _run_query_plan(plan))
 
@@ -100,7 +105,11 @@ async def query(gql, params=None, route_override=None):
     return await run_with_selection(plan.get("links"), _selected)
 
 
-async def query_one(gql, params=None, route_override=None):
+async def query_one(
+    gql: str,
+    params: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """GQL 查询（返回单条）
 
     走 core ``plan_query_one``：用户未显式 ``$limit`` 时强制下推 ``$limit(1)``，
@@ -117,7 +126,7 @@ async def query_one(gql, params=None, route_override=None):
     return items[0] if items else None
 
 
-async def _run_federated_unit(unit):
+async def _run_federated_unit(unit: dict[str, Any]) -> Any:
     """执行单个联邦取数单元（按 ``sources[].source`` 精确路由；two_phase 走两阶段）
 
     与单库 ``_run_query_plan`` 同形：只差路由键（单元自带 source，不按 collection 反查）。
@@ -134,7 +143,10 @@ async def _run_federated_unit(unit):
     return await _exec_on(unit["source"], commands[0])
 
 
-async def query_federated(gql, params=None):
+async def query_federated(
+    gql: str,
+    params: dict[str, Any] | None = None,
+) -> Any:
     """
     跨库联邦查询（返回嵌套文档数组）
 
@@ -154,7 +166,7 @@ async def query_federated(gql, params=None):
     # 降级事件走请求容器 + 统一反馈通道（core 事件通常不带 type，兜底 federation_degraded）
     degraded.emit_plan(plan, "federation_degraded")
 
-    async def _selected():
+    async def _selected() -> Any:
         """联邦执行体：并行逐源取数 → core 内存 hash join → _finalize 统一后处理"""
         results = await asyncio.gather(
             *(_run_federated_unit(u) for u in plan.get("sources") or [])
@@ -166,7 +178,11 @@ async def query_federated(gql, params=None):
     return await run_with_selection(plan.get("links"), _selected)
 
 
-async def query_with_count(gql, params=None, route_override=None):
+async def query_with_count(
+    gql: str,
+    params: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     GQL 查询（返回 items + total + 分页元数据）
 

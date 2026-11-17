@@ -26,7 +26,7 @@ class RedisIoError(Exception):
 
     def __init__(
         self, message: str, *, database: Any = None, op: Any = None, cause: Any = None
-    ):
+    ) -> None:
         """``op`` 标注失败环节（init/scan/get/set/parse/stringify），``database`` 标注分区"""
         super().__init__(message)
         self.database = database
@@ -46,7 +46,7 @@ def _key(base: str, database: Any, collection: str) -> str:
     return f"{base}/{database}/{collection}" if database else f"{base}/{collection}"
 
 
-def create_redis_io(*, client: Any, prefix: str = "store") -> dict:
+def create_redis_io(*, client: Any, prefix: str = "store") -> dict[str, Any]:
     """创建「Redis 作载体」的整量 io。
 
     :param client: 由调用方注入（禁新增依赖），须实现 ``scan`` / ``get`` / ``set``
@@ -65,7 +65,7 @@ def create_redis_io(*, client: Any, prefix: str = "store") -> dict:
     base = "" if prefix == "" else str(prefix)
     base_prefix = f"{base}/" if base else ""
 
-    async def load(database: Any = None) -> dict:
+    async def load(database: Any = None) -> dict[str, Any]:
         """整量取回：``{ 集合名: 文档数组 }``；单键解析失败 ⇒ Err（含键名），禁跳过。"""
         db = database
         pattern = f"{base}/{db}/*" if db else f"{base}/*"

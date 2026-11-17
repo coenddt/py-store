@@ -5,6 +5,8 @@
 对齐 ``nodejs-store/src/introspect/postgres.js``。
 """
 
+from typing import Any
+
 _TABLES = """
   SELECT table_name AS name
   FROM information_schema.tables
@@ -62,9 +64,9 @@ _INDEXES = """
   ORDER BY t.relname, i.relname"""
 
 
-def _group_indexes(rows):
+def _group_indexes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """把 ``{table,name,unique,column}`` 行按索引名归并出 columns 数组"""
-    by_key: dict = {}
+    by_key: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = f"{r['table']}::{r['name']}"
         entry = by_key.get(key)
@@ -80,7 +82,9 @@ def _group_indexes(rows):
     return list(by_key.values())
 
 
-async def introspect(driver, options=None):
+async def introspect(
+    driver: Any, options: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """只读采集指定 schema（缺省 ``public``）的表/列/外键/索引并归一化。"""
     if driver is None or not hasattr(driver, "fetch"):
         raise TypeError("postgres introspection 需要 asyncpg 的连接或连接池")

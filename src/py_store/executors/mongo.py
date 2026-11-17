@@ -15,12 +15,13 @@ Mongo session 事务：本模块只提供原语 `open_transaction`（`start_sess
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from bson import ObjectId
 from pymongo import ReturnDocument
 
 
-def _json_safe(value):
+def _json_safe(value: Any) -> Any:
     """驱动返回值 BSON 标量 → JSON 标量（core-py 绑定只接受 JSON 类型）
 
     Host 适配层的边界归一（铁律 1/3：驱动 IO 归 Host）：Mongo 驱动读出的
@@ -46,7 +47,7 @@ def _json_safe(value):
     return value
 
 
-def _explicit_null(v):
+def _explicit_null(v: Any) -> Any:
     """递归改写 filter：`field: null`（标量等值）→ `field: {$eq: null, $exists: true}`。"""
     if isinstance(v, dict):
         out = {}
@@ -69,14 +70,14 @@ def _explicit_null(v):
     return v
 
 
-def _norm_filter(cmd):
+def _norm_filter(cmd: dict[str, Any]) -> None:
     """命令带 dict filter 时原地改写为显式 null 语义（``_explicit_null``）。"""
     filter_ = cmd.get("filter")
     if isinstance(filter_, dict):
         cmd["filter"] = _explicit_null(filter_)
 
 
-def _norm_pipeline(cmd):
+def _norm_pipeline(cmd: dict[str, Any]) -> None:
     """命令带管道时原地改写各 ``$match`` 阶段为显式 null 语义。"""
     pipe = cmd.get("pipeline")
     if isinstance(pipe, list):
@@ -85,7 +86,7 @@ def _norm_pipeline(cmd):
                 stage["$match"] = _explicit_null(stage["$match"])
 
 
-def _client_of(connection):
+def _client_of(connection: Any) -> Any:
     """Mongo 连接的 client：db 实例取 ``.client``；MongoClient 返回自身
 
     本模块不 import ``datasource``（会被 ``datasource`` 反向 import，形成环），
@@ -98,14 +99,14 @@ def _client_of(connection):
     return connection.client  # Database.client
 
 
-def _opts(session, **kw):
+def _opts(session: Any, **kw: Any) -> dict[str, Any]:
     """session 非 None 时注入 ``session`` 关键字；None 时保持原调用形态（零回归）"""
     if session is not None:
         kw["session"] = session
     return kw
 
 
-async def open_transaction(connection):
+async def open_transaction(connection: Any) -> dict[str, Any]:
     """Mongo 事务句柄：start_session + start_transaction
 
     - ``commit`` / ``rollback`` 幂等（closed 标志）；``release`` 结束 session；
@@ -119,7 +120,7 @@ async def open_transaction(connection):
     await session.start_transaction()
     closed = False
 
-    async def commit():
+    async def commit() -> None:
         """提交 Mongo 事务（``commit_transaction``）；幂等，重复调用为 no-op。"""
         nonlocal closed
         if closed:
@@ -127,7 +128,7 @@ async def open_transaction(connection):
         closed = True
         await session.commit_transaction()
 
-    async def rollback():
+    async def rollback() -> None:
         """中止 Mongo 事务（``abort_transaction``）；幂等，重复调用为 no-op。"""
         nonlocal closed
         if closed:
@@ -135,7 +136,7 @@ async def open_transaction(connection):
         closed = True
         await session.abort_transaction()
 
-    async def release():
+    async def release() -> None:
         """结束并释放 session（``end_session``），无论事务是否已提交/中止。"""
         await session.end_session()
 
@@ -147,7 +148,7 @@ async def open_transaction(connection):
     }
 
 
-async def exec_mongo(db, cmd, session=None):
+async def exec_mongo(db: Any, cmd: dict[str, Any], session: Any = None) -> Any:
     """Command JSON → PyMongo 驱动调用（session 非 None 时全部操作携带该 session）
 
     返回前经 ``_json_safe`` 归一：所有读/写回执中的 BSON 标量（ObjectId / datetime）
@@ -157,7 +158,7 @@ async def exec_mongo(db, cmd, session=None):
     return _json_safe(await _exec_mongo_raw(db, cmd, session=session))
 
 
-async def _exec_mongo_raw(db, cmd, session=None):
+async def _exec_mongo_raw(db: Any, cmd: dict[str, Any], session: Any = None) -> Any:
     """原生驱动调用（不做结果归一；唯一调用方是 ``exec_mongo`` 包装层）"""
     coll = db[cmd["collection"]]
     kind = cmd["kind"]

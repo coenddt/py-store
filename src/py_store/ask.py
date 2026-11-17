@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import importlib.resources
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from . import crud, feedback, permission, schema
 from .llm import get_llm as _get_llm
@@ -53,9 +55,9 @@ class AskResult:
     - ``events``：执行期接管到的反馈事件（拦截/降级告警；无拦截时为空列表）。
     """
 
-    data: list
-    attempts: list = field(default_factory=list)
-    events: list = field(default_factory=list)
+    data: list[dict[str, Any]]
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AskExhausted(Exception):
@@ -65,7 +67,9 @@ class AskExhausted(Exception):
     上游不读属性也能看到失败原因。
     """
 
-    def __init__(self, attempts, events):
+    def __init__(
+        self, attempts: list[dict[str, Any]], events: list[dict[str, Any]]
+    ) -> None:
         """消息内嵌最后一轮结构化错误；完整尝试轨迹挂 .attempts / .events"""
         last_error = (attempts[-1].get("error") if attempts else None) or {
             "code": "unknown"
@@ -82,10 +86,10 @@ class AskExhausted(Exception):
 # ─── 组件 A：schema 摘要生成器 ─────────────────────────────────
 
 # 计算列收窄告警去重（同 (model, compute) 只告警一次，对齐 schema.list 的 _dup_signatures 先例）
-_COMPUTE_SKIP_SIGS: set = set()
+_COMPUTE_SKIP_SIGS: set[tuple[str, str]] = set()
 
 
-def _field_type(fdef):
+def _field_type(fdef: Any) -> str | None:
     """字段类型字符串（str 形态原样；dict 形态取 type；其余显式 None，不伪造）"""
     if isinstance(fdef, str):
         return fdef
@@ -94,7 +98,7 @@ def _field_type(fdef):
     return None
 
 
-def _emit_compute_skipped(model, compute):
+def _emit_compute_skipped(model: str, compute: str) -> None:
     """计算列收窄告警（同 (model, compute) 去重只发一次；对齐 _dup_signatures 先例）"""
     sig = (model, compute)
     if sig in _COMPUTE_SKIP_SIGS:
@@ -119,7 +123,7 @@ def _emit_compute_skipped(model, compute):
     )
 
 
-def describe_for_ai(ctx=None) -> list[dict]:
+def describe_for_ai(ctx: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """输出 LLM 可读的 schema 摘要（紧凑 JSON 数组，每模型一条）。
 
     过滤规则（顺序固定，设计文档 §4.1）：
@@ -131,7 +135,7 @@ def describe_for_ai(ctx=None) -> list[dict]:
          无 ctx → 仅暴露模型名与字段名，不暴露类型细节（防探针）；
       3. 不输出 indexes / datasource / database / schema（运维细节不进 prompt）。
     """
-    summaries = []
+    summaries: list[dict[str, Any]] = []
     for name in schema.list():
         if name.endswith("Deleted"):
             continue
@@ -188,13 +192,13 @@ _KNOWLEDGE_CACHE: str | None = None
 class _BadLlmOutput(Exception):
     """LLM 输出未通过严格解析（携带结构化 detail 供回喂）——内部控制流，不外穿"""
 
-    def __init__(self, detail):
+    def __init__(self, detail: dict[str, Any]) -> None:
         """携带结构化 detail（code/message/detail/raw 前缀）供回喂 LLM"""
         super().__init__(detail.get("detail", "badLlmOutput"))
         self.detail = detail
 
 
-def _load_knowledge(knowledge):
+def _load_knowledge(knowledge: str | None) -> str:
     """知识文本：传参优先（测试/自定义）；缺省读包内 ask_knowledge.md（text-to-query 裁剪版）"""
     global _KNOWLEDGE_CACHE
     if knowledge is not None:
@@ -206,7 +210,7 @@ def _load_knowledge(knowledge):
     return _KNOWLEDGE_CACHE
 
 
-def _build_system_prompt(summary, knowledge):
+def _build_system_prompt(summary: list[dict[str, Any]], knowledge: str) -> str:
     """system prompt = 翻译知识 + 摘要 + 输出契约（D3；含 "json" 字样满足 json_mode 预检）"""
     return (
         f"{knowledge}\n\n"
@@ -220,10 +224,10 @@ def _build_system_prompt(summary, knowledge):
     )
 
 
-def _parse_llm_output(raw):
+def _parse_llm_output(raw: Any) -> tuple[str, dict[str, Any]]:
     """严格 JSON 解析 + 形状校验（D3）；失败抛 ``_BadLlmOutput``（禁正则容错提取）"""
 
-    def fail(detail):
+    def fail(detail: str) -> _BadLlmOutput:
         """构造带结构化 detail 的 _BadLlmOutput（raw 截 500 字符防超长）"""
         return _BadLlmOutput(
             {
@@ -252,7 +256,9 @@ def _parse_llm_output(raw):
     return gql, params
 
 
-def _error_from_exception(e, round_events):
+def _error_from_exception(
+    e: Exception, round_events: list[dict[str, Any]]
+) -> dict[str, Any]:
     """执行失败 → 回喂错误对象：core/Host 拦截事件**原样透传**（禁改写禁摘要）；
     无事件兜底构造时只给确证字段（feature/layer 留白不伪造）"""
     for ev in round_events:
@@ -265,7 +271,15 @@ def _error_from_exception(e, round_events):
     return {"code": "planError", "message": str(e)}
 
 
-async def _ask_body(*, client, messages, attempts, events, round_events, max_retries):
+async def _ask_body(
+    *,
+    client: Callable[[list[dict[str, Any]]], Any],
+    messages: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    round_events: list[dict[str, Any]],
+    max_retries: int,
+) -> AskResult | None:
     """ask 执行主体（作用域内运行：档位视图 / 反馈 sink / 用户 ctx 均已就位）。
 
     R2 起本函数（及整个执行面）**不得**出现 ``set_profile`` / ``set_sink`` / ``set_meta``
@@ -315,7 +329,12 @@ async def _ask_body(*, client, messages, attempts, events, round_events, max_ret
 
 
 async def ask(
-    question: str, *, llm, ctx: dict, max_retries: int = 3, knowledge: str | None = None
+    question: str,
+    *,
+    llm: str | Callable[[list[dict[str, Any]]], Any],
+    ctx: dict[str, Any] | None,
+    max_retries: int = 3,
+    knowledge: str | None = None,
 ) -> AskResult:
     """AI 问数唯一入口（L1 只读）：自然语言 → LLM 翻译 → 受控沙箱执行 → 结构化回喂。
 
@@ -353,11 +372,11 @@ async def ask(
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
-    attempts: list[dict] = []
-    events: list[dict] = []
-    round_events: list[dict] = []
+    attempts: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    round_events: list[dict[str, Any]] = []
 
-    def _collect(event):
+    def _collect(event: dict[str, Any]) -> None:
         """作用域 sink：事件同时进全程 events 与本轮 round_events"""
         events.append(event)
         round_events.append(event)

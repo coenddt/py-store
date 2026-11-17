@@ -9,22 +9,22 @@
 """
 
 import re
-from typing import Set
+from typing import Any, Set, cast
 
 from .exec import _exec
 
 _store = None  # 装配期由 py_store.__init__ 注入（避免循环导入）
-_trigger_fns: dict = {}
+_trigger_fns: dict[str, Any] = {}
 _fn_refs: Set[str] = set()
 
 
-def set_store(s):
+def set_store(s: Any) -> None:
     """装配门面（``py_store.__init__`` 在 ``store = Store()`` 后调用一次）"""
     global _store
     _store = s
 
 
-def set_trigger_fn(fn_ref, impl):
+def set_trigger_fn(fn_ref: str, impl: Any) -> None:
     """回调注入：``fn_ref → impl(args, ctx, {'store': store})``（可为 async）"""
     if not isinstance(fn_ref, str) or not fn_ref:
         raise ValueError("ERR_TRIGGER_FN_REF:fnRef 须为非空字符串")
@@ -34,7 +34,7 @@ def set_trigger_fn(fn_ref, impl):
     _fn_refs.add(fn_ref)
 
 
-def assert_trigger_fns_covered(defns):
+def assert_trigger_fns_covered(defns: Any) -> None:
     """启动期校验：schema 的 triggers 里声明的 fnRef 必须都有实现（缺则显式抛错，不静默）。
 
     注意：声明形状的 fnRef 在顶层（规划展开后才包成 ``callback:{fnRef,args}``），
@@ -60,7 +60,7 @@ _BEFORE_PH = re.compile(r"^\{\{before\.([A-Za-z0-9_.]+)\}\}$")
 _NOW_PH = re.compile(r"^\{\{now\}\}$")
 
 
-def _dig(obj, path):
+def _dig(obj: Any, path: str) -> Any:
     """点路径取值；缺失 → None（不抛）"""
     if obj is None:
         return None
@@ -74,18 +74,18 @@ def _dig(obj, path):
     return cur
 
 
-def _deep_eq(a, b):
+def _deep_eq(a: Any, b: Any) -> bool:
     """深比较（结构相等；顺序无关的键集合比较）"""
     if a is b:
         return True
     if a is None or b is None or not isinstance(a, dict) or not isinstance(b, dict):
-        return a == b
+        return cast(bool, a == b)
     if list(a.keys()) != list(b.keys()) and set(a.keys()) != set(b.keys()):
         return False
     return all(_deep_eq(a[k], b[k]) for k in a)
 
 
-def resolve_trigger_placeholders(value, scope):
+def resolve_trigger_placeholders(value: Any, scope: dict[str, Any]) -> Any:
     """深替换触发器步骤中的占位符。
 
     未命中的占位符**显式报错**（``ERR_TRIGGER_PLACEHOLDER``）——占位符必须独占字符串值，
@@ -117,7 +117,7 @@ def resolve_trigger_placeholders(value, scope):
 _WHEN_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "and", "or", "not"})
 
 
-def eval_when(when, scope):
+def eval_when(when: dict[str, Any] | None, scope: dict[str, Any]) -> bool:
     """触发器 when 条件求值：单算子文法（eq/ne/gt/gte/lt/lte/in/and/or/not），占位符先解析后比较；None 视为成立，未知/多算子显式 ERR_TRIGGER_WHEN"""
     if when is None:
         return True
@@ -129,22 +129,22 @@ def eval_when(when, scope):
         raise ValueError(f"ERR_TRIGGER_WHEN:未知算子 {op}")
     arg = when[op]
 
-    def rv(v):
+    def rv(v: Any) -> Any:
         """比较前的占位符解析（把 {{doc.*}} 等按 scope 展开为实值）"""
         return resolve_trigger_placeholders(v, scope)
 
     if op == "eq":
-        return rv(arg[0]) == rv(arg[1])
+        return cast(bool, rv(arg[0]) == rv(arg[1]))
     if op == "ne":
-        return rv(arg[0]) != rv(arg[1])
+        return cast(bool, rv(arg[0]) != rv(arg[1]))
     if op == "gt":
-        return rv(arg[0]) > rv(arg[1])
+        return cast(bool, rv(arg[0]) > rv(arg[1]))
     if op == "gte":
-        return rv(arg[0]) >= rv(arg[1])
+        return cast(bool, rv(arg[0]) >= rv(arg[1]))
     if op == "lt":
-        return rv(arg[0]) < rv(arg[1])
+        return cast(bool, rv(arg[0]) < rv(arg[1]))
     if op == "lte":
-        return rv(arg[0]) <= rv(arg[1])
+        return cast(bool, rv(arg[0]) <= rv(arg[1]))
     if op == "in":
         return rv(arg[0]) in (rv(arg[1]) or [])
     if op == "and":
@@ -157,7 +157,9 @@ def eval_when(when, scope):
 # ─── 命中判定 + 执行器 ───────────────────────────────────────
 
 
-def hit_trigger(step, *, before, after, scope):
+def hit_trigger(
+    step: dict[str, Any], *, before: Any, after: Any, scope: dict[str, Any]
+) -> bool:
     """命中判定：``onFields 值真的变化`` → ``when 成立``。
 
     ``onFields`` 为空（记录级）或事件为 insert（无 before）时跳过字段级检查。
@@ -172,7 +174,15 @@ def hit_trigger(step, *, before, after, scope):
     return eval_when(step.get("when"), scope)
 
 
-async def run_triggers(steps, *, root, before, now, ctx, executed):
+async def run_triggers(
+    steps: list[dict[str, Any]] | None,
+    *,
+    root: Any,
+    before: Any,
+    now: Any,
+    ctx: Any,
+    executed: Set[str],
+) -> None:
     """依序执行触发链。
 
     ``steps`` 为 core 产出的 triggers 数组；``executed`` 为本次顶层调用的去重集合

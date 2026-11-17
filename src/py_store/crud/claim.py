@@ -19,6 +19,7 @@ README「声明式并发原语」）。
 """
 
 from collections.abc import Mapping
+from typing import Any
 
 from ..datasource import PushdownUnsupportedError
 from ..permission import get_context
@@ -27,7 +28,7 @@ from ..schema import get_core
 from .exec import _call, _now_for, run_atomic_commands
 
 
-def _single_source(plan):
+def _single_source(plan: dict[str, Any]) -> str:
     """从 atomic_commands plan 的命令序列提取唯一源（多源/缺源显式报错）"""
     sources = {(c or {}).get("source") or "default" for c in plan.get("commands") or []}
     if len(sources) != 1:
@@ -42,8 +43,14 @@ def _single_source(plan):
 
 
 async def claim(
-    schema_name, filter, update, *, limit=1, sort=None, route_override=None
-):
+    schema_name: str,
+    filter: dict[str, Any] | None,
+    update: dict[str, Any] | None,
+    *,
+    limit: int = 1,
+    sort: Any = None,
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """条件领取 N 行并原子置标；返回领到的行（含领取后最新值）
 
     MySQL/PG 走 ``FOR UPDATE SKIP LOCKED`` 两步同事务；SQLite 走 ``IN (子查询)``
@@ -67,7 +74,13 @@ async def claim(
     return await run_atomic_commands(_single_source(plan), plan)
 
 
-async def compare_and_set(schema_name, filter, update, *, route_override=None):
+async def compare_and_set(
+    schema_name: str,
+    filter: dict[str, Any] | None,
+    update: dict[str, Any] | None,
+    *,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, int]:
     """条件更新并返回 ``{"matched": int, "modified": int}``
 
     单命令 ``atomic_commands`` plan（同事务包裹执行）；``matched`` = WHERE 命中行数
@@ -93,7 +106,13 @@ async def compare_and_set(schema_name, filter, update, *, route_override=None):
     return {"matched": matched, "modified": matched}
 
 
-async def renew_lease(schema_name, filter, lease_fields, *, route_override=None):
+async def renew_lease(
+    schema_name: str,
+    filter: dict[str, Any] | None,
+    lease_fields: dict[str, Any],
+    *,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, int]:
     """租约续期：compare_and_set 组合门面（不新开命令 kind，01 已裁决）
 
     归属条件由调用方 ``filter`` 携带（如 ``{"_id": {"$in": ids},

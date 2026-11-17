@@ -17,7 +17,7 @@ DDL 生成（schema def → CREATE TABLE 文本；纯函数，不连库、不回
 """
 
 import json as _json
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 from .core import native as _native
 from .feedback import emit as _emit_feedback
@@ -46,7 +46,7 @@ _TYPES = {
 _NON_COLUMN = ("object", "array")
 
 
-def _js(v):
+def _js(v: Any) -> str:
     """等价 JS 模板中的 JSON.stringify（undefined → 'undefined'，整值 float 去 .0）"""
     if v is None:
         return "undefined"
@@ -57,7 +57,7 @@ def _js(v):
     return _json.dumps(v, ensure_ascii=False)
 
 
-def _is_positive_int(v) -> TypeGuard[int | float]:
+def _is_positive_int(v: Any) -> TypeGuard[int | float]:
     """等价 JS Number.isInteger(v) && v > 0（bool 不算整数）"""
     if isinstance(v, bool):
         return False
@@ -68,7 +68,7 @@ def _is_positive_int(v) -> TypeGuard[int | float]:
     return False
 
 
-def _vector_type(backend, fdef):
+def _vector_type(backend: str, fdef: Any) -> str:
     """vector 字段列类型：PG 原生 vector(dim)，MySQL / SQLite 存 JSON 文本（降级）"""
     dim = fdef.get("dim") if isinstance(fdef, dict) else None
     if not _is_positive_int(dim):
@@ -91,7 +91,9 @@ _METRIC_OPS = {
 }
 
 
-def _vector_index_stmt(defn, backend, field, opts):
+def _vector_index_stmt(
+    defn: dict[str, Any], backend: str, field: str, opts: dict[str, Any]
+) -> list[str]:
     """向量索引 → CREATE INDEX（PG 原生；MySQL/SQLite 显式反馈不支持；flat 不建索引）"""
     if backend != "postgres":
         _emit_feedback(
@@ -182,26 +184,26 @@ _CREATOR_FIELD = "createdBy"
 _MYSQL_PRESENT_MAX = 255
 
 
-def _idx(backend):
+def _idx(backend: str) -> int:
     """取后端在 _BACKENDS 中的序号（能力矩阵行号）"""
     return _BACKENDS.index(backend)
 
 
-def _q(backend, ident):
+def _q(backend: str, ident: str) -> str:
     """标识符引用（与 core dialect::Backend::quote_ident 一致：mysql 反引号，其余双引号）"""
     if backend == "mysql":
         return "`" + ident.replace("`", "``") + "`"
     return '"' + ident.replace('"', '""') + '"'
 
 
-def _declared_type(field_def):
+def _declared_type(field_def: Any) -> Any:
     """取字段声明的 type：dict 形态取其 type 键，字符串形态即为类型本身"""
     if isinstance(field_def, dict):
         return field_def.get("type")
     return field_def
 
 
-def _pname(backend, logical):
+def _pname(backend: str, logical: Any) -> Any:
     """逻辑名 → 本后端物理标识符（设计 §6）：SQL 后端恒 snake_case。
 
     保留名（I3）：``_id`` 物理主键、``__``/``^__`` 前缀哨兵列不翻译。
@@ -214,17 +216,17 @@ def _pname(backend, logical):
     return _native.translate_name(logical, backend)
 
 
-def _has_creator_permission(defn):
+def _has_creator_permission(defn: dict[str, Any]) -> bool:
     """schema 的 read/write 是否含 creator 伪角色（决定归属键必建）"""
 
-    def _has(roles):
+    def _has(roles: Any) -> bool:
         """角色名单是否非空且含 creator 伪角色"""
         return bool(roles) and _CREATOR_ROLE in roles
 
     return _has(defn.get("read")) or _has(defn.get("write"))
 
 
-def _owner_field(defn):
+def _owner_field(defn: dict[str, Any]) -> str | None:
     """owner 行控使用的归属键名；None = 不使用 owner 行控（不补列）。
 
     ownerKey 缺省 = createdBy；`_id` 是系统主键，DDL 已建，不重复补列。
@@ -237,7 +239,7 @@ def _owner_field(defn):
     return None if name == "_id" else name
 
 
-def implicit_columns(defn, backend):
+def implicit_columns(defn: dict[str, Any], backend: str) -> list[tuple[str, str]]:
     """宿主自动补齐的内建列清单（**DDL 生成与迁移剔除共用的唯一来源**）。
 
     返回 ``[(逻辑名, sql_type)]``，顺序：timestamps → 归属键（owner 行控隐含）。
@@ -256,7 +258,7 @@ def implicit_columns(defn, backend):
     return out
 
 
-def builtin_field_names(defn, backend):
+def builtin_field_names(defn: dict[str, Any], backend: str) -> list[str]:
     """内建物理列名清单（迁移剔除用；与 ``implicit_columns`` 同源）。
 
     「内建」= 宿主按 schema 声明自动建、但用户未显式声明的列：``__present`` 哨兵 +
@@ -276,7 +278,7 @@ def builtin_field_names(defn, backend):
     return names
 
 
-def _columns(defn, backend):
+def _columns(defn: dict[str, Any], backend: str) -> list[tuple[str, str, bool, bool]]:
     """返回 [(name, sql_type, pk, auto)]，顺序：声明的字段（标量 / object·array JSON 列）→
     timestamps → 归属键（owner 行控隐含）→ __present；name 为该后端物理列名（snake_case）。"""
     i = _idx(backend)
@@ -316,7 +318,9 @@ def _columns(defn, backend):
     return cols
 
 
-def _warn_present_overflow(defn, cols):
+def _warn_present_overflow(
+    defn: dict[str, Any], cols: list[tuple[str, str, bool, bool]]
+) -> None:
     """MySQL __present VARCHAR(255) 容量校验：超限即告警（不静默）"""
     length = sum(len(c[0]) for c in cols) + len(cols) + 1
     if length > _MYSQL_PRESENT_MAX:
@@ -338,7 +342,7 @@ def _warn_present_overflow(defn, cols):
         )
 
 
-def _create_table(defn, backend):
+def _create_table(defn: dict[str, Any], backend: str) -> str:
     """生成 CREATE TABLE 语句：列类型/主键/自增按后端差异渲染（SQLite AUTOINCREMENT 紧跟 PRIMARY KEY，MySQL 主键 NOT NULL 且 PRIMARY KEY 单列一行），MySQL 先查 VARCHAR(255) 超限告警"""
     table = _pname(backend, defn.get("collection") or defn.get("name"))
     cols = _columns(defn, backend)
@@ -360,7 +364,7 @@ def _create_table(defn, backend):
     return f"CREATE TABLE {_q(backend, table)} (\n" + ",\n".join(lines) + "\n);"
 
 
-def _index_stmts(defn, backend):
+def _index_stmts(defn: dict[str, Any], backend: str) -> list[str]:
     """schema.indexes → CREATE [UNIQUE] INDEX 语句列表（阶段 3 索引落地）。
 
     索引名 `idx_<collection>_<f1>_<f2>`（对齐 SQL 常规命名）；keys 值 1/-1 → ASC/DESC。
@@ -397,7 +401,7 @@ def _index_stmts(defn, backend):
     return out
 
 
-def generate(backend, names=None):
+def generate(backend: str, names: Any | None = None) -> str:
     """生成 DDL 文本（多表以空行分隔）；backend ∈ mysql/postgres/sqlite
 
     按表名去重：同名表只出一次 CREATE TABLE（防御 core 注册表出现重复名 ——
@@ -451,7 +455,7 @@ _WIDEN = {
 }
 
 
-def _field_sql_type(backend, fdef):
+def _field_sql_type(backend: str, fdef: Any) -> str:
     """字段 def → 列 SQL 类型（与 _columns 同源；object/array → JSON 文本列）"""
     i = _idx(backend)
     ftype = _declared_type(fdef)
@@ -466,7 +470,7 @@ def _field_sql_type(backend, fdef):
     return _TYPES[ftype][i]
 
 
-def _sql_literal(v):
+def _sql_literal(v: Any) -> str:
     """default 字面量 → SQL 文本（仅 JSON 标量；SQLite 禁非常量表达式 DEFAULT，N1 实测）"""
     if isinstance(v, bool):
         return "TRUE" if v else "FALSE"
@@ -479,7 +483,7 @@ def _sql_literal(v):
     )
 
 
-def _archive_defn_of(defn):
+def _archive_defn_of(defn: dict[str, Any]) -> dict[str, Any]:
     """主 def → 归档表 def（列 = 主列 + deletedAt；剔除 _id 自增策略；indexes 继承；
     对齐 core registry.rs::archive_defn）"""
     fields = dict(defn.get("fields") or {})
@@ -502,7 +506,7 @@ def _archive_defn_of(defn):
     return arch
 
 
-def archive_ddl(backend, defn):
+def archive_ddl(backend: str, defn: dict[str, Any]) -> list[str]:
     """归档表建表语句（列/索引与主表同源）：供迁移补建「主表已存在但 ``_deleted`` 缺失」的老库。
 
     ``archive=False`` 无归档表 → 返回空列表（与 addTable 分支同口径）。
@@ -513,7 +517,7 @@ def archive_ddl(backend, defn):
     return [_create_table(arch, backend), *_index_stmts(arch, backend)]
 
 
-def implicit_column_ddl(backend, defn, existing):
+def implicit_column_ddl(backend: str, defn: dict[str, Any], existing: Any) -> list[str]:
     """补齐缺失内建列的 ALTER 语句（供迁移修复旧版归档表）。
 
     旧版 ``_archive_defn_of`` 固定 ``timestamps=False``，历史上建出的
@@ -539,20 +543,16 @@ def implicit_column_ddl(backend, defn, existing):
     return out
 
 
-def _index_keys_of(defn):
+def _index_keys_of(defn: dict[str, Any]) -> list[dict[str, Any]]:
     """收集 defn.indexes 中 keys 为非空 dict 的索引项（供稳定序列化后做增量比对）"""
     out = []
     for idx in defn.get("indexes") or []:
-        if (
-            isinstance(idx, dict)
-            and isinstance(idx.get("keys"), dict)
-            and idx["keys"]
-        ):
+        if isinstance(idx, dict) and isinstance(idx.get("keys"), dict) and idx["keys"]:
             out.append(idx)
     return out
 
 
-def _diff_id_pk(of, nf, errors):
+def _diff_id_pk(of: Any, nf: Any, errors: list[str]) -> None:
     """_id 主键检查：类型或 strategy 变更均不支持（主键定义变更属破坏性变更）"""
     if of is not None and _declared_type(of) != _declared_type(nf):
         errors.append(
@@ -564,7 +564,7 @@ def _diff_id_pk(of, nf, errors):
         errors.append(f"_id 主键策略变更不支持（{o_strat!r} → {n_strat!r}）")
 
 
-def _diff_vector_meta(name, of, nf, errors):
+def _diff_vector_meta(name: str, of: Any, nf: Any, errors: list[str]) -> None:
     """vector 字段元数据（dim/metric）变更不支持：需显式重建列与向量索引"""
     od = of.get("dim") if isinstance(of, dict) else None
     nd = nf.get("dim") if isinstance(nf, dict) else None
@@ -578,15 +578,13 @@ def _diff_vector_meta(name, of, nf, errors):
         )
 
 
-def _diff_one_field(name, of, nf, changes, errors):
+def _diff_one_field(
+    name: str, of: Any, nf: Any, changes: list[dict[str, Any]], errors: list[str]
+) -> None:
     """非 _id 字段对比：新增 → addColumn；同型 → 恒等或 vector 元数据检查；放宽 → widenColumn；其余 → errors"""
     nf_type = _declared_type(nf)
     if of is None:
-        if (
-            nf_type not in _TYPES
-            and nf_type not in _NON_COLUMN
-            and nf_type != "vector"
-        ):
+        if nf_type not in _TYPES and nf_type not in _NON_COLUMN and nf_type != "vector":
             errors.append(f'新列 "{name}" 类型 {nf_type!r} 未知')
             return
         changes.append(
@@ -618,7 +616,12 @@ def _diff_one_field(name, of, nf, changes, errors):
         )
 
 
-def _diff_fields(old_fields, new_fields, changes, errors):
+def _diff_fields(
+    old_fields: dict[str, Any],
+    new_fields: dict[str, Any],
+    changes: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
     """字段对比：新增 / 放宽 / 删除（白名单外记入 errors，禁静默）"""
     for name, nf in new_fields.items():
         if name == "_id":
@@ -632,7 +635,9 @@ def _diff_fields(old_fields, new_fields, changes, errors):
             )
 
 
-def _diff_indexes(old_defn, new_defn, changes):
+def _diff_indexes(
+    old_defn: dict[str, Any], new_defn: dict[str, Any], changes: list[dict[str, Any]]
+) -> None:
     """索引增量：new 有 old 无 → addIndex。
 
     相等判定用稳定序列化（键序无关 + JS 数字语义），对齐 node diffDefs 的 _stableStringify：
@@ -646,19 +651,26 @@ def _diff_indexes(old_defn, new_defn, changes):
             changes.append({"op": "addIndex", "index": idx})
 
 
-def diff_defs(old_defn, new_defn):
+def diff_defs(
+    old_defn: dict[str, Any] | None, new_defn: dict[str, Any]
+) -> dict[str, Any]:
     """新旧 schema def 对比 → {'changes': [...], 'errors': [...]}（后端无关，纯函数）。
 
     首批白名单：addColumn / widenColumn / addIndex（addTable 由 generate_migration 在
     old_defn 为 None 时处理）。白名单外变更记入 errors（调用方必须显式处理，禁静默）。
     """
-    changes: list = []
+    changes: list[dict[str, Any]] = []
     errors: list[str] = []
 
     if old_defn is None:
         return {"changes": [{"op": "addTable", "defn": new_defn}], "errors": errors}
 
-    _diff_fields((old_defn or {}).get("fields") or {}, new_defn.get("fields") or {}, changes, errors)
+    _diff_fields(
+        (old_defn or {}).get("fields") or {},
+        new_defn.get("fields") or {},
+        changes,
+        errors,
+    )
     _diff_indexes(old_defn, new_defn, changes)
 
     # collection 改名 = 建新表丢旧表（破坏性）→ Err
@@ -672,7 +684,9 @@ def diff_defs(old_defn, new_defn):
     return {"changes": changes, "errors": errors}
 
 
-def generate_migration(backend, old_defn, new_defn):
+def generate_migration(
+    backend: str, old_defn: dict[str, Any] | None, new_defn: dict[str, Any]
+) -> list[str]:
     """新旧 schema def → 迁移 SQL 文本列表（per-dialect；只产文本、不执行）。
 
     顺序固定：建表 → 加列（主表 + 归档表跟随）→ 放宽类型 → 加索引。

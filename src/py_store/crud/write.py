@@ -1,5 +1,8 @@
 """写路径 —— 单条/批量插入、更新、删除归档、存在性与计数"""
 
+from collections.abc import Callable
+from typing import Any, cast
+
 from ..schema import get as _get_schema
 from ..schema import get_core
 from .exec import (
@@ -15,7 +18,9 @@ from .id import _generate_id
 from .triggers import run_triggers
 
 
-async def _plan_with_probe(plan_fn):
+async def _plan_with_probe(
+    plan_fn: Callable[[Any, Any], dict[str, Any]],
+) -> dict[str, Any]:
     """creator 写权限探针：先规划，若 needsProbe 则执行探针命令后重入"""
     out = plan_fn(None, None)
     if out.get("needsProbe"):
@@ -24,7 +29,11 @@ async def _plan_with_probe(plan_fn):
     return out
 
 
-async def insert(schema_name, data, route_override=None):
+async def insert(
+    schema_name: str,
+    data: dict[str, Any],
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """插入一条（``route_override`` 可选：多租户路由 ``{'source', 'database', 'schema'}``）"""
     s = _get_schema(schema_name)
     now = _now_for(schema_name)
@@ -39,7 +48,7 @@ async def insert(schema_name, data, route_override=None):
         )
     )
 
-    def _finish(result):
+    def _finish(result: Any) -> Any:
         """组装插入返回值：autoincrement 主键时把执行器回读的自增值补进 returns._id"""
         returns = plan["returns"]
         # 阶段2：autoincrement 主键 —— 执行器已回读自增值，returns 补 `_id`
@@ -58,7 +67,7 @@ async def insert(schema_name, data, route_override=None):
     # 有触发器：主写 + 触发链同一原子作用域（单源真事务 / 跨源发 non_atomic_write）
     ctx = _ctx()
 
-    async def _do():
+    async def _do() -> Any:
         """插入执行体：主写后跑触发链（before=None），与主写同一原子作用域"""
         result = await _exec(plan["command"])
         await run_triggers(
@@ -69,7 +78,11 @@ async def insert(schema_name, data, route_override=None):
     return await run_atomic(_sources_of(plan), _do)
 
 
-async def insert_many(schema_name, docs, route_override=None):
+async def insert_many(
+    schema_name: str,
+    docs: list[dict[str, Any]],
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """批量插入（带权限检查，自动生成 _id 和时间戳；空数组直接返回空）"""
     if not isinstance(docs, list) or not docs:
         return []
@@ -101,7 +114,13 @@ async def insert_many(schema_name, docs, route_override=None):
     return plan["returns"]
 
 
-async def update(schema_name, condition, data, options=None, route_override=None):
+async def update(
+    schema_name: str,
+    condition: dict[str, Any],
+    data: dict[str, Any],
+    options: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """
     更新一条（支持原生操作符，不触发默认值）
 
@@ -120,7 +139,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
     )
     sources = _sources_of(first)
 
-    async def _do():
+    async def _do() -> Any:
         """更新执行体：needsProbe 时先取探针文档作 before 并二次规划，主写命中后跑触发链并回填写计算列"""
         out = first
         before = None
@@ -160,7 +179,7 @@ async def update(schema_name, condition, data, options=None, route_override=None
     return await run_atomic(sources, _do)
 
 
-async def _exec_with_pre(command):
+async def _exec_with_pre(command: dict[str, Any]) -> Any:
     """执行带 ``preCommand`` 的命令（阶段1：mutation 关系谓词归一）。
 
     preCommand（aggregate 取命中 `_id`）先行执行，把结果 `_id` 列表回填进主命令
@@ -177,13 +196,13 @@ async def _exec_with_pre(command):
     return await _fill_pre_ids(command, ids)
 
 
-def _fill_pre_ids(command, ids):
+def _fill_pre_ids(command: dict[str, Any], ids: list[Any]) -> Any:
     """把 preCommand 取得的 `_id` 列表回填进命令 filter 的 `$in` 占位（递归查找后执行）。
 
     core 注入的占位可能位于 `$and` 数组内（改写条件已有其他键时），故递归遍历。"""
     main = {k: v for k, v in command.items() if k != "preCommand"}
 
-    def _walk(node):
+    def _walk(node: Any) -> None:
         """递归查找 filter 中 ``$in`` 占位（含 $and 数组内）并替换为命中 _id 列表"""
         if isinstance(node, dict):
             for k, v in list(node.items()):
@@ -200,7 +219,12 @@ def _fill_pre_ids(command, ids):
     return _exec(main)
 
 
-async def update_many(schema_name, condition, data, route_override=None):
+async def update_many(
+    schema_name: str,
+    condition: dict[str, Any],
+    data: dict[str, Any],
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, int]:
     """批量更新（支持原生操作符）"""
     out = _call(
         lambda: get_core().plan_update_many(
@@ -211,7 +235,12 @@ async def update_many(schema_name, condition, data, route_override=None):
     return {"modifiedCount": result.modified_count}
 
 
-async def remove(schema_name, condition, route_override=None, options=None):
+async def remove(
+    schema_name: str,
+    condition: dict[str, Any],
+    route_override: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
+) -> dict[str, int]:
     """删除 —— 原表数据先归档到对应 `_deleted` 附表（附 deletedAt），再物理删除原表数据。
     归档命令带 ``upsertById``（幂等），重试不再因 _id 冲突整批失败；单一 SQL 源时
     归档+删除整体事务化（Mongo / 跨源按顺序执行，非原子边界见 README「事务边界」）。
@@ -234,7 +263,7 @@ async def remove(schema_name, condition, route_override=None, options=None):
         )
     )
 
-    async def _do_remove():
+    async def _do_remove() -> dict[str, int]:
         """删除执行体：先执行 preCommand 取命中 _id（归档与删除共用）→ 归档附表写入 → 物理删除；返回删除/归档计数"""
         archived_count = 0
         docs = []
@@ -279,10 +308,14 @@ async def remove(schema_name, condition, route_override=None, options=None):
     # 触发链触及源并入原子性声明（跨源 → non_atomic_write）
     if out.get("triggers"):
         declare_trigger_sources(sources, out["triggers"])
-    return await run_atomic(sources, _do_remove)
+    return cast("dict[str, int]", await run_atomic(sources, _do_remove))
 
 
-async def exists(schema_name, condition, route_override=None):
+async def exists(
+    schema_name: str,
+    condition: dict[str, Any],
+    route_override: dict[str, Any] | None = None,
+) -> bool:
     """判断是否存在（读权限由 core 按当前 ctx 裁决：
 
     ``read: []`` / 字段白名单 / RBAC enforce 均经 ``plan_exists_with_ctx`` 生效，
@@ -297,7 +330,7 @@ async def exists(schema_name, condition, route_override=None):
     return doc is not None
 
 
-async def apply_write_computes(schema_name, doc):
+async def apply_write_computes(schema_name: str, doc: dict[str, Any]) -> Any:
     """写路径结果回喂：只叠 **同步计算列**（``fn``），**不补任何默认值**。
 
     入参必须是 ``returnDocument: AFTER`` 的落库文档。默认值只在 insert 物化一次，
@@ -309,7 +342,11 @@ async def apply_write_computes(schema_name, doc):
     return _call(lambda: get_core().apply_write_computes(schema_name, doc))
 
 
-async def count(schema_name, filter=None, route_override=None):
+async def count(
+    schema_name: str,
+    filter: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> Any:
     """统计符合条件的文档数量"""
     cmd = _call(
         lambda: get_core().plan_count(schema_name, filter, _ctx(), route_override)

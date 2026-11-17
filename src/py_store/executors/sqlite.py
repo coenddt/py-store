@@ -20,11 +20,15 @@ per-connection 锁串行化；语句执行本身在 aiosqlite 单线程队列里
 
 import asyncio
 import contextvars
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from ..schema import core as _core
+from ..schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 
 
-def _bind(params):
+def _bind(params: list[Any] | None) -> list[Any]:
     """aiosqlite（sqlite3）只接受 int/float/str/bytes/None；布尔显式转 0/1"""
     out = []
     for v in params or []:
@@ -37,15 +41,17 @@ def _bind(params):
     return out
 
 
-def create(db, options=None):
+def create(db: Any, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """创建执行器描述符（可直接作为 ``init(connections)`` 的一个 SQL 数据源连接）"""
     if db is None or not hasattr(db, "execute"):
         raise TypeError("sqlite 执行器需要 aiosqlite 的 Connection 实例")
 
     lock = asyncio.Lock()
-    _lock_held = contextvars.ContextVar('pystore_sqlite_lock_held', default=False)
+    _lock_held: contextvars.ContextVar[bool] = contextvars.ContextVar(
+        "pystore_sqlite_lock_held", default=False
+    )
 
-    async def _with_lock(fn):
+    async def _with_lock(fn: Callable[[], Awaitable[Any]]) -> Any:
         """锁窗口包装：同协程已在窗口内（事务嵌套复用）则直接放行"""
         if _lock_held.get():
             return await fn()
@@ -56,7 +62,7 @@ def create(db, options=None):
             finally:
                 _lock_held.reset(token)
 
-    async def run_stmts(plan):
+    async def run_stmts(plan: dict[str, Any]) -> dict[str, Any]:
         """依序执行 plan.stmts（单连接，事务内与池路径共用）"""
         docs = None
         rows = None
@@ -87,7 +93,7 @@ def create(db, options=None):
             "insertId": insert_id,
         }
 
-    async def exec_(plan):
+    async def exec_(plan: dict[str, Any]) -> dict[str, Any]:
         """非事务路径：plan 成功后显式提交（aiosqlite 默认非 autocommit，
         不提交则仅当前连接可见 —— 落盘场景会丢数据/读到幻象，且无任何告警）；
         失败则回滚后上抛，绝不提交半截写入。全程过锁（执行 + 提交同一窗口，
@@ -104,7 +110,7 @@ def create(db, options=None):
 
         return await _with_lock(_body)
 
-    async def open_transaction():
+    async def open_transaction() -> dict[str, Any]:
         """显式事务句柄（aiosqlite 单连接）
 
         - 进入前先 ``commit()`` 清理遗留隐式事务（与既有 ``with_transaction`` 一致）；
@@ -121,7 +127,7 @@ def create(db, options=None):
 
         commit, rollback = idempotent_tx_ops(db.commit, db.rollback)
 
-        async def release():
+        async def release() -> None:
             """释放事务句柄：单连接无需归还，恒为 no-op。"""
             return None
 

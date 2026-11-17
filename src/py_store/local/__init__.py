@@ -27,15 +27,15 @@ v1 保证范围，见执行文档 §8-1）。对齐 ``nodejs-store/src/local/ind
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from typing import Any, Callable, cast
 
-from .handle import create_db
+from .handle import LocalDb, create_db
 from .store import _dir_for, read_snapshot, with_dir_lock, write_collections
 
 LOCAL_KIND = "local"
 
 
-def connect(options: dict | None = None) -> dict:
+def connect(options: dict[str, Any] | None = None) -> dict[str, Any]:
     """创建本地磁盘数据源连接（描述符）。
 
     :param options: ``{'dir': <路径>, 'database': <库名>}``（``dir`` 兼容 ``base_dir``）；
@@ -47,15 +47,22 @@ def connect(options: dict | None = None) -> dict:
     ).resolve()
     database = options.get("database")
 
-    def _io_for(db):
+    def _io_for(
+        db: str | None,
+    ) -> tuple[
+        Callable[[], dict[str, list[dict[str, Any]]]],
+        Callable[[list[str], dict[str, list[dict[str, Any]]]], None],
+    ]:
         """按库构造 IO（load/save 与写锁键均以 ``_dir_for(root, db)`` 为落点）。"""
         target = _dir_for(root, db)
 
-        def _load():
+        def _load() -> dict[str, list[dict[str, Any]]]:
             """读取该库落点的整目录快照（``{集合名: [文档…]}``）。"""
             return read_snapshot(root, db)
 
-        def _save(changed, collections):
+        def _save(
+            changed: list[str], collections: dict[str, list[dict[str, Any]]]
+        ) -> None:
             """回写变更集合（``changed`` 非空才调用），经目录写锁串行化。"""
             with_dir_lock(
                 target, lambda: write_collections(root, changed, collections, db)
@@ -63,7 +70,7 @@ def connect(options: dict | None = None) -> dict:
 
         return _load, _save
 
-    def handle_for(db):
+    def handle_for(db: str | None) -> LocalDb:
         """按库取分区手柄；``db=None`` 时沿用描述符自身 ``database`` 的落点。"""
         load, save = _io_for(db)
         return create_db(load, save, db)
@@ -76,7 +83,7 @@ def connect(options: dict | None = None) -> dict:
         "handle_for": handle_for,
     }
 
-    async def open_transaction(db=None):
+    async def open_transaction(db: str | None = None) -> dict[str, Any]:
         """事务原语：快照隔离（读内存 ``staged``，commit 才落盘）。
 
         :param db: 目标库；缺省沿用描述符自身 ``database``
@@ -85,15 +92,17 @@ def connect(options: dict | None = None) -> dict:
         target = _dir_for(root, db)
         state: dict[str, Any] = {"staged": read_snapshot(root, db), "closed": False}
 
-        def _tx_load():
+        def _tx_load() -> dict[str, list[dict[str, Any]]]:
             """取事务期内存快照 ``staged``（不读磁盘）。"""
-            return state["staged"]
+            return cast("dict[str, list[dict[str, Any]]]", state["staged"])
 
-        def _tx_save(_changed, collections):
+        def _tx_save(
+            _changed: list[str], collections: dict[str, list[dict[str, Any]]]
+        ) -> None:
             """事务期写操作：仅更新内存快照 ``staged``，不落盘。"""
             state["staged"] = collections
 
-        async def commit():
+        async def commit() -> None:
             """提交事务：整目录落盘（经目录写锁串行化）；重复调用为 no-op。"""
             if state["closed"]:
                 return
@@ -103,11 +112,11 @@ def connect(options: dict | None = None) -> dict:
                 target, lambda: write_collections(root, list(staged.keys()), staged, db)
             )
 
-        async def rollback():
+        async def rollback() -> None:
             """回滚事务：丢弃内存快照 ``staged`` 并关闭事务（不落盘）。"""
             state["closed"] = True
 
-        async def release():
+        async def release() -> None:
             """释放事务句柄：标记关闭，防止后续 commit 落盘。"""
             state["closed"] = True
 
@@ -119,7 +128,9 @@ def connect(options: dict | None = None) -> dict:
             "release": release,
         }
 
-    async def with_transaction(fn, db=None):
+    async def with_transaction(
+        fn: Callable[[Any, dict[str, Any]], Any], db: str | None = None
+    ) -> Any:
         """便捷包装（与 sqlite 执行器 with_transaction 同形）。"""
         tx = await open_transaction(db if db is not None else database)
         try:

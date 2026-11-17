@@ -5,24 +5,28 @@
 （``db_of_schema``），禁止在此新建 client。
 """
 
+from typing import Any
+
 from . import datasource
 
 _SIMILARITY = {"cosine": "cosine", "l2": "euclidean", "ip": "dotProduct"}
 
 
-def similarity_of(metric):
+def similarity_of(metric: Any) -> str | None:
     """内部 metric → Atlas similarity（唯一映射点）"""
     return _SIMILARITY.get(metric or "cosine")
 
 
-def _is_integer(v):
+def _is_integer(v: Any) -> bool:
     """等价 JS ``Number.isInteger``（排除 bool；整值 float 视为整数）"""
     if isinstance(v, bool):
         return False
     return isinstance(v, int) or (isinstance(v, float) and v.is_integer())
 
 
-async def ensure_vector_indexes(store, opts=None) -> dict:
+async def ensure_vector_indexes(
+    store: Any, opts: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """按 schema 中声明 options.indexName 的向量索引，幂等创建 Atlas Search Index"""
     created = []
     skipped = []

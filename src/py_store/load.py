@@ -10,13 +10,16 @@
 
 import json
 import os
+from typing import Any, cast
 
 from . import schema
 
 __all__ = ["collect_files", "load_defs", "plan_load", "read_config"]
 
 
-def read_config(path_or_obj, base_dir=None):
+def read_config(
+    path_or_obj: dict[str, Any] | str, base_dir: str | None = None
+) -> tuple[Any, str]:
     """读 store.config.json（路径字符串 或 已解析对象）；返回 ``(config, base_dir)``"""
     if isinstance(path_or_obj, dict):
         return path_or_obj, base_dir or os.getcwd()
@@ -33,12 +36,12 @@ def read_config(path_or_obj, base_dir=None):
     return parsed, base_dir or os.path.dirname(abs_path)
 
 
-def collect_files(roots):
+def collect_files(roots: Any | None) -> list[dict[str, Any]]:
     """递归收集定义文件（IO）：跳过 ``_`` 前缀文件/目录，仅 ``.json``。
 
     返回 ``[{'rel', 'defn'}]``，``rel`` = 相对该定义根的路径（POSIX 分隔符）。
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for root in roots or []:
         abs_root = os.path.abspath(root)
         if not os.path.exists(abs_root):
@@ -47,7 +50,7 @@ def collect_files(roots):
     return out
 
 
-def _walk(dir_path, root, out):
+def _walk(dir_path: str, root: str, out: list[dict[str, Any]]) -> None:
     """递归遍历定义目录：`_` 前缀跳过，.json 文件解析后以 {rel, defn} 追加进 out（解析失败抛 ERR:LOAD）"""
     entries = sorted(os.listdir(dir_path))  # 目录项名排序（确定性）
     for name in entries:
@@ -66,12 +69,16 @@ def _walk(dir_path, root, out):
             out.append({"rel": rel, "defn": defn})
 
 
-def plan_load(config, files):
+def plan_load(config: Any, files: list[dict[str, Any]]) -> Any:
     """纯规划（转调 core；判决唯一在 core）"""
     return schema.get_core().plan_load(config, files)
 
 
-def load_defs(config=None, ctx=None, base_dir=None):
+def load_defs(
+    config: dict[str, Any] | str | None = None,
+    ctx: Any | None = None,
+    base_dir: str | None = None,
+) -> list[dict[str, Any]]:
     """运行期装载入口：读配置 → 收集定义 → core 纯规划 → 带定位批量注册。
 
     返回装载项（主在前、其后从），每项为
@@ -88,4 +95,4 @@ def load_defs(config=None, ctx=None, base_dir=None):
     schema.register_batch(items, ctx)
     # 链路声明装配：宿主只转交 cfg（读/解析/排序/判据单点在 core）；Err 原样上抛（fail-fast）
     schema.get_core().apply_link_decls(cfg)
-    return items
+    return cast("list[dict[str, Any]]", items)

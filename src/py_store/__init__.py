@@ -19,8 +19,8 @@ py-store — 轻量多后端数据层（Python 版，Rust 单核心架构；支�
     items = await store.query(`Model($condition:@c0) { field1, field2 }`, {'c0': {...}})
 """
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 from pymongo.errors import PyMongoError
 
@@ -85,10 +85,13 @@ from .scope import with_scope as with_scope
 from .sync import sync_schema
 
 
-def _build_pipeline(gql, params=None):
+def _build_pipeline(gql: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """解析 GQL 并构建 pipeline，返回 `{tokens, ast, pipeline, projection}`"""
-    return schema.get_core().build_pipeline(
-        gql, params if params is not None else {}, permission.get_context()
+    return cast(
+        "dict[str, Any]",
+        schema.get_core().build_pipeline(
+            gql, params if params is not None else {}, permission.get_context()
+        ),
     )
 
 
@@ -103,80 +106,116 @@ class Store:
     """
 
     async def query(
-        self, gql: str, params: dict | None = None, route_override: dict | None = None
+        self,
+        gql: str,
+        params: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """查询列表（透传 crud.query；route_override 覆盖多租户路由）"""
-        return await crud.query(gql, params, route_override)
+        return cast(
+            "list[dict[str, Any]]", await crud.query(gql, params, route_override)
+        )
 
     async def query_one(
-        self, gql: str, params: dict | None = None, route_override: dict | None = None
+        self,
+        gql: str,
+        params: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """查询单条（透传 crud.query_one；未命中返回 None）"""
-        return await crud.query_one(gql, params, route_override)
+        return cast(
+            "dict[str, Any] | None", await crud.query_one(gql, params, route_override)
+        )
 
     async def query_with_count(
-        self, gql: str, params: dict | None = None, route_override: dict | None = None
+        self,
+        gql: str,
+        params: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """查询列表 + 总数（透传 crud.query_with_count；返回 {'rows', 'count'}）"""
         return await crud.query_with_count(gql, params, route_override)
 
     async def query_federated(
-        self, gql: str, params: dict | None = None
+        self, gql: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """跨库联邦查询（一条 GQL 跨多数据源：各源取数 → 内存 join → 统一后处理）"""
-        return await crud.query_federated(gql, params)
+        return cast("list[dict[str, Any]]", await crud.query_federated(gql, params))
 
     async def insert(
-        self, schema_name: str, data: dict, route_override: dict | None = None
+        self,
+        schema_name: str,
+        data: dict[str, Any],
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """插入单条（透传 crud.insert；返回落库文档）"""
-        return await crud.insert(schema_name, data, route_override)
+        return cast(
+            "dict[str, Any]", await crud.insert(schema_name, data, route_override)
+        )
 
     async def insert_many(
-        self, schema_name: str, docs: list[dict], route_override: dict | None = None
+        self,
+        schema_name: str,
+        docs: list[dict[str, Any]],
+        route_override: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """批量插入（透传 crud.insert_many；返回落库文档列表）"""
-        return await crud.insert_many(schema_name, docs, route_override)
+        return cast(
+            "list[dict[str, Any]]",
+            await crud.insert_many(schema_name, docs, route_override),
+        )
 
     async def update(
         self,
         schema_name: str,
-        condition: dict,
-        data: dict,
-        options: dict | None = None,
-        route_override: dict | None = None,
+        condition: dict[str, Any],
+        data: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """条件更新单条（透传 crud.update；options 透传驱动选项如 returnDocument）"""
-        return await crud.update(schema_name, condition, data, options, route_override)
+        return cast(
+            "dict[str, Any] | None",
+            await crud.update(schema_name, condition, data, options, route_override),
+        )
 
     async def apply_write_computes(
         self, schema_name: str, doc: dict[str, Any]
     ) -> dict[str, Any]:
         """写后仅叠同步 ``fn`` 计算列（入参须为 ``returnDocument: AFTER`` 落库文档；不补默认值）"""
-        return await crud.apply_write_computes(schema_name, doc)
+        return cast("dict[str, Any]", await crud.apply_write_computes(schema_name, doc))
 
     async def update_many(
         self,
         schema_name: str,
-        condition: dict,
-        data: dict,
-        route_override: dict | None = None,
+        condition: dict[str, Any],
+        data: dict[str, Any],
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """条件批量更新（透传 crud.update_many；返回 {'matched', 'modified'} 计数）"""
-        return await crud.update_many(schema_name, condition, data, route_override)
+        return cast(
+            "dict[str, Any]",
+            await crud.update_many(schema_name, condition, data, route_override),
+        )
 
     async def remove(
         self,
         schema_name: str,
-        condition: dict,
-        route_override: dict | None = None,
-        options: dict | None = None,
+        condition: dict[str, Any],
+        route_override: dict[str, Any] | None = None,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """条件删除（透传 crud.remove；options 透传驱动选项）"""
-        return await crud.remove(schema_name, condition, route_override, options)
+        return cast(
+            "dict[str, Any]",
+            await crud.remove(schema_name, condition, route_override, options),
+        )
 
     async def exists(
-        self, schema_name: str, condition: dict, route_override: dict | None = None
+        self,
+        schema_name: str,
+        condition: dict[str, Any],
+        route_override: dict[str, Any] | None = None,
     ) -> bool:
         """存在性判断（透传 crud.exists；条件命中任一行即为 True）"""
         return await crud.exists(schema_name, condition, route_override)
@@ -184,17 +223,17 @@ class Store:
     async def count(
         self,
         schema_name: str,
-        filter: dict | None = None,
-        route_override: dict | None = None,
+        filter: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> int:
         """计数（透传 crud.count；filter 缺省计全表）"""
-        return await crud.count(schema_name, filter, route_override)
+        return cast(int, await crud.count(schema_name, filter, route_override))
 
     async def mutation(
         self,
         schema_name: str,
-        data: dict | list[dict],
-        route_override: dict | None = None,
+        data: dict[str, Any] | list[dict[str, Any]],
+        route_override: dict[str, Any] | None = None,
     ) -> Any:
         """命令式 mutation（透传 crud.mutation；data 为单条 dict 或批量 list，按命令规则路由）"""
         return await crud.mutation(schema_name, data, route_override)
@@ -202,10 +241,10 @@ class Store:
     async def upsert(
         self,
         schema_name: str,
-        condition: dict,
-        data: dict,
-        options: dict | None = None,
-        route_override: dict | None = None,
+        condition: dict[str, Any],
+        data: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """存在即更新、不存在即插入（透传 crud.upsert；返回落库文档）"""
         return await crud.upsert(schema_name, condition, data, options, route_override)
@@ -213,12 +252,12 @@ class Store:
     async def claim(
         self,
         schema_name: str,
-        filter: dict,
-        update: dict,
+        filter: dict[str, Any],
+        update: dict[str, Any],
         *,
         limit: int = 1,
-        sort: list | None = None,
-        route_override: dict | None = None,
+        sort: list[Any] | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """条件领取 N 行并原子置标；返回领到的行（含领取后最新值）
 
@@ -226,47 +265,56 @@ class Store:
         SQLite 走 ``IN (子查询)`` 原子领取；仅 SQL 源（Mongo 显式拒绝）。
         时间戳/身份字段由调用方写入 ``update``（门面与 core 均无时钟）。
         """
-        return await crud.claim(
-            schema_name,
-            filter,
-            update,
-            limit=limit,
-            sort=sort,
-            route_override=route_override,
+        return cast(
+            "list[dict[str, Any]]",
+            await crud.claim(
+                schema_name,
+                filter,
+                update,
+                limit=limit,
+                sort=sort,
+                route_override=route_override,
+            ),
         )
 
     async def compare_and_set(
         self,
         schema_name: str,
-        filter: dict,
-        update: dict,
+        filter: dict[str, Any],
+        update: dict[str, Any],
         *,
-        route_override: dict | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """条件更新并返回 ``{"matched": int, "modified": int}``（matched = WHERE 命中行数，三后端一致）"""
-        return await crud.compare_and_set(
-            schema_name, filter, update, route_override=route_override
+        return cast(
+            "dict[str, Any]",
+            await crud.compare_and_set(
+                schema_name, filter, update, route_override=route_override
+            ),
         )
 
     async def renew_lease(
         self,
         schema_name: str,
-        filter: dict,
-        lease_fields: dict,
+        filter: dict[str, Any],
+        lease_fields: dict[str, Any],
         *,
-        route_override: dict | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """租约续期：compare_and_set 组合门面（归属条件由 filter 携带，时间戳由调用方写入）"""
-        return await crud.renew_lease(
-            schema_name, filter, lease_fields, route_override=route_override
+        return cast(
+            "dict[str, Any]",
+            await crud.renew_lease(
+                schema_name, filter, lease_fields, route_override=route_override
+            ),
         )
 
     async def sync_schema(
         self,
         backend: str,
         driver: Any,
-        introspect_options: dict | None = None,
-        overlay: list | None = None,
+        introspect_options: dict[str, Any] | None = None,
+        overlay: list[Any] | None = None,
         datasource: str | None = None,
         database: str | None = None,
         schema: str | None = None,
@@ -284,11 +332,13 @@ class Store:
             register_defs,
         )
 
-    def build_pipeline(self, gql: str, params: dict | None = None) -> dict[str, Any]:
+    def build_pipeline(
+        self, gql: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """解析 GQL 并构建 pipeline（透传 _build_pipeline；返回 tokens/ast/pipeline/projection）"""
         return _build_pipeline(gql, params)
 
-    def base_view(self):
+    def base_view(self) -> Any:
         """base Registry 引用（恒 base，无视作用域）：协议皮经宿主门面派生视图的唯一合法起点。
 
         （``base_view().with_policy(overrides)`` → with_scope；皮侧禁自持 Registry——R2-04 §4.1/§7）
@@ -296,7 +346,7 @@ class Store:
         return schema.get_base()
 
     # ── 事务 + 原生 SQL（复用 datasource.run_in_transaction；见 README「事务边界」）──
-    async def transaction(self, source: str, fn) -> Any:
+    async def transaction(self, source: str, fn: Any) -> Any:
         """事务作用域：单 SQL 源「同连接 + 同事务」执行 fn（复用 run_in_transaction）
 
         fn 内 execute_raw / CRUD 均落到该源的事务连接（commit/rollback 一体）；
@@ -308,7 +358,7 @@ class Store:
         """
         return await datasource.run_in_transaction(source, fn)
 
-    def session(self):
+    def session(self) -> Session:
         """会话（工作单元）：``async with`` 语法，退出统一提交 / 异常统一回滚
 
         用法::
@@ -330,7 +380,7 @@ class Store:
         self,
         source: str,
         sql: str,
-        params: list | tuple | dict | None = None,
+        params: list[Any] | tuple[Any, ...] | dict[str, Any] | None = None,
         is_write: bool | None = None,
     ) -> dict[str, Any]:
         """在指定 SQL 源执行原生 SQL（事务内可用；编译由 core raw_stmt_compile 完成）
@@ -348,8 +398,8 @@ class Store:
         self,
         source: str,
         collection: str,
-        pipeline: list | None = None,
-        options: dict | None = None,
+        pipeline: list[Any] | None = None,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """在指定 Mongo 源执行原生聚合管道（事务内可用；对标 SQL 侧 execute_raw）
 
@@ -365,8 +415,8 @@ class Store:
     async def aggregate(
         self,
         schema_name: str,
-        pipeline: list | None = None,
-        options: dict | None = None,
+        pipeline: list[Any] | None = None,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """按 schema 名执行原生聚合管道（execute_native 的 schema 名孪生；opt-in）
 
@@ -383,36 +433,42 @@ class Store:
                 'init(connections, {"allowNativeAggregate": True}) 显式开启；'
                 "或改用 GQL $group / $having 归一聚合 / execute_native 直调"
             )
+            # 运行时动态属性：在 RuntimeError 实例上注入 .code 错误码（供网关按码处理）
             err.code = "ERR_NATIVE_AGGREGATE_DISABLED"  # type: ignore[attr-defined]
             raise err
         try:
             m = schema.get(schema_name)
         except KeyError:
             err = RuntimeError(f"ERR_AGGREGATE_SCHEMA:未知 schema {schema_name}")
+            # 运行时动态属性：在 RuntimeError 实例上注入 .code 错误码（供网关按码处理）
             err.code = "ERR_AGGREGATE_SCHEMA"  # type: ignore[attr-defined]
             raise err from None
         return await datasource.execute_native(
             m.get("datasource") or "default", m["collection"], pipeline, options
         )
 
-    def generate_ddl(self, backend: str, names: list | None = None) -> str:
+    def generate_ddl(self, backend: str, names: list[str] | None = None) -> str:
         """从已注册 schema def 生成指定后端 DDL 文本（纯函数，不连库、不回写；铁律 6）"""
         return ddl.generate(backend, names)
 
     # ── meta-store 定义控制面（定义持久化与版本化；见 metadef.py）──
-    async def persist_def(self, defn: dict, opts: dict | None = None) -> dict:
+    async def persist_def(
+        self, defn: dict[str, Any], opts: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """持久化定义（同名同形幂等，异形 version+1；A1/A2）"""
-        return await metadef.persist_def(self, defn, opts)
+        return cast("dict[str, Any]", await metadef.persist_def(self, defn, opts))
 
-    async def list_defs(self, opts: dict | None = None) -> list[dict]:
+    async def list_defs(
+        self, opts: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """列定义行（按 version desc；name 缺省列全部）"""
-        return await metadef.list_defs(self, opts or {})
+        return cast("list[dict[str, Any]]", await metadef.list_defs(self, opts or {}))
 
     # 注：定义控制面的「各 name 最新 active 行」经 `metadef.load_defs` 模块函数调用；
     # 门面 `store.load_defs` 归运行期目录装载器（见类体下文
     # `load_defs = staticmethod(load.load_defs)` 与 bootstrap.py），二者不得同名遮蔽。
 
-    async def restore_defs(self, opts: dict | None = None) -> dict:
+    async def restore_defs(self, opts: dict[str, Any] | None = None) -> dict[str, Any]:
         """从持久化定义重建注册表：schema + workflow 两类（网关 reload 重装配前调用）"""
         base = opts or {}
         s = await metadef.restore_defs(self, {**base, "kind": "schema"})
@@ -422,21 +478,21 @@ class Store:
             "applied": s["applied"] + w["applied"],
         }
 
-    async def rollback_to(self, opts: dict) -> dict:
+    async def rollback_to(self, opts: dict[str, Any]) -> dict[str, Any]:
         """回滚到历史版本（追加式，重新 register 该版本 defn）"""
-        return await metadef.rollback_to(self, opts)
+        return cast("dict[str, Any]", await metadef.rollback_to(self, opts))
 
     async def migrate(
         self,
         *,
         backend: str,
         source: str,
-        defs: dict,
-        old_defs: dict | None = None,
-        driver=None,
+        defs: dict[str, Any],
+        old_defs: dict[str, Any] | None = None,
+        driver: Any = None,
         tenant: str | None = None,
         env: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """迁移编排（A4）：diff → 方言 SQL → 事务执行 → ``__schemaMigration`` 版本行；
         白名单外拒绝并给分步建议（对齐 node ``store.migrate``）"""
         return await migrate_module.migrate(
@@ -450,30 +506,46 @@ class Store:
         )
 
     # 定义控制面：workflow 定义（kind=workflow；见 metadef.py）
-    async def persist_workflow_def(self, defn: dict, opts: dict | None = None) -> dict:
+    async def persist_workflow_def(
+        self, defn: dict[str, Any], opts: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """持久化 workflow 定义（同名同形幂等，异形 version+1）"""
-        return await metadef.persist_def(
-            self, defn, {**(opts or {}), "kind": "workflow"}
+        return cast(
+            "dict[str, Any]",
+            await metadef.persist_def(self, defn, {**(opts or {}), "kind": "workflow"}),
         )
 
-    async def list_workflow_defs(self, opts: dict | None = None) -> list[dict]:
+    async def list_workflow_defs(
+        self, opts: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """列 workflow 定义行（按 version desc；name 缺省列全部）"""
-        return await metadef.list_defs(self, {**(opts or {}), "kind": "workflow"})
+        return cast(
+            "list[dict[str, Any]]",
+            await metadef.list_defs(self, {**(opts or {}), "kind": "workflow"}),
+        )
 
-    async def load_workflow_defs(self, opts: dict | None = None) -> list[dict]:
+    async def load_workflow_defs(
+        self, opts: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """各 name 的最新 active workflow 定义行"""
-        return await metadef.load_defs(self, {**(opts or {}), "kind": "workflow"})
+        return cast(
+            "list[dict[str, Any]]",
+            await metadef.load_defs(self, {**(opts or {}), "kind": "workflow"}),
+        )
 
-    async def rollback_workflow_to(self, opts: dict) -> dict:
+    async def rollback_workflow_to(self, opts: dict[str, Any]) -> dict[str, Any]:
         """回滚 workflow 定义到历史版本（追加式）"""
-        return await metadef.rollback_to(self, {**(opts or {}), "kind": "workflow"})
+        return cast(
+            "dict[str, Any]",
+            await metadef.rollback_to(self, {**(opts or {}), "kind": "workflow"}),
+        )
 
     def ensure_builtins(self) -> None:
         """自举内建定义表 __schemaDef/__workflowDef（幂等）"""
         return metadef.ensure_builtins()
 
     # ── 反馈事件落库（A6；见 feedback.py）──
-    def enable_feedback_table(self):
+    def enable_feedback_table(self) -> Callable[[], None]:
         """一键接线：注册内建 __feedback 并把 sink 指向落库；返回 disposer（恢复原 sink）"""
         return feedback.enable_feedback_table(self)
 
@@ -481,40 +553,40 @@ class Store:
         """注入进程级 ns 标签（tenant/env），供落库事件附加（进程级隔离下天然单 ns）"""
         feedback.set_meta({"tenant": tenant, "env": env})
 
-    async def flush_feedback(self):
+    async def flush_feedback(self) -> None:
         """等待全部在途 __feedback 落库完成（graceful shutdown 前调用；对齐 node store.flush_feedback）"""
         await feedback.flush()
 
-    def register_provider(self, kind, mod):
+    def register_provider(self, kind: str, mod: Any) -> None:
         """注册资源 provider 类型（转发模块级注册表；mod 须具 create 属性）"""
         return resource.register_provider(kind, mod)
 
-    def configure_resource(self, cfg):
+    def configure_resource(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """配置资源存储（透传 resource.configure：backend/local/limits 等）"""
         return resource.configure(cfg)
 
-    async def resource_put(self, **kw):
+    async def resource_put(self, **kw: Any) -> dict[str, Any]:
         """上传资源（透传 resource.put；kw 为 provider 契约参数）"""
         return await resource.put(**kw)
 
-    async def resource_open(self, rid, **kw):
+    async def resource_open(self, rid: str, **kw: Any) -> Any:
         """打开/读取资源（透传 resource.open；返回流或字节，视 provider 而定）"""
         return await resource.open(rid, **kw)
 
-    async def resource_remove(self, rid):
+    async def resource_remove(self, rid: str) -> dict[str, Any]:
         """删除资源（透传 resource.remove）"""
         return await resource.remove(rid)
 
-    async def resource_url(self, ref, **kw):
+    async def resource_url(self, ref: Any, **kw: Any) -> Any:
         """生成资源访问 URL（透传 resource.url）"""
         return await resource.url(ref, **kw)
 
     # ── 缓存状态注记（B6；见 cache.py）──
-    def set_cache_status(self, fn):
+    def set_cache_status(self, fn: Any) -> None:
         """注册缓存状态 provider：`x-cache` 注记位唯一取值来源；未注册恒 BYPASS"""
         return cache.set_cache_status(fn)
 
-    def cache_status(self, ctx: dict | None = None) -> str:
+    def cache_status(self, ctx: dict[str, Any] | None = None) -> str:
         """当前响应的缓存状态注记（恒为 HIT|MISS|BYPASS 之一）"""
         return cache.cache_status(permission.get_context() if ctx is None else ctx)
 
@@ -527,24 +599,26 @@ class Store:
         """当前请求的降级状态（无请求容器 → degraded:False）"""
         return degraded.status()
 
-    def with_degraded_scope(self, fn) -> dict[str, Any]:
+    def with_degraded_scope(self, fn: Any) -> Any:
         """请求级降级作用域：返回 ``{result, status}``（协议皮用于 x-store-degraded）"""
+        # degraded.with_request 为 async：此处按既有行为原样返回协程对象（调用方 await），
+        # 注解放宽为 Any（零运行时变更，不加 await）
         return degraded.with_request(fn)
 
     # ── 降级容器（协议皮中间件建/销毁；见 degraded.py）──
     degraded = degraded
 
     # ── Atlas 向量索引（启动/运维调用；不参与请求路径）──
-    async def ensure_vector_indexes(self, opts=None):
+    async def ensure_vector_indexes(self, opts: dict[str, Any] | None = None) -> Any:
         """幂等创建 schema 中声明 options.indexName 的 Atlas 向量索引"""
         return await vector_index.ensure_vector_indexes(self, opts or {})
 
     # ── 向量回填（VR-10；见 reindex.py）──
-    async def reindex_vectors(self, schema_name: str, **opts) -> dict[str, Any]:
+    async def reindex_vectors(self, schema_name: str, **opts: Any) -> dict[str, Any]:
         """向量回填：按 source_hash 只重算变化项"""
         return await reindex_mod.reindex_vectors(self, schema_name, **opts)
 
-    def register_vector_reindex(self, cfg: dict) -> str:
+    def register_vector_reindex(self, cfg: dict[str, Any]) -> str:
         """注入 trigger 回调 ``<Schema>.vectorReindex``，返回 fnRef
 
         （须在 ``assert_trigger_fns_covered`` 之前调用）
@@ -552,25 +626,29 @@ class Store:
         return reindex_mod.register_vector_reindex(cfg)
 
     # ── 工作流编排（首批：线性 + when 守卫 + fail-fast；见 workflow.py 与设计文档）──
-    def register_workflow(self, defn: dict, ctx: dict | None = None) -> dict:
+    def register_workflow(
+        self, defn: dict[str, Any], ctx: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """注册工作流定义（可选 ``ctx`` 过定义层门禁；默认 Open。白名单外显式 Err 含 WORKFLOW_UNSUPPORTED）"""
         return workflow.register(defn, ctx)
 
-    def workflows(self, ctx: dict | None = None) -> list[str]:
+    def workflows(self, ctx: dict[str, Any] | None = None) -> list[str]:
         """全部可见工作流名（read 白名单过滤）"""
         return workflow.list(ctx)
 
-    def get_workflow(self, name: str, ctx: dict | None = None) -> dict:
+    def get_workflow(
+        self, name: str, ctx: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """按名取工作流定义（read 白名单过滤；不可见与不存在同形——防枚举）"""
         return workflow.get(name, ctx)
 
     async def run_workflow(
         self,
         name: str,
-        input: dict | None = None,
+        input: dict[str, Any] | None = None,
         *,
         dry_run: bool = False,
-        route_override: dict | None = None,
+        route_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """触发工作流 → 完整 run 文档（终态 failed/rejected 不抛错，以 run.status + error 表达）"""
         return await workflow.run(
@@ -662,7 +740,7 @@ triggers.set_store(store)
 
 
 # 索引名对齐 MongoDB 自动命名（k1_v1_k2_v2），用于幂等创建
-async def _create_indexes_if_needed():
+async def _create_indexes_if_needed() -> None:
     """按数据源分派：Mongo 源执行索引创建；SQL 后端**不建索引**（indexes 仅元数据）"""
     names = schema.list()
     for name in names:
@@ -742,7 +820,7 @@ async def _create_indexes_if_needed():
 _allow_native_aggregate = False
 
 
-async def init(connections, options: dict | None = None):
+async def init(connections: Any, options: dict[str, Any] | None = None) -> Store:
     """
     初始化 store — 传入数据源连接映射
 
@@ -773,7 +851,7 @@ async def init(connections, options: dict | None = None):
     return store
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """惰性暴露框架统一入口 ``create_app``。
 
     放在模块级 ``__getattr__``（PEP 562）而非顶部 ``from .bootstrap import create_app``，

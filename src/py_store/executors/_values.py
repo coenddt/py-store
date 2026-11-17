@@ -12,16 +12,17 @@
 """
 
 from decimal import Decimal
+from typing import Any
 
 
-def normalize_value(v):
+def normalize_value(v: Any) -> Any:
     """标量值归一（当前仅 ``Decimal`` 需要归一；其余原样透传）"""
     if isinstance(v, Decimal):
         return int(v) if v == v.to_integral_value() else float(v)
     return v
 
 
-def normalize_rows(rows):
+def normalize_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
     """行集归一：逐行逐列应用 [`normalize_value`]"""
     if not rows:
         return rows

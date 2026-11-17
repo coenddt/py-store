@@ -14,15 +14,15 @@ from typing import Any, Iterable
 async def create_app(
     *,
     datasource: Any,
-    schemas: Iterable[dict] = (),
-    fns: dict | None = None,
+    schemas: Iterable[dict[str, Any]] = (),
+    fns: dict[str, Any] | None = None,
     ctx: Any = None,
     feedback: bool = True,
     tenant: str = "",
     env: str = "",
     config: Any = None,
     config_base_dir: str | None = None,
-):
+) -> dict[str, Any]:
     """框架统一装配：注册（或按 config 目录装载）→ init → 绑 fns → 校验覆盖 → 反馈落库接线；返回 {'store'}"""
     from . import init, schema, store  # 延迟导入，规避包内循环导入
 

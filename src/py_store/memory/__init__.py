@@ -30,14 +30,14 @@ io 的 ``database`` 为空 ⇒ key 不带前缀（与载体键空间规则一致
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, Callable, cast
 
-from ..local.handle import create_db
+from ..local.handle import LocalDb, create_db
 
 MEMORY_KIND = "memory"
 
 # 进程内键空间：``<database>/<collection>``（``database`` 空则 ``<collection>``）→ 文档数组
-_DEFAULT_STORE: dict[str, list] = {}
+_DEFAULT_STORE: dict[str, list[dict[str, Any]]] = {}
 
 
 def _clone(value: Any) -> Any:
@@ -50,13 +50,13 @@ def _key(database: str | None, collection: str) -> str:
     return f"{database}/{collection}" if database else collection
 
 
-def _map_io(store: dict) -> dict:
+def _map_io(store: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """默认 io：进程内分区 dict（按 ``<database>/<collection>`` 界定分区）。"""
 
-    def load(database):
+    def load(database: str | None) -> dict[str, list[dict[str, Any]]]:
         """读该库分区：收集同前缀键并深拷贝返回（不属本库的子分区键剔除）。"""
         prefix = f"{database}/" if database else ""
-        out: dict[str, list] = {}
+        out: dict[str, list[dict[str, Any]]] = {}
         for k, docs in store.items():
             if not k.startswith(prefix):
                 continue
@@ -66,7 +66,11 @@ def _map_io(store: dict) -> dict:
             out[coll] = _clone(docs)
         return out
 
-    def save(database, changed, collections) -> None:
+    def save(
+        database: str | None,
+        changed: list[str],
+        collections: dict[str, list[dict[str, Any]]],
+    ) -> None:
         """回写变更集合：按分区键深拷贝写入 ``store``（``changed`` 非空才被调用）。"""
         for name in list(changed):
             value = collections.get(name)
@@ -75,7 +79,12 @@ def _map_io(store: dict) -> dict:
     return {"load": load, "save": save}
 
 
-def _bind_io(io: dict, database: str | None):
+def _bind_io(
+    io: dict[str, Any], database: str | None
+) -> tuple[
+    Callable[[], dict[str, list[dict[str, Any]]]],
+    Callable[[list[str], dict[str, list[dict[str, Any]]]], None],
+]:
     """把带 ``database`` 形参的整量 io 适配为 ``create_db`` 需要的 ``(load, save)`` 二元组"""
     db = database
     return (
@@ -84,7 +93,7 @@ def _bind_io(io: dict, database: str | None):
     )
 
 
-def connect(options: dict | None = None) -> dict:
+def connect(options: dict[str, Any] | None = None) -> dict[str, Any]:
     """创建进程内内存数据源连接（描述符）。
 
     :param options: ``{'database': <库名>, 'store': <分区 dict>, 'io': <整量 io 实现>}``；
@@ -92,13 +101,13 @@ def connect(options: dict | None = None) -> dict:
         缺省用 ``store``（缺省进程内全局分区）构造内存 io。
     """
     options = options or {}
-    store: dict = (
+    store: dict[str, list[dict[str, Any]]] = (
         options["store"] if options.get("store") is not None else _DEFAULT_STORE
     )
-    io: dict = options.get("io") or _map_io(store)
+    io: dict[str, Any] = options.get("io") or _map_io(store)
     database = options.get("database")
 
-    def handle_for(db):
+    def handle_for(db: str | None) -> LocalDb:
         """按库绑定 io 构造分区手柄。"""
         load, save = _bind_io(io, db)
         return create_db(load, save, db)
@@ -110,7 +119,7 @@ def connect(options: dict | None = None) -> dict:
         "handle_for": handle_for,
     }
 
-    async def open_transaction(db=None):
+    async def open_transaction(db: str | None = None) -> dict[str, Any]:
         """事务原语：快照隔离（读 io 快照 ``staged``，commit 才整体写回分区）。
 
         :param db: 目标库；缺省沿用描述符自身 ``database``
@@ -119,15 +128,17 @@ def connect(options: dict | None = None) -> dict:
         load, save = _bind_io(io, db)
         state: dict[str, Any] = {"staged": load(), "closed": False}
 
-        def _tx_load():
+        def _tx_load() -> dict[str, list[dict[str, Any]]]:
             """取事务期内存快照 ``staged``（不读 io）。"""
-            return state["staged"]
+            return cast("dict[str, list[dict[str, Any]]]", state["staged"])
 
-        def _tx_save(_changed, collections):
+        def _tx_save(
+            _changed: list[str], collections: dict[str, list[dict[str, Any]]]
+        ) -> None:
             """事务期写操作：仅更新内存快照 ``staged``，不写回分区。"""
             state["staged"] = collections
 
-        async def commit():
+        async def commit() -> None:
             """提交事务：以 ``staged`` 整体写回该库分区；重复调用为 no-op。"""
             if state["closed"]:
                 return
@@ -135,11 +146,11 @@ def connect(options: dict | None = None) -> dict:
             staged = state["staged"]
             save(list(staged.keys()), staged)
 
-        async def rollback():
+        async def rollback() -> None:
             """回滚事务：丢弃 ``staged`` 并关闭事务（不写回分区）。"""
             state["closed"] = True
 
-        async def release():
+        async def release() -> None:
             """释放事务句柄：标记关闭，防止后续 commit 写回。"""
             state["closed"] = True
 
@@ -151,7 +162,9 @@ def connect(options: dict | None = None) -> dict:
             "release": release,
         }
 
-    async def with_transaction(fn, db=None):
+    async def with_transaction(
+        fn: Callable[[Any, dict[str, Any]], Any], db: str | None = None
+    ) -> Any:
         """便捷包装（与 sqlite 执行器 with_transaction 同形）。"""
         tx = await open_transaction(db if db is not None else database)
         try:

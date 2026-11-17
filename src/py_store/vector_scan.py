@@ -14,6 +14,7 @@ PostgreSQL 无过滤走原生 SQL，local / memory 由 core 直接求值，均�
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+from typing import Any, cast
 
 MAX_VECTOR_SCAN_ROWS = 100_000
 
@@ -34,7 +35,7 @@ DEGRADED_MESSAGES = {
 _SCORE_META = {"$meta": "vectorSearchScore"}
 
 
-def _registry(core=None):
+def _registry(core: Any = None) -> Any:
     """取可用的 ``Registry`` 实例（``local_eval`` 是实例方法，非模块级导出）"""
     if core is not None and callable(getattr(core, "local_eval", None)):
         return core
@@ -45,7 +46,7 @@ def _registry(core=None):
     return _default_core
 
 
-def is_vector_command(cmd):
+def is_vector_command(cmd: Any) -> bool:
     """命令是否为 ``$vectorSearch`` 打头的聚合"""
     if not isinstance(cmd, Mapping) or cmd.get("kind") != "aggregate":
         return False
@@ -56,7 +57,7 @@ def is_vector_command(cmd):
     return isinstance(first, Mapping) and bool(first.get("$vectorSearch"))
 
 
-def has_filter(cmd):
+def has_filter(cmd: Any) -> bool:
     """``$vectorSearch.filter`` 是否有实际条件（缺省 / 空对象视为无过滤）"""
     if not is_vector_command(cmd):
         return False
@@ -65,7 +66,7 @@ def has_filter(cmd):
     return isinstance(flt, Mapping) and bool(flt)
 
 
-def can_scan(cmd, backend):
+def can_scan(cmd: Any, backend: str) -> bool:
     """该命令能否在本后端走降级扫描。
 
     backend 为连接 kind（mysql / postgres / sqlite）或 ``'mongo'``；
@@ -79,7 +80,7 @@ def can_scan(cmd, backend):
     return True
 
 
-def _is_score_stage(stage):
+def _is_score_stage(stage: Any) -> bool:
     """``$addFields: { _score: { $meta: 'vectorSearchScore' } }``（core 紧随 ``$vectorSearch`` 产出）"""
     if not isinstance(stage, Mapping):
         return False
@@ -89,7 +90,7 @@ def _is_score_stage(stage):
     return af.get("_score") == _SCORE_META
 
 
-def _strip_score(node):
+def _strip_score(node: Any) -> Any:
     """递归剔除 ``_score`` 条件（未打分前该字段不存在）；空映射返回 None"""
     if isinstance(node, list):
         arr = [x for x in (_strip_score(n) for n in node) if x is not None]
@@ -107,7 +108,7 @@ def _strip_score(node):
     return node
 
 
-def _candidate_pipeline(flt, rest):
+def _candidate_pipeline(flt: Any, rest: list[Any]) -> list[dict[str, Any]]:
     """候选过滤管道：``$vectorSearch.filter`` → ``$match``，加上残余 ``$match``；
     其余阶段（``$limit`` / ``$project`` / ``$sort`` …）一律不进入候选阶段
     （TopK 与投影由第 3 段按原始完整管道重放）。"""
@@ -128,7 +129,12 @@ def _candidate_pipeline(flt, rest):
     return out
 
 
-async def scan(cmd, exec=None, core=None, max_rows=MAX_VECTOR_SCAN_ROWS):
+async def scan(
+    cmd: Any,
+    exec: Any = None,
+    core: Any = None,
+    max_rows: int = MAX_VECTOR_SCAN_ROWS,
+) -> list[dict[str, Any]]:
     """降级扫描：剥离 → 取候选 → core 精确打分。
 
     :param cmd: aggregate 命令（逻辑名），``{kind:'aggregate', collection, pipeline}``
@@ -178,7 +184,7 @@ async def scan(cmd, exec=None, core=None, max_rows=MAX_VECTOR_SCAN_ROWS):
         {cmd["collection"]: rows},
         {"kind": "aggregate", "collection": cmd["collection"], "pipeline": pipeline},
     )
-    return out["result"]
+    return cast(list[dict[str, Any]], out["result"])
 
 
 class VectorScanOverflow(RuntimeError):
@@ -189,7 +195,7 @@ class VectorScanOverflow(RuntimeError):
     max_rows: int
 
 
-def strip_vector_meta(cmd):
+def strip_vector_meta(cmd: Any) -> Any:
     """真实 Mongo 驱动执行前剥离 core 内部元数据键 ``$vectorSearch.metric``
     （Atlas 阶段只认官方键；local 求值仍需该键，故只作用于物理命令副本）。"""
     if not isinstance(cmd, Mapping) or not isinstance(cmd.get("pipeline"), list):
@@ -203,7 +209,7 @@ def strip_vector_meta(cmd):
     return cmd
 
 
-def is_unsupported_stage_error(err):
+def is_unsupported_stage_error(err: Any) -> bool:
     """Mongo 是否因「自建 mongod 执行不了 ``$vectorSearch``」而报错。
     只认两种形态，其余错误原样上抛：code 40324（不认识该阶段）与
     code 6047401（mongod 7+ 认识该阶段但仅 Atlas 允许执行）——

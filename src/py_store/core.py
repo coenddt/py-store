@@ -14,6 +14,7 @@ import importlib
 import os
 import pathlib
 import sys
+from typing import Any
 
 # 相邻 rust-store 仓库的 cargo/maturin 产物目录（含 rust_store_py.pyd）
 _DEV_DIST = (
@@ -24,7 +25,7 @@ _DEV_DIST = (
 )
 
 
-def _dev_fallback():
+def _dev_fallback() -> Any:
     """开发期兜底：仅 LOCAL_CORE=1 且非 production 时启用，避免生产环境从相邻目录加载。"""
     if (
         os.environ.get("LOCAL_CORE") != "1"
@@ -39,7 +40,7 @@ def _dev_fallback():
         return {"__error": f"{_DEV_DIST}: {e}"}
 
 
-def _load():
+def _load() -> Any:
     """加载 rust_store_py 绑定：LOCAL_CORE=1 时优先相邻调试产物，否则 pip 依赖；两者皆缺给装配指引"""
     # 开发期 LOCAL_CORE=1 时以相邻 rust-store 调试产物为**唯一来源**（优先于 site-packages，
     # 否则已安装的旧绑定会遮蔽新 API，如 register_batch）

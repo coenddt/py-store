@@ -20,11 +20,14 @@ import asyncio
 import re
 import time
 from datetime import datetime
+from typing import Any
 
 from ..crud.exec import _ctx
 from ..crud.triggers import run_triggers
 from ..feedback import emit as _emit_feedback
-from ..schema import core as _core
+from ..schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 
 # ─── cron 5 段匹配器（分 时 日 月 周） ─────────────────────────
 
@@ -33,12 +36,12 @@ _RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _INT = re.compile(r"^\d+$")
 
 
-def _bad(msg):
+def _bad(msg: str) -> ValueError:
     """构造带 ERR_CRON 前缀的 cron 解析错误"""
     return ValueError(f"ERR_CRON:{msg}")
 
 
-def _parse_field(spec, idx):
+def _parse_field(spec: Any, idx: int) -> set[int]:
     """解析单段为取值集合（``*`` | ``n`` | ``a-b`` | ``*/s`` | ``a-b/s`` | ``a/s``；列表 ``,``）"""
     lo_min, hi_max = _RANGES[idx]
     out = set()
@@ -78,7 +81,7 @@ def _parse_field(spec, idx):
     return out
 
 
-def parse_cron(expr):
+def parse_cron(expr: str) -> dict[str, Any]:
     """解析 5 段 cron → ``{'sets', 'any_dom', 'any_dow'}``（cron_matches 消费）"""
     segs = str(expr).split()
     if len(segs) != 5:
@@ -91,7 +94,7 @@ def parse_cron(expr):
     }
 
 
-def cron_matches(expr, dt):
+def cron_matches(expr: str, dt: datetime) -> bool:
     """cron 与时刻（本地时间分量）是否匹配"""
     p = parse_cron(expr)
     sets = p["sets"]
@@ -112,7 +115,7 @@ def cron_matches(expr, dt):
 # ─── tick_once：枚举到期 schedule 触发器并执行 ──────────────────
 
 
-async def tick_once(now_ms=None):
+async def tick_once(now_ms: int | None = None) -> list[dict[str, Any]]:
     """执行一轮：枚举全部 schedule 触发器，cron 命中 ``now`` 的依序执行 step。
 
     ``now_ms`` 为毫秒时刻（缺省当前时间；测试注入固定时刻）；返回触发清单
@@ -133,7 +136,7 @@ async def tick_once(now_ms=None):
     return fired
 
 
-def _now_ms():
+def _now_ms() -> int:
     """当前毫秒时间戳（与 node Date.now() 同语义）"""
     return int(time.time() * 1000)
 
@@ -143,12 +146,12 @@ def _now_ms():
 _task = None
 
 
-def _ms_to_next_minute():
+def _ms_to_next_minute() -> int:
     """距下一个整分钟边界的毫秒数（用于循环对齐分钟节拍）"""
     return (60 - datetime.now().second) * 1000 - datetime.now().microsecond // 1000
 
 
-async def _loop():
+async def _loop() -> None:
     """分钟对齐主循环：每分钟 tick_once 一次，单轮失败发反馈告警后继续（不中断循环）"""
     while True:
         try:
@@ -166,7 +169,7 @@ async def _loop():
         await asyncio.sleep(_ms_to_next_minute() / 1000)
 
 
-def start():
+def start() -> None:
     """启动分钟对齐循环（幂等）；单轮失败走反馈通道告警，循环继续（禁静默失守）"""
     global _task
     if _task is not None and not _task.done():
@@ -174,7 +177,7 @@ def start():
     _task = asyncio.get_event_loop().create_task(_loop())
 
 
-def stop():
+def stop() -> None:
     """停止循环（幂等）"""
     global _task
     if _task is not None:

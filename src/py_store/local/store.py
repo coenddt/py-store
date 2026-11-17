@@ -18,19 +18,21 @@ from __future__ import annotations
 import json
 import os
 import threading
+from pathlib import Path
+from typing import Any, Callable
 
 _LOCKS: dict[str, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
 
 
-def _lock_for(root) -> threading.Lock:
+def _lock_for(root: Path | str) -> threading.Lock:
     """按目录路径取（或惰性创建）进程内互斥锁，同一路径恒返回同一把锁。"""
     key = str(root)
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(key, threading.Lock())
 
 
-def _dir_for(root, database=None):
+def _dir_for(root: Path | str, database: str | None = None) -> str:
     """唯一路径拼装点（红线）：``database`` 非空 ⇒ ``<root>/<database>``；为空 ⇒ ``root`` 本体。
 
     非法 ``database``（含 ``/``、``\\``、``..``，防目录穿越）⇒ 抛 ``ValueError``。
@@ -47,7 +49,7 @@ def _dir_for(root, database=None):
     return os.path.join(os.fspath(root), database)
 
 
-def read_snapshot(root, database=None) -> dict:
+def read_snapshot(root: Path | str, database: str | None = None) -> dict[str, Any]:
     """读取整个目录快照 ``{集合名: [文档…]}``。
 
     ``database`` 空 ⇒ 旧布局（``<root>`` 本体）；非空 ⇒ ``<root>/<database>``。
@@ -72,7 +74,12 @@ def read_snapshot(root, database=None) -> dict:
     return out
 
 
-def write_collections(root, changed, collections, database=None) -> None:
+def write_collections(
+    root: Path | str,
+    changed: Any,
+    collections: dict[str, list[dict[str, Any]]],
+    database: str | None = None,
+) -> None:
     """只回写 ``changed`` 内的集合；临时文件 + ``os.replace`` 原子替换。
 
     ``database`` 空 ⇒ 旧布局（``<root>`` 本体）；非空 ⇒ ``<root>/<database>``（先校验，非法 ⇒ 抛错）。
@@ -90,7 +97,7 @@ def write_collections(root, changed, collections, database=None) -> None:
         os.replace(tmp, path)
 
 
-def with_dir_lock(root, fn):
+def with_dir_lock(root: Path | str, fn: Callable[[], Any]) -> Any:
     """同一目录的写操作互斥（避免同一进程内并发写互相覆盖）。"""
     with _lock_for(root):
         return fn()

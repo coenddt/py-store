@@ -6,21 +6,25 @@ schema 同步：introspect → core.schema_from_rows → core.merge_schema(overl
 对齐 ``nodejs-store/src/sync.js``。
 """
 
+from typing import Any, cast
+
 from . import introspect
-from .schema import core as _core
+from .schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 from .schema import register as _register
 
 
 async def sync_schema(
-    backend,
-    driver,
-    introspect_options=None,
-    overlay=None,
-    datasource=None,
-    database=None,
-    schema=None,
-    register_defs=True,
-):
+    backend: str,
+    driver: Any,
+    introspect_options: dict[str, Any] | None = None,
+    overlay: Any = None,
+    datasource: str | None = None,
+    database: str | None = None,
+    schema: str | None = None,
+    register_defs: bool = True,
+) -> list[dict[str, Any]]:
     """
     同步一个数据源的物理结构到 Registry。
 
@@ -47,4 +51,4 @@ async def sync_schema(
     if register_defs:
         for d in defs:
             _register(d)
-    return defs
+    return cast("list[dict[str, Any]]", defs)

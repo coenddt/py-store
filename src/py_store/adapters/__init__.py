@@ -6,13 +6,21 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .http import HttpAdapterError as HttpAdapterError
 from .http import create_http_adapter as create_http_adapter
 
 __all__ = ["HttpAdapterError", "create_http_adapter", "pull_into"]
 
 
-async def pull_into(adapter, schema_name, store, params=None, route_override=None):
+async def pull_into(
+    adapter: dict[str, Any],
+    schema_name: str,
+    store: Any,
+    params: dict[str, Any] | None = None,
+    route_override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """拉取 → 落主链路：调既有 CRUD（由 core 计划决定落点），不自行写库。
 
     :returns: ``{'pulled': int, 'written': Any}``；``pulled == 0`` 时 ``written`` 为

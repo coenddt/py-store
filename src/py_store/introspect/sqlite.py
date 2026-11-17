@@ -5,22 +5,24 @@
 对齐 ``nodejs-store/src/introspect/sqlite.js``。
 """
 
+from typing import Any, cast
 
-def _quote(name):
+
+def _quote(name: Any) -> str:
     """PRAGMA 不支持参数化，需内联表名；标识符来自 sqlite_master（非用户输入），并做引号转义"""
     return '"' + str(name).replace('"', '""') + '"'
 
 
-async def _all(db, sql):
+async def _all(db: Any, sql: str) -> list[Any]:
     """执行一条 SQL 并取回全部行（用毕关闭游标）。"""
     cur = await db.execute(sql)
     try:
-        return await cur.fetchall()
+        return cast(list[Any], await cur.fetchall())
     finally:
         await cur.close()
 
 
-async def introspect(db, options=None):
+async def introspect(db: Any, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """只读采集（``options['database']`` 可选 attached 库）的表/列/外键/索引并归一化。"""
     if db is None or not hasattr(db, "execute"):
         raise TypeError("sqlite introspection 需要 aiosqlite 的 Connection 实例")

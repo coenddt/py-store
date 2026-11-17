@@ -15,6 +15,8 @@
 目标 schema 的逆表递归。对齐 ``nodejs-store/src/naming.js``。
 """
 
+from typing import Any, cast
+
 from .core import native as _native
 from .schema import get as _schema_get
 from .schema import list as _schema_list
@@ -22,7 +24,7 @@ from .schema import list as _schema_list
 _MONGO = "mongodb"
 
 
-def is_reserved(name):
+def is_reserved(name: Any) -> bool:
     """保留物理名（I3）：``_id``、``_score``（向量检索评分列）、``__``/``^__`` 前缀内部合成名不翻译"""
     return isinstance(name, str) and (
         name == "_id"
@@ -32,7 +34,7 @@ def is_reserved(name):
     )
 
 
-def physical(logical):
+def physical(logical: Any) -> Any:
     """逻辑名 → Mongo 物理名（camelCase）；保留名原样（单点：core::naming.translate_name）"""
     if not isinstance(logical, str) or logical == "":
         return logical
@@ -42,7 +44,7 @@ def physical(logical):
 # ─── 正向：逻辑命令 → 物理命令 ───────────────────────────────
 
 
-def _tr_key(key, rels):
+def _tr_key(key: Any, rels: set[str]) -> Any:
     """键名 / 点号路径翻译（关系名与内部别名不翻译；段级处理）"""
     if not isinstance(key, str) or key == "":
         return key
@@ -55,14 +57,14 @@ def _tr_key(key, rels):
     return key if key in rels else physical(key)
 
 
-def _tr_seg(seg, rels):
+def _tr_seg(seg: str, rels: set[str]) -> str:
     """单段路径翻译：保留名原样；命中关系名集合原样，否则译为物理名"""
     if is_reserved(seg):
         return seg
     return seg if seg in rels else physical(seg)
 
 
-def physical_path(logical):
+def physical_path(logical: Any) -> Any:
     """逻辑字段路径 → Mongo 物理路径（点号分段逐段翻译，保留层级结构）
 
     索引键等「路径型标识符」必须逐段物理化：整串交给 ``translate_name`` 会把
@@ -71,7 +73,7 @@ def physical_path(logical):
     return _tr_key(logical, set())
 
 
-def _tr_ref(value, rels):
+def _tr_ref(value: Any, rels: set[str]) -> Any:
     """``$fieldRef`` 字符串值翻译（``$$var`` 系统变量保留）"""
     if (
         not isinstance(value, str)
@@ -82,7 +84,7 @@ def _tr_ref(value, rels):
     return "$" + _tr_key(value[1:], rels)
 
 
-def _walk(node, rels, transform_refs):
+def _walk(node: Any, rels: set[str], transform_refs: bool) -> Any:
     """深度键翻译。
 
     ``transform_refs=True`` 时同时翻译 ``$fieldRef`` 字符串值（pipeline / ``$expr`` 语境）；
@@ -110,7 +112,7 @@ def _walk(node, rels, transform_refs):
     return _tr_ref(node, rels) if transform_refs else node
 
 
-def _tr_vector_search(obj, rels):
+def _tr_vector_search(obj: dict[str, Any], rels: set[str]) -> dict[str, Any]:
     """``$vectorSearch`` 阶段：``path`` 为字段名（须按数据标识符译），
     其余键（index / metric 等）逐项走通用翻译"""
     out = {}
@@ -122,7 +124,7 @@ def _tr_vector_search(obj, rels):
     return out
 
 
-def _tr_lookup(obj, rels):
+def _tr_lookup(obj: dict[str, Any], rels: set[str]) -> dict[str, Any]:
     """``$lookup`` 阶段：``from``=集合名（译）、``as``=关系名（不译）、
     ``localField``/``foreignField``=关系字段（译）"""
     out = {}
@@ -143,14 +145,14 @@ def _tr_lookup(obj, rels):
     return out
 
 
-def _collect_rels(info, pipeline):
+def _collect_rels(info: dict[str, Any] | None, pipeline: Any) -> set[str]:
     """收集关系名：schema 声明的 relations + pipeline 内全部 ``$lookup.as``"""
     rels = set((info or {}).get("relations") or {})
     _collect_as(pipeline, rels)
     return rels
 
 
-def _collect_as(node, rels):
+def _collect_as(node: Any, rels: set[str]) -> None:
     """递归收集节点内全部 ``$lookup.as`` 关系名并入 rels（嵌套 pipeline 一并覆盖）"""
     if isinstance(node, list):
         for n in node:
@@ -164,7 +166,7 @@ def _collect_as(node, rels):
         _collect_as(v, rels)
 
 
-def _to_mongo(cmd):
+def _to_mongo(cmd: Any) -> Any:
     """逻辑命令 → 物理命令。只翻译**数据标识符**：collection、filter/projection/update/doc/docs
     的键、pipeline 的键与 ``$fieldRef`` 值、``$lookup.from``/``localField``/``foreignField`` 的值。
     ``database`` / ``options`` 等非数据标识符原样透传。"""
@@ -185,17 +187,17 @@ def _to_mongo(cmd):
 
 # ─── 反向：物理文档 → 逻辑文档（逐 schema 逆表） ──────────────
 
-_INV_CACHE: dict[str, dict] = {}
+_INV_CACHE: dict[str, dict[str, str]] = {}
 
 
-def clear_cache():
+def clear_cache() -> None:
     """清空逆表缓存（schema 注册表重建时同步，避免同名异形 schema 命中陈旧逆表）"""
     _INV_CACHE.clear()
 
 
-def _inverse_table(info):
+def _inverse_table(info: dict[str, Any]) -> dict[str, str]:
     """逐 schema 逆表：physical → logical（fields ∪ computes ∪ timestamps ∪ ``_id``）"""
-    name = info.get("name")
+    name = cast(str, info.get("name"))
     cached = _INV_CACHE.get(name)
     if cached is not None:
         return cached
@@ -208,7 +210,7 @@ def _inverse_table(info):
     return t
 
 
-def _info_for_collection(collection):
+def _info_for_collection(collection: Any) -> dict[str, Any] | None:
     """由镜像按 collection 定位 schema（定义零落点：collection 逻辑名）"""
     if not isinstance(collection, str):
         return None
@@ -222,7 +224,7 @@ def _info_for_collection(collection):
     return None
 
 
-def _info_for_name(name):
+def _info_for_name(name: Any) -> dict[str, Any] | None:
     """按 schema 逻辑名取镜像信息；名称非法或未注册返回 None"""
     if not isinstance(name, str) or name == "":
         return None
@@ -232,14 +234,14 @@ def _info_for_name(name):
         return None
 
 
-def _map_doc(value, info):
+def _map_doc(value: Any, info: dict[str, Any] | None) -> Any:
     """递归回映射文档：关系子文档按目标 schema 逆表递归，其余标量保持不变"""
     if isinstance(value, list):
         return [_map_doc(v, info) for v in value]
     if not isinstance(value, dict):
         return value
-    inv = _inverse_table(info)
-    relations = info.get("relations") or {}
+    inv = _inverse_table(cast("dict[str, Any]", info))
+    relations = cast("dict[str, Any]", info).get("relations") or {}
     out = {}
     for k, v in value.items():
         if k in relations:
@@ -252,7 +254,7 @@ def _map_doc(value, info):
     return out
 
 
-def _to_logical(result, cmd):
+def _to_logical(result: Any, cmd: dict[str, Any] | None) -> Any:
     """物理结果 → 逻辑结果。按命令 collection 定位 schema；未注册（无法建逆表）时原样返回
     （绝不臆测 camelCase 反推）。"""
     info = _info_for_collection((cmd or {}).get("collection"))

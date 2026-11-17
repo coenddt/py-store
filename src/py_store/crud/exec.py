@@ -13,7 +13,8 @@ Mongo 走原生驱动，SQL 走 ``translate → exec``。对齐 ``nodejs-store/s
 
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from typing import Any, cast
 
 from .. import datasource as _datasource
 from .. import degraded as _degraded
@@ -60,39 +61,39 @@ class ProfileViolation(Exception):
     非授权问题（见执行文档 §4.4）。实参 ``status`` 供上层（HTTP 网关等）映射响应码。
     """
 
-    def __init__(self, message, status=400):
+    def __init__(self, message: str, status: int = 400) -> None:
         """``status`` 供上层网关映射响应码（默认 400：调用方合约违反）"""
         super().__init__(message)
         self.status = status
 
 
-def set_db(db):
+def set_db(db: Any) -> None:
     """单库简写：等价于 ``set_connections({'default': db})``"""
     _datasource.set_connections({_datasource.DEFAULT_SOURCE: db})
 
 
-def set_connections(connections):
+def set_connections(connections: dict[str, Any]) -> None:
     """设置数据源连接映射（见 ``..datasource.set_connections``）"""
     _datasource.set_connections(connections)
 
 
-def _get_db(source=None):
+def _get_db(source: str | None = None) -> Any:
     """取指定数据源连接（缺省 ``default``）"""
     return _datasource.get_connection(source or _datasource.DEFAULT_SOURCE)
 
 
-def _now_for(schema_name):
+def _now_for(schema_name: str) -> int:
     """按 schema 的 timestamps 单位产出当前时间戳（'s' → 秒，其余/未启用 → 毫秒）"""
     unit = _schema_get(schema_name).get("timestampUnit")
     return int(time.time()) if unit == "s" else int(time.time() * 1000)
 
 
-def _ctx():
+def _ctx() -> Any:
     """当前用户上下文（绑定层错误映射的取数入口）"""
     return get_context()
 
 
-def _call(fn):
+def _call(fn: Callable[[], Any]) -> Any:
     """绑定层调用包装：
 
       - 权限类错误（``ERR_PERMISSION:`` 前缀）→ ``PermissionError``
@@ -131,15 +132,15 @@ def _call(fn):
 # ─── 命令执行（唯一 IO 边界） ────────────────────────────────
 
 
-def _physical_for_driver(cmd):
+def _physical_for_driver(cmd: dict[str, Any]) -> dict[str, Any]:
     """逻辑命令 → 物理命令（逻辑名翻译为物理名，并剥离 core 内部元数据键
     ``$vectorSearch.metric``；local 求值仍需该键，故只作用于物理副本）"""
     physical = _to_mongo(cmd)
     _vector_scan.strip_vector_meta(physical)
-    return physical
+    return cast("dict[str, Any]", physical)
 
 
-async def _exec_mongo_vector(db, cmd, session=None):
+async def _exec_mongo_vector(db: Any, cmd: dict[str, Any], session: Any = None) -> Any:
     """Mongo 原生执行 + 向量降级（03 §4.7）
 
     真实驱动不认 ``$vectorSearch``（非 Atlas / 未建向量索引）时，捕获该形态错误后
@@ -168,7 +169,9 @@ async def _exec_mongo_vector(db, cmd, session=None):
         )
 
 
-async def _exec_mongo_candidate(db, candidate, session=None):
+async def _exec_mongo_candidate(
+    db: Any, candidate: dict[str, Any], session: Any = None
+) -> Any:
     """降级候选命令执行：逻辑名 → 物理名 → 驱动 → 逆映射回逻辑名"""
     return _to_logical(
         await _exec_mongo(db, _physical_for_driver(candidate), session=session),
@@ -176,7 +179,7 @@ async def _exec_mongo_candidate(db, candidate, session=None):
     )
 
 
-async def _exec_on(source, cmd):
+async def _exec_on(source: str, cmd: dict[str, Any]) -> Any:
     """在指定数据源上执行命令（Mongo 走原生驱动，SQL 走 translate → exec；
     事务 / 会话作用域内经 datasource.resolve_connection 落到事务专用连接）"""
     connection = await _datasource.resolve_connection(
@@ -192,7 +195,7 @@ async def _exec_on(source, cmd):
         )
         # 嵌入式载体无原生近似索引：向量查询恒为应用层精确检索，须显式声明降级
         # （06 §4.6 C10；native 是静态能力，不因此改变）
-        kind = _datasource.kind_of(connection)
+        kind = cast(str, _datasource.kind_of(connection))
         if _vector_scan.can_scan(cmd, kind):
             spec = cmd["pipeline"][0]["$vectorSearch"]
             _degraded.vector_degraded(
@@ -214,12 +217,12 @@ async def _exec_on(source, cmd):
     return await _datasource.exec_sql(source, connection, cmd)
 
 
-async def _exec(cmd):
+async def _exec(cmd: dict[str, Any]) -> Any:
     """Command JSON → 按命令自带的 ``source`` 路由（不按 collection 反查）"""
     return await _exec_on(cmd.get("source") or _datasource.DEFAULT_SOURCE, cmd)
 
 
-def _sources_of(plan):
+def _sources_of(plan: dict[str, Any] | None) -> set[str]:
     """从规划结果中提取数据源集合（探针 / 写 / 查 / 删 / mutation 步骤命令）
 
     ``sources`` 必须由规划结果提取，不得写死 ``default``（多租户路由场景下的
@@ -242,7 +245,9 @@ def _sources_of(plan):
     return out or {_datasource.DEFAULT_SOURCE}
 
 
-def declare_trigger_sources(base_sources, triggers):
+def declare_trigger_sources(
+    base_sources: Iterable[str], triggers: list[dict[str, Any]] | None
+) -> set[str]:
     """触发链触及源的原子性声明（update 专用：其 triggers 在事务内二次规划后才产出，
     顶层 ``_sources_of`` 已不及）——触发源超出已声明源集时发 ``non_atomic_write``
     （含全部涉及源），此后顺序执行；会话内不发声明（跨源写由既有 fail-closed 拒绝）。
@@ -257,7 +262,7 @@ def declare_trigger_sources(base_sources, triggers):
     return uniq
 
 
-def _warn_multi_source(sources):
+def _warn_multi_source(sources: set[str]) -> None:
     """多源写：无法原子 → 程序化声明 nonAtomic（允许顺序执行，禁止静默）"""
     listed = sorted(sources)
     _emit_feedback(
@@ -275,7 +280,7 @@ def _warn_multi_source(sources):
     )
 
 
-async def run_atomic(sources, fn):
+async def run_atomic(sources: Iterable[str], fn: Callable[[], Awaitable[Any]]) -> Any:
     """顶层 API 调用的原子包络：无会话 + 单一源（SQL 或 Mongo）→ 包事务；否则原样执行
 
     - 会话内：事务边界由会话统一管理，直接执行（不嵌套）；
@@ -299,7 +304,7 @@ async def run_atomic(sources, fn):
     return await fn()
 
 
-def _substitute(value, resolver):
+def _substitute(value: Any, resolver: Callable[[str], Any]) -> Any:
     """深度替换命令中的占位符（命中 resolver 返回非字符串时替换）"""
     if isinstance(value, str):
         return resolver(value)
@@ -310,7 +315,9 @@ def _substitute(value, resolver):
     return value
 
 
-def resolve_placeholders(command, ids=None, steps=None):
+def resolve_placeholders(
+    command: Any, ids: Any = None, steps: list[Any] | None = None
+) -> Any:
     """Host 契约：把命令中的占位符替换为执行结果
 
       - ``{{phase1.ids}}``   → 两阶段查询第一步取回的 id 数组（整值替换）
@@ -322,7 +329,7 @@ def resolve_placeholders(command, ids=None, steps=None):
     """
     steps = steps or []
 
-    def resolver(s):
+    def resolver(s: str) -> Any:
         """单字符串裁决：{{phase1.ids}} 整值替换 / {{step.<N>._id}} 按 steps 下标；未命中原样保留"""
         if _PHASE1_IDS.match(s):
             return ids if ids is not None else s
@@ -340,7 +347,7 @@ _CLAIMED_IDS = "___claimed_ids___"
 _MODE_ATOMIC = "atomic_commands"
 
 
-def _fill_claimed(command, ids):
+def _fill_claimed(command: Any, ids: list[Any]) -> Any:
     """atomic_commands 专用占位符替换：``___claimed_ids___`` → 领取到的 _id 数组
 
     与 ``{{phase1.ids}}`` 分开实现（two_phase 与 claim 各用各的替换入口），
@@ -348,14 +355,14 @@ def _fill_claimed(command, ids):
     SQL 因非法语法显式报错（no-error-masking：禁静默当作空集执行）。
     """
 
-    def resolver(s):
+    def resolver(s: str) -> Any:
         """单字符串裁决：整体等于 ___claimed_ids___ 才整值替换，否则原样保留"""
         return ids if s == _CLAIMED_IDS else s
 
     return _substitute(command, resolver)
 
 
-def _claimed_ids_of(env):
+def _claimed_ids_of(env: Any) -> list[Any]:
     """从 claim 命令的执行包络提取领取到的 _id 列表
 
     三后端 rows 形状统一含 ``_id`` 列：MySQL/PG 为 stmt1 ``SELECT _id`` 的行；
@@ -366,7 +373,7 @@ def _claimed_ids_of(env):
     return [r["_id"] for r in rows if isinstance(r, Mapping) and "_id" in r]
 
 
-async def run_atomic_commands(source, plan):
+async def run_atomic_commands(source: str, plan: dict[str, Any] | None) -> Any:
     """atomic_commands mode 执行器（claim / compareAndSet 的执行管道）
 
     - mode 校验：仅接受 ``atomic_commands``，其余显式报错（禁静默走通用路径——
@@ -384,11 +391,11 @@ async def run_atomic_commands(source, plan):
             f"run_atomic_commands 仅接受 mode='{_MODE_ATOMIC}'，实际 {mode!r}"
             "（禁静默走通用路径：atomic_commands 的同事务语义不可降级）"
         )
-    commands = plan.get("commands") or []
+    commands = cast("dict[str, Any]", plan).get("commands") or []
     if not commands:
         raise ValueError("atomic_commands plan 缺少 commands（禁静默空执行）")
 
-    async def _do():
+    async def _do() -> Any:
         """事务体：首条 claim → 有还原行（docs）直接返回；否则回填 _id 执行取行命令"""
         env = await _exec(commands[0])
         if len(commands) == 1:

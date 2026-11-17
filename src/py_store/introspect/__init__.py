@@ -5,19 +5,23 @@
      fks:[{table,column,refTable,refColumn}], indexes:[{table,name,columns,unique}]}``
 """
 
+from typing import Any, cast
+
 from . import mysql, postgres, sqlite
 
 _BACKENDS = {"mysql": mysql, "postgres": postgres, "sqlite": sqlite}
 
 
-async def run(backend, driver, options=None):
+async def run(
+    backend: str, driver: Any, options: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """按后端名执行 introspection（统一 await 返回）"""
     mod = _BACKENDS.get(backend)
     if mod is None:
         raise ValueError(
             f"未知 introspection 后端: {backend}（支持 mysql/postgres/sqlite）"
         )
-    return await mod.introspect(driver, options)
+    return cast("dict[str, Any]", await mod.introspect(driver, options))
 
 
 __all__ = ["mysql", "postgres", "run", "sqlite"]

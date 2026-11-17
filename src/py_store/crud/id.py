@@ -7,6 +7,7 @@
 import secrets
 import string
 import time
+from typing import Any, cast
 
 from ..schema import get as _get_schema
 
@@ -14,7 +15,7 @@ _ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 _BASE36_DIGITS = string.digits + string.ascii_lowercase
 
 
-def _to_base36(n):
+def _to_base36(n: int) -> str:
     """非负整数 → 小写 base36 字符串（0 返回 "0"）"""
     if n == 0:
         return "0"
@@ -25,14 +26,14 @@ def _to_base36(n):
     return "".join(reversed(out))
 
 
-def _generate_id(schema):
+def _generate_id(schema: dict[str, Any]) -> str:
     """按 schema.idPrefix 生成唯一 ID（时间戳36进制 + secrets 随机8位）"""
     ts = _to_base36(int(time.time() * 1000)).upper()
     rnd = "".join(secrets.choice(_ID_CHARS).upper() for _ in range(8))
-    return schema["idPrefix"] + ts + rnd
+    return cast(str, schema["idPrefix"] + ts + rnd)
 
 
-def _truthy(v):
+def _truthy(v: Any) -> bool:
     """对齐 core `is_truthy`（字符串仅判空，不 trim）"""
     if v is None or v is False:
         return False
@@ -45,7 +46,7 @@ def _truthy(v):
     return True
 
 
-def _new_id_pool(schema_name, data):
+def _new_id_pool(schema_name: str, data: dict[str, Any]) -> list[str]:
     """预生成 mutation 的 ID 池：按数据树逐节点判断是否需要新 _id
 
     （与 core `needs_new_id` 一致：无有效 _id 且 schema 配了 idPrefix），
@@ -53,7 +54,7 @@ def _new_id_pool(schema_name, data):
     """
     pool = []
 
-    def walk(name, node):
+    def walk(name: str, node: dict[str, Any] | None) -> None:
         """递归数据树：节点无有效 _id 且 schema 配 idPrefix 则按序入池，关系子文档（含数组）递归"""
         s = _get_schema(name)
         if not _truthy((node or {}).get("_id")) and s["idPrefix"]:

@@ -20,7 +20,10 @@ Mongo 连接支持两种形态（绝不猜，按命令的 database 严格校验�
 import asyncio
 import contextvars
 import weakref
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
+from contextvars import Token
+from types import TracebackType
+from typing import Any, cast
 
 from . import degraded, executors, vector_scan
 from .feedback import emit as _emit_feedback
@@ -29,15 +32,15 @@ from .schema import get_core
 
 DEFAULT_SOURCE = "default"
 
-_connections: dict = {}
+_connections: dict[str, Any] = {}
 
 # 事务作用域的连接覆盖：source → 事务描述符（见 run_in_transaction）
-_tx_override: contextvars.ContextVar = contextvars.ContextVar(
+_tx_override: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "py_store_tx_override", default=None
 )
 
 # 当前会话：优先于 _tx_override（会话内部自持事务连接）
-_current_session: contextvars.ContextVar = contextvars.ContextVar(
+_current_session: contextvars.ContextVar["Session | None"] = contextvars.ContextVar(
     "py_store_current_session", default=None
 )
 
@@ -60,7 +63,7 @@ MEMORY_KIND = "memory"
 _CLAIMED_IDS = "___claimed_ids___"
 
 
-def _render_claimed_ids(ids) -> str:
+def _render_claimed_ids(ids: Iterable[Any]) -> str:
     """_id 列表 → SQL IN **列表字面量**（不含外层括号；core 模板已写作 ``IN (___claimed_ids___)``）。
 
     单引号转义（_id 为框架生成值，转义为防御）。此前返回带括号的 ``('a','b')``，回填后成为
@@ -74,7 +77,7 @@ _MISSING = object()
 _mongo_tx_cap: "weakref.WeakKeyDictionary[object, bool]" = weakref.WeakKeyDictionary()
 
 
-def is_write_cmd(cmd):
+def is_write_cmd(cmd: Any) -> bool:
     """命令是否为写命令（跨源写 fail-closed 判定用）"""
     return (cmd or {}).get("kind") in WRITE_KINDS
 
@@ -82,7 +85,7 @@ def is_write_cmd(cmd):
 class NonAtomicWriteError(RuntimeError):
     """会话内写入了多个数据源：跨源写无法原子（fail-closed，绝不静默提交半截）"""
 
-    def __init__(self, sources):
+    def __init__(self, sources: Iterable[str]) -> None:
         """记录肇事数据源列表并组装 fail-closed 错误信息"""
         self.sources = sorted(sources)
         super().__init__(
@@ -91,7 +94,7 @@ class NonAtomicWriteError(RuntimeError):
         )
 
 
-def current_session():
+def current_session() -> "Session | None":
     """当前生效会话（无则 None）"""
     return _current_session.get()
 
@@ -103,7 +106,9 @@ class PushdownUnsupportedError(RuntimeError):
     自动反馈：触发原因见 message，修复指引见 feedback()。
     """
 
-    def __init__(self, source, kind, codes, warnings):
+    def __init__(
+        self, source: str, kind: str, codes: Iterable[str], warnings: Iterable[str]
+    ) -> None:
         """组装下推不支持错误信息，并保留 source/kind/不可翻译 codes 与警告供 feedback() 转出"""
         msg = f"SQL 下推不支持（{kind}）: {', '.join(codes)}；{' / '.join(warnings)}"
         super().__init__(msg)
@@ -112,7 +117,7 @@ class PushdownUnsupportedError(RuntimeError):
         self.codes = codes
         self.warnings = warnings
 
-    def feedback(self):
+    def feedback(self) -> dict[str, Any]:
         """转统一反馈事件（与 feedback.emit 的事件形状一致）"""
         return {
             "type": "sql_pushdown_unsupported",
@@ -125,12 +130,12 @@ class PushdownUnsupportedError(RuntimeError):
         }
 
 
-def _is_mongo_client(x):
+def _is_mongo_client(x: Any) -> bool:
     """PyMongo MongoClient 判别：有 ``get_database``（Database 只有 ``get_collection``）"""
     return hasattr(x, "get_database") and not hasattr(x, "get_collection")
 
 
-def _normalize(connections):
+def _normalize(connections: Any) -> dict[str, Any]:
     """归一化连接映射：单个 Mongo db 实例 / MongoClient / 裸 local 描述符 → ``{default: 连接}``"""
     if connections is None:
         return {}
@@ -143,13 +148,13 @@ def _normalize(connections):
     return {DEFAULT_SOURCE: connections}
 
 
-def set_connections(connections):
+def set_connections(connections: Any) -> None:
     """设置数据源连接映射（Mongo 传 db 实例或 MongoClient；SQL 传 ``{'kind', 'exec'}`` 描述符）"""
     global _connections
     _connections = _normalize(connections)
 
 
-def get_connection(source):
+def get_connection(source: str) -> Any:
     """取指定数据源连接（未配置即报错）"""
     conn = _connections.get(source)
     if conn is None:
@@ -159,12 +164,12 @@ def get_connection(source):
     return conn
 
 
-def has_connection(source):
+def has_connection(source: str) -> bool:
     """数据源是否已在当前连接映射中（供索引创建等初始化辅助动作软跳过未配置源）"""
     return _connections.get(source) is not None
 
 
-def mongo_db(connection, source, database):
+def mongo_db(connection: Any, source: str, database: str | None) -> Any:
     """
     Mongo 源：按命令的 ``database`` 解析目标 db（两种形态，绝不猜）
 
@@ -190,14 +195,14 @@ def mongo_db(connection, source, database):
     return connection
 
 
-def _mongo_client_of(connection):
+def _mongo_client_of(connection: Any) -> Any:
     """Mongo 连接的 client：db 实例取 ``.client``；MongoClient 返回自身；其余 None"""
     if _is_mongo_client(connection):
         return connection
     return getattr(connection, "client", None)
 
 
-async def mongo_transactable(connection):
+async def mongo_transactable(connection: Any) -> bool | None:
     """探测 Mongo 部署是否支持多文档事务（四态，绝不猜；结果按 client 缓存）
 
       - True : 支持（replica set 的 ``setName``，或 sharded 的 ``msg == 'isdbgrid'``）
@@ -211,7 +216,7 @@ async def mongo_transactable(connection):
         return None
     cached = _mongo_tx_cap.get(client, _MISSING)
     if cached is not _MISSING:
-        return cached
+        return cast("bool | None", cached)
     try:
         hello = await client.admin.command("hello")
     except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
@@ -223,35 +228,35 @@ async def mongo_transactable(connection):
     return cap
 
 
-def is_mongo_source(source):
+def is_mongo_source(source: str) -> bool:
     """数据源名是否绑定 Mongo 源（非 SQL 描述符即 Mongo 驱动实例 / Mongo 事务视图）"""
     return not is_sql(get_connection(source))
 
 
-def source_of_schema(name):
+def source_of_schema(name: str) -> str:
     """schema 声明的数据源名（缺省 ``default``）"""
     return _get_schema(name).get("datasource") or DEFAULT_SOURCE
 
 
-def connection_of_schema(name):
+def connection_of_schema(name: str) -> Any:
     """某 schema 所属数据源的连接（供 Host 侧直连场景）"""
     return get_connection(source_of_schema(name))
 
 
-def db_of_schema(name):
+def db_of_schema(name: str) -> Any:
     """某 schema 的 Mongo db 句柄（按镜像的 datasource + database 解析；SQL 源返回 None）"""
     s = _get_schema(name)
     source = s.get("datasource") or DEFAULT_SOURCE
     return mongo_db(get_connection(source), source, s.get("database") or None)
 
 
-def route(cmd):
+def route(cmd: dict[str, Any]) -> tuple[str, Any]:
     """Command.source → ``(source, connection)``（三元组中的 source 精确路由）"""
     source = cmd.get("source") or DEFAULT_SOURCE
     return source, get_connection(source)
 
 
-def _kind_of(connection):
+def _kind_of(connection: Any) -> str | None:
     """SQL 源以 ``{'kind', 'exec'}`` 描述符（Mapping）承载，Mongo 源为驱动实例
 
     注意：**不可**用 ``getattr(连接, 'kind')`` 判定 —— PyMongo 的 ``Database`` 实现了
@@ -267,7 +272,7 @@ def _kind_of(connection):
 kind_of = _kind_of
 
 
-def is_sql(connection):
+def is_sql(connection: Any) -> bool:
     """判定连接是否为 SQL 数据源描述符
 
     仅 ``kind ∈ SQL_KINDS`` 才算 SQL —— Mongo 驱动实例（``kind`` 为 None）与
@@ -276,12 +281,12 @@ def is_sql(connection):
     return _kind_of(connection) in SQL_KINDS
 
 
-def is_sql_source(source):
+def is_sql_source(source: str) -> bool:
     """数据源名是否绑定 SQL 源"""
     return is_sql(get_connection(source))
 
 
-def is_local(connection):
+def is_local(connection: Any) -> bool:
     """本地磁盘数据源判别：``kind == 'local'``（描述符与事务视图都携带 ``handle``）
 
     必须是 ``dict`` / ``Mapping``（``_kind_of`` 按 Mapping 取 ``kind``，见执行文档 §8-1）。
@@ -289,12 +294,12 @@ def is_local(connection):
     return _kind_of(connection) == LOCAL_KIND
 
 
-def is_memory(connection):
+def is_memory(connection: Any) -> bool:
     """内存数据源判别：``kind == 'memory'``（描述符与事务视图都携带 ``handle``）"""
     return _kind_of(connection) == MEMORY_KIND
 
 
-def is_embedded(connection):
+def is_embedded(connection: Any) -> bool:
     """嵌入式载体判别（local ∪ memory）：无外部驱动、可整量求值的载体族。
 
     单点泛化：此后新增同族载体只改这一处（消除硬编码二元判别）。
@@ -302,7 +307,7 @@ def is_embedded(connection):
     return is_local(connection) or is_memory(connection)
 
 
-def connection_for(source):
+def connection_for(source: str) -> Any:
     """当前生效连接：事务作用域内返回覆盖描述符，否则返回全局映射的连接
     （``crud.exec._exec_on`` 经此取连接，使事务内所有命令落到专用连接）"""
     override = _tx_override.get()
@@ -311,7 +316,7 @@ def connection_for(source):
     return get_connection(source)
 
 
-async def resolve_connection(source, is_write=False):
+async def resolve_connection(source: str, is_write: bool = False) -> Any:
     """会话感知的连接解析：会话内返回事务覆盖，否则返回全局连接
 
     ``crud.exec._exec_on`` 与 ``execute_raw`` 共用此入口，保证会话内命令
@@ -325,7 +330,7 @@ async def resolve_connection(source, is_write=False):
     return connection_for(source)
 
 
-def _warn_savepoint_unavailable(source):
+def _warn_savepoint_unavailable(source: str) -> None:
     """嵌套作用域无保存点原语 → 降级并入外层（允许降级，禁止静默）"""
     _emit_feedback(
         {
@@ -345,7 +350,7 @@ def _warn_savepoint_unavailable(source):
     )
 
 
-def _warn_savepoint_failed(source, name, exc):
+def _warn_savepoint_failed(source: str, name: str, exc: BaseException) -> None:
     """错误路径保存点回滚 / 释放失败：发反馈，绝不掩盖原始错误"""
     _emit_feedback(
         {
@@ -360,7 +365,7 @@ def _warn_savepoint_failed(source, name, exc):
     )
 
 
-def _warn_mongo_unsupported(source, deployment):
+def _warn_mongo_unsupported(source: str, deployment: str) -> None:
     """Mongo 部署不支持事务 → 降级按原样执行（允许降级，禁止静默）
 
     ``deployment``: ``'standalone'``（探测为不支持）| ``'unknown'``（探测失败/无法探测）。
@@ -381,7 +386,7 @@ def _warn_mongo_unsupported(source, deployment):
     )
 
 
-def _warn_transaction_not_atomic(source, kind):
+def _warn_transaction_not_atomic(source: str, kind: Any) -> None:
     """事务作用域所在 SQL 执行器未实现 ``with_transaction`` → 按原样执行（允许降级，禁止静默）
 
     与 ``session_not_atomic``（会话路径）对称：同一类降级在两条入口（``store.transaction``
@@ -403,7 +408,7 @@ def _warn_transaction_not_atomic(source, kind):
     )
 
 
-async def _rollback_savepoint(tx, source, name):
+async def _rollback_savepoint(tx: Mapping[str, Any], source: str, name: str) -> None:
     """回滚到保存点并释放；任一失败发 savepoint_failed（不掩盖原始错误）
 
     收尾路径必须覆盖取消/中断（cancelled task 也要收回保存点），故捕获 BaseException。
@@ -418,7 +423,9 @@ async def _rollback_savepoint(tx, source, name):
         _warn_savepoint_failed(source, name, errors[0])
 
 
-async def _nested_savepoint_scope(source, outer, fn):
+async def _nested_savepoint_scope(
+    source: str, outer: dict[str, Any], fn: Callable[..., Any]
+) -> Any:
     """同源嵌套事务作用域：在已持有的事务连接上开保存点
 
     - 外层句柄无 ``savepoint`` 原语 → 降级并入外层（同一外层作用域只告警一次）；
@@ -435,19 +442,21 @@ async def _nested_savepoint_scope(source, outer, fn):
     outer["sp_depth"] = depth
     name = "sp_%d" % depth
     await open_sp(name)  # 创建失败直接上抛（保存点不存在，无需回滚）
+    # 至此 tx 已确认是带 savepoint 原语的 Mapping 句柄（434-435 已判），仅类型收窄（cast 运行时 no-op）
+    tx_m = cast("Mapping[str, Any]", tx)
     try:
         out = await fn()
     except BaseException:  # 回滚后原样重抛（含取消/中断），事务体语义不变
-        await _rollback_savepoint(tx, source, name)
+        await _rollback_savepoint(tx_m, source, name)
         raise
     else:
-        await tx["release_savepoint"](name)
+        await tx_m["release_savepoint"](name)
         return out
     finally:
         outer["sp_depth"] = depth - 1
 
 
-async def run_in_transaction(source, fn):
+async def run_in_transaction(source: str, fn: Callable[..., Any]) -> Any:
     """事务作用域：在单个源上以「同连接 + 同事务」执行 fn 内的全部命令
 
     - 会话内调用：并入会话（事务边界由会话统一管理），不另开事务；
@@ -510,7 +519,7 @@ async def run_in_transaction(source, fn):
             return await _nested_savepoint_scope(source, parent[source], fn)
         tx_desc = {"kind": conn["kind"], "exec": None, "tx": None}
 
-        async def _body(exec_on_tx, tx=None):
+        async def _body(exec_on_tx: Any, tx: Any | None = None) -> Any:
             """事务回包：把连接执行器与事务句柄登记进该源视图，再执行被包裹函数"""
             tx_desc["exec"] = exec_on_tx
             tx_desc["tx"] = tx
@@ -546,14 +555,14 @@ async def run_in_transaction(source, fn):
         _tx_override.reset(token)
 
 
-def _exec_of(connection):
+def _exec_of(connection: Any) -> Any:
     """从 SQL 连接描述（Mapping）取 exec 执行器；非 Mapping 连接返回 None"""
     if isinstance(connection, Mapping):
         return connection.get("exec")
     return None
 
 
-async def exec_sql(source, connection, cmd):
+async def exec_sql(source: str, connection: Any, cmd: dict[str, Any]) -> Any:
     """
     SQL 路径：translate（core 纯逻辑）→ exec（连接执行器）→ 结果塑形
 
@@ -566,7 +575,7 @@ async def exec_sql(source, connection, cmd):
     近似索引退化为后过滤（ACL / TopK 不成立），同样回退应用层精确扫描 ——
     均为运行期降级，不改变静态 native 判定。
     """
-    kind = _kind_of(connection)
+    kind = cast("str", _kind_of(connection))  # SQL 路径连接必带 kind（调用方保证）
     if vector_scan.can_scan(cmd, kind):
         spec = cmd["pipeline"][0]["$vectorSearch"]
         degraded.vector_degraded(
@@ -583,7 +592,7 @@ async def exec_sql(source, connection, cmd):
     return await _exec_sql_direct(source, connection, cmd)
 
 
-def _claim_two_step(plan):
+def _claim_two_step(plan: dict[str, Any]) -> dict[str, Any] | None:
     """识别 MySQL 两步化 claim / compareAndSet 计划（core 把领取结果下沉为 SQL 文本占位符）。
 
     返回 ``{'first': stmt0, 'second': stmt1}``；非两步化计划返回 ``None``。
@@ -598,7 +607,9 @@ def _claim_two_step(plan):
     return {"first": stmts[0], "second": stmts[1]}
 
 
-async def _exec_claim(exec_fn, cmd, step):
+async def _exec_claim(
+    exec_fn: Callable[..., Any], cmd: dict[str, Any], step: dict[str, Any]
+) -> Any:
     """执行两步化 claim：先取命中 _id，回填 SQL 文本占位符后再执行置标语句。
 
     跳过回填会让驱动直接报 ``1054 Unknown column '___claimed_ids___'``（禁静默失守）。
@@ -630,7 +641,7 @@ async def _exec_claim(exec_fn, cmd, step):
     )
 
 
-async def _exec_sql_direct(source, connection, cmd):
+async def _exec_sql_direct(source: str, connection: Any, cmd: dict[str, Any]) -> Any:
     """``exec_sql`` 的直通路径（不做向量降级）"""
     plan = get_core().dialect_translate(_kind_of(connection), cmd)
     # Host 兜底：core 标记了无法安全下推的组合（如 $lookup 子 $limit 每父 top-N）时，
@@ -640,7 +651,7 @@ async def _exec_sql_direct(source, connection, cmd):
     if unsupported:
         err = PushdownUnsupportedError(
             source,
-            _kind_of(connection),
+            cast("str", _kind_of(connection)),
             [
                 str(u.get("code")) if isinstance(u, Mapping) else str(u)
                 for u in unsupported
@@ -666,7 +677,12 @@ class RawSqlError(RuntimeError):
     """原生 SQL 入口的显式错误（非 SQL 源 / 执行器未接入）"""
 
 
-async def execute_raw(source, sql, params=None, is_write=None):
+async def execute_raw(
+    source: str,
+    sql: str,
+    params: Any | None = None,
+    is_write: bool | None = None,
+) -> dict[str, Any]:
     """
     在指定 SQL 源上执行原生 SQL（Host 层逃生口，编译由 core 的 raw_stmt_compile 完成）
 
@@ -715,7 +731,7 @@ class NativeCommandError(RuntimeError):
     """原生 Mongo 命令入口的显式错误（非 Mongo 源 / 非 Mongo 形态）"""
 
 
-def pipeline_writes(pipeline):
+def pipeline_writes(pipeline: Any) -> bool:
     """聚合管道是否为写管道：任一阶段含 ``$merge`` / ``$out``（Mongo 的写出口）。
 
     写管道必须按写路径解析连接（主库 / 事务连接）——按读路径解析会在主从分离或
@@ -727,7 +743,12 @@ def pipeline_writes(pipeline):
     return False
 
 
-async def execute_native(source, collection, pipeline, options=None):
+async def execute_native(
+    source: str,
+    collection: str,
+    pipeline: Any,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     在指定 Mongo 源上执行原生聚合管道（Host 层逃生口，对标 SQL 侧 ``execute_raw``）
 
@@ -788,23 +809,27 @@ class Session:
       （内层失败只回滚本层；SAVEPOINT 名字形如 sp_<n>）。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化会话状态：视图/事务表、开启与写序、嵌套作用域栈与告警去重集"""
-        self._views = {}  # source -> {'kind','exec','tx'} | Mongo 视图 | None（None=直通）
-        self._txs = {}  # source -> 显式事务句柄
-        self._opened = []  # 开启顺序
-        self._wrote = set()  # 发生过写命令的 source
-        self._warned = set()
-        self._outer = None
-        self._token = None
-        self._scopes = []  # 嵌套作用域栈（仅最外层会话持有）
+        self._views: dict[
+            str, Any
+        ] = {}  # source -> {'kind','exec','tx'} | Mongo 视图 | None（None=直通）
+        self._txs: dict[str, Any] = {}  # source -> 显式事务句柄
+        self._opened: list[str] = []  # 开启顺序
+        self._wrote: set[str] = set()  # 发生过写命令的 source
+        self._warned: set[str] = set()
+        self._outer: "Session | None" = None
+        self._token: Token[Any] | None = None
+        self._scopes: list[
+            dict[str, dict[str, Any]]
+        ] = []  # 嵌套作用域栈（仅最外层会话持有）
         self._sp_seq = 0  # 保存点命名序号（sp_<n>）
-        self._sp_warned = set()  # 无保存点原语的告警去重
-        self._scope = None  # 本内层会话对应的作用域（嵌套时）
+        self._sp_warned: set[str] = set()  # 无保存点原语的告警去重
+        self._scope: Any = None  # 本内层会话对应的作用域（嵌套时）
 
     # ---------- 生命周期 ----------
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Session":
         """进入会话：嵌套时在外层上压作用域（保存点隔离）；否则注册为当前会话"""
         parent = _current_session.get()
         if parent is not None:
@@ -814,7 +839,12 @@ class Session:
         self._token = _current_session.set(self)
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         """退出会话：嵌套层只收束本层保存点；外层异常全回滚、跨源写抛 NonAtomicWriteError，否则提交"""
         if self._outer is not None:
             # 嵌套：只收束本层（失败回滚到本层保存点），生命周期仍交外层
@@ -833,7 +863,7 @@ class Session:
             if self._token is not None:
                 _current_session.reset(self._token)
 
-    async def _finalize(self, commit):
+    async def _finalize(self, commit: bool) -> None:
         """收尾各源事务：commit=True 逐源提交（失败级联回滚其余源），False 按开启逆序回滚；最后统一释放并清理，失败经 _warn_finalize_failure 反馈后重抛首个异常"""
         # 收尾路径（commit 失败级联回滚 / 显式 rollback / 释放）必须覆盖取消与中断，
         # 故统一捕获 BaseException；失败逐条收集后经 _warn_finalize_failure 反馈，不静默。
@@ -873,7 +903,7 @@ class Session:
 
     # ---------- 连接解析（供 crud.exec / execute_raw 调用） ----------
 
-    async def conn_for(self, source, is_write=False):
+    async def conn_for(self, source: str, is_write: bool = False) -> Any:
         """命令落到该源时解析连接：事务视图 / None（直通，用原始连接）
 
         嵌套作用域内首次**写**某源时，在该事务连接上开保存点（惰性，只读不开）。
@@ -887,7 +917,7 @@ class Session:
             await self._scope_savepoints(source, view)
         return view
 
-    async def _open_view(self, source):
+    async def _open_view(self, source: str) -> Any:
         """解析并缓存该源的事务视图；返回 ``{'kind','exec','tx'}`` /
         ``{'kind':'mongo','conn','session','tx'}`` /
         ``{'kind':'local'|'memory','conn','session','tx','handle'}`` / None（直通）"""
@@ -938,13 +968,15 @@ class Session:
 
     # ---------- 嵌套作用域（嵌套会话 / 会话内 transaction） ----------
 
-    def push_scope(self):
+    def push_scope(self) -> "dict[str, dict[str, Any]]":
         """进入嵌套作用域（内层 session / 会话内 transaction）"""
-        scope: "dict[str, dict]" = {"savepoints": {}, "txs": {}}
+        scope: "dict[str, dict[str, Any]]" = {"savepoints": {}, "txs": {}}
         self._scopes.append(scope)
         return scope
 
-    async def pop_scope(self, scope, rollback):
+    async def pop_scope(
+        self, scope: "dict[str, dict[str, Any]]", rollback: bool
+    ) -> None:
         """退出嵌套作用域：按成败回滚到保存点或释放（失败发反馈，不掩盖原异常）"""
         try:
             for source in reversed(list(scope["savepoints"])):
@@ -962,7 +994,7 @@ class Session:
             # 按身份（is）移出本层，避免同内容的空作用域按值误删外层
             self._scopes[:] = [s for s in self._scopes if s is not scope]
 
-    async def nested_scope(self, fn):
+    async def nested_scope(self, fn: Callable[..., Any]) -> Any:
         """会话内以嵌套作用域执行 fn（保存点隔离；失败只回滚本层）"""
         scope = self.push_scope()
         try:
@@ -973,7 +1005,7 @@ class Session:
         await self.pop_scope(scope, rollback=False)
         return out
 
-    async def _scope_savepoints(self, source, view):
+    async def _scope_savepoints(self, source: str, view: Any) -> None:
         """嵌套作用域首次写到某源时开保存点（惰性；句柄无原语 → 降级 + 告警一次）"""
         tx = view.get("tx") if isinstance(view, Mapping) else None
         for scope in self._scopes:
@@ -989,7 +1021,7 @@ class Session:
             scope["savepoints"][source] = name
             scope["txs"][source] = tx
 
-    def _warn_scope_no_savepoint(self, source):
+    def _warn_scope_no_savepoint(self, source: str) -> None:
         """该源在嵌套作用域中无保存点原语 → 发一次降级告警（按源去重）"""
         if source in self._sp_warned:
             return
@@ -998,7 +1030,7 @@ class Session:
 
     # ---------- 告警（自动反馈：允许降级、禁止静默） ----------
 
-    def _warn_not_atomic(self, source, kind):
+    def _warn_not_atomic(self, source: str, kind: Any) -> None:
         """该源未实现 open_transaction → 发 session_not_atomic 降级声明（同源只发一次）"""
         if source in self._warned:
             return
@@ -1018,7 +1050,7 @@ class Session:
             }
         )
 
-    def _warn_mongo(self, source, cap):
+    def _warn_mongo(self, source: str, cap: bool | None) -> None:
         """Mongo 部署不支持事务 → 降级声明（同源只声明一次）
 
         ``cap``: False → standalone；None → unknown（探测失败/无法探测）。
@@ -1028,7 +1060,9 @@ class Session:
         self._warned.add(source)
         _warn_mongo_unsupported(source, "standalone" if cap is False else "unknown")
 
-    def _warn_finalize_failure(self, source, commit, exc):
+    def _warn_finalize_failure(
+        self, source: str, commit: bool, exc: BaseException
+    ) -> None:
         """会话收尾（commit/rollback）失败 → 发 session_finalize_failed 反馈事件（不静默）"""
         _emit_feedback(
             {
@@ -1046,78 +1080,78 @@ class Session:
 
     # ---------- 会话 API（与 Store 同名同形，委托 crud） ----------
 
-    async def query(self, *a, **kw):
+    async def query(self, *a: Any, **kw: Any) -> Any:
         """会话内查询：透传 crud.query（在本会话事务上下文执行，模型/字段语义同 Store）"""
         from . import crud
 
         return await crud.query(*a, **kw)
 
-    async def query_one(self, *a, **kw):
+    async def query_one(self, *a: Any, **kw: Any) -> Any:
         """会话内查单条：透传 crud.query_one"""
         from . import crud
 
         return await crud.query_one(*a, **kw)
 
-    async def query_with_count(self, *a, **kw):
+    async def query_with_count(self, *a: Any, **kw: Any) -> Any:
         """会话内分页查询并附总数：透传 crud.query_with_count"""
         from . import crud
 
         return await crud.query_with_count(*a, **kw)
 
-    async def insert(self, *a, **kw):
+    async def insert(self, *a: Any, **kw: Any) -> Any:
         """会话内插入：透传 crud.insert"""
         from . import crud
 
         return await crud.insert(*a, **kw)
 
-    async def insert_many(self, *a, **kw):
+    async def insert_many(self, *a: Any, **kw: Any) -> Any:
         """会话内批量插入：透传 crud.insert_many"""
         from . import crud
 
         return await crud.insert_many(*a, **kw)
 
-    async def update(self, *a, **kw):
+    async def update(self, *a: Any, **kw: Any) -> Any:
         """会话内更新：透传 crud.update"""
         from . import crud
 
         return await crud.update(*a, **kw)
 
-    async def update_many(self, *a, **kw):
+    async def update_many(self, *a: Any, **kw: Any) -> Any:
         """会话内批量更新：透传 crud.update_many"""
         from . import crud
 
         return await crud.update_many(*a, **kw)
 
-    async def upsert(self, *a, **kw):
+    async def upsert(self, *a: Any, **kw: Any) -> Any:
         """会话内插入或更新：透传 crud.upsert"""
         from . import crud
 
         return await crud.upsert(*a, **kw)
 
-    async def remove(self, *a, **kw):
+    async def remove(self, *a: Any, **kw: Any) -> Any:
         """会话内删除：透传 crud.remove"""
         from . import crud
 
         return await crud.remove(*a, **kw)
 
-    async def exists(self, *a, **kw):
+    async def exists(self, *a: Any, **kw: Any) -> Any:
         """会话内存在性判断：透传 crud.exists"""
         from . import crud
 
         return await crud.exists(*a, **kw)
 
-    async def count(self, *a, **kw):
+    async def count(self, *a: Any, **kw: Any) -> Any:
         """会话内计数：透传 crud.count"""
         from . import crud
 
         return await crud.count(*a, **kw)
 
-    async def mutation(self, *a, **kw):
+    async def mutation(self, *a: Any, **kw: Any) -> Any:
         """会话内多步变更：透传 crud.mutation"""
         from . import crud
 
         return await crud.mutation(*a, **kw)
 
-    async def execute_raw(self, *a, **kw):
+    async def execute_raw(self, *a: Any, **kw: Any) -> Any:
         """会话内执行原生命令：透传模块级 execute_raw"""
         return await execute_raw(*a, **kw)

@@ -13,17 +13,17 @@ from typing import Any
 
 from .feedback import emit
 
-_BUCKET: contextvars.ContextVar = contextvars.ContextVar(
+_BUCKET: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "py_store_degraded", default=None
 )
 
 
-def begin() -> contextvars.Token:
+def begin() -> contextvars.Token[dict[str, Any] | None]:
     """建立请求容器（HTTP 中间件调用）"""
     return _BUCKET.set({"events": []})
 
 
-def end(token: contextvars.Token) -> None:
+def end(token: contextvars.Token[dict[str, Any] | None]) -> None:
     """重置请求容器；跨上下文 reset 抛 ValueError 时保持当前容器原样（不掩盖）"""
     try:
         _BUCKET.reset(token)
@@ -58,7 +58,7 @@ def status() -> dict[str, Any]:
     return {"degraded": bool(events), "events": events}
 
 
-async def with_request(fn):
+async def with_request(fn: Any) -> dict[str, Any]:
     """请求级降级作用域：建立请求容器执行 fn（同步 / 异步均可），返回 ``{result, status}``
     （协议皮用于 ``x-store-degraded``；与 nodejs ``degraded.withRequest`` 同构）。
 

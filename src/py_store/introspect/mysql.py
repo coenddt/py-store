@@ -5,6 +5,8 @@
 对齐 ``nodejs-store/src/introspect/mysql.js``。
 """
 
+from typing import Any
+
 from ..executors.mysql import acquire as _acquire
 
 _TABLES = """
@@ -44,9 +46,9 @@ _INDEXES = """
   ORDER BY table_name, index_name, seq_in_index"""
 
 
-def _group_indexes(rows):
+def _group_indexes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """把 ``{table,name,nonUnique,column}`` 行按索引名归并出 columns 数组"""
-    by_key: dict = {}
+    by_key: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = f"{r['table']}::{r['name']}"
         entry = by_key.get(key)
@@ -62,7 +64,9 @@ def _group_indexes(rows):
     return list(by_key.values())
 
 
-async def introspect(driver, options=None):
+async def introspect(
+    driver: Any, options: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """只读采集当前库（或 ``options['database']`` 指定库）的表/列/外键/索引并归一化。"""
     if driver is None:
         raise TypeError("mysql introspection 需要 asyncmy 的连接或连接池")
@@ -77,11 +81,11 @@ async def introspect(driver, options=None):
     )
     params = (database,) if database is not None else ()
 
-    def tables_sql(base):
+    def tables_sql(base: str) -> str:
         """把 SQL 模板中的 ``table_schema = DATABASE()`` 替换为实际 schema 过滤条件。"""
         return base.replace("table_schema = DATABASE()", schema_filter)
 
-    async def run(sql, args=()):
+    async def run(sql: str, args: Any = ()) -> Any:
         """从池取连接执行一条只读查询并返回全部行。"""
         async with _acquire(driver) as conn:
             async with conn.cursor(DictCursor) as cur:

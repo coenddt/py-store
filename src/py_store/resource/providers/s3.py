@@ -1,9 +1,10 @@
 """S3 兼容 provider（OSS / MinIO / AWS 共用）；boto3 懒加载（可选依赖）。"""
 
 import asyncio
+from typing import Any, cast
 
 
-def create(options=None):
+def create(options: dict[str, Any] | None = None) -> dict[str, Any]:
     """构造 S3 provider（``bucket`` 必填；``client`` 可注入以复用既有 boto3 客户端）。"""
     options = options or {}
     import boto3  # 懒加载：未安装时仅该 provider 报错，不影响其他
@@ -31,13 +32,13 @@ def create(options=None):
 
     prefix = options.get("prefix")
 
-    def key_of(key):
+    def key_of(key: str) -> str:
         """拼对象完整键（配置 ``prefix`` 时加前缀）。"""
         if prefix:
             return f"{str(prefix).rstrip('/')}/{key}"
         return key
 
-    def _put(key, data, opts):
+    def _put(key: str, data: bytes, opts: dict[str, Any] | None) -> None:
         """同步 put_object（``opts.mime`` 作为 ContentType）。"""
         client.put_object(
             Bucket=bucket,
@@ -46,16 +47,16 @@ def create(options=None):
             ContentType=(opts or {}).get("mime") or "application/octet-stream",
         )
 
-    def _get(key):
+    def _get(key: str) -> bytes:
         """同步 get_object 并读出全部字节。"""
         r = client.get_object(Bucket=bucket, Key=key_of(key))
-        return r["Body"].read()
+        return cast(bytes, r["Body"].read())
 
-    def _remove(key):
+    def _remove(key: str) -> None:
         """同步 delete_object。"""
         client.delete_object(Bucket=bucket, Key=key_of(key))
 
-    def _exists(key):
+    def _exists(key: str) -> bool:
         """同步 head_object 探测存在性（404/NoSuchKey 记不存在，其余错误原样抛出）。"""
         try:
             client.head_object(Bucket=bucket, Key=key_of(key))
@@ -68,19 +69,19 @@ def create(options=None):
                 return False
             raise
 
-    async def put(key, data, opts=None):
+    async def put(key: str, data: bytes, opts: dict[str, Any] | None = None) -> None:
         """写入对象（阻塞调用经线程池）。"""
         await asyncio.to_thread(_put, key, data, opts)
 
-    async def get(key, opts=None):
+    async def get(key: str, opts: dict[str, Any] | None = None) -> bytes:
         """读取对象字节。"""
         return await asyncio.to_thread(_get, key)
 
-    async def remove(key, opts=None):
+    async def remove(key: str, opts: dict[str, Any] | None = None) -> None:
         """删除对象。"""
         await asyncio.to_thread(_remove, key)
 
-    async def exists(key, opts=None):
+    async def exists(key: str, opts: dict[str, Any] | None = None) -> bool:
         """判断对象是否存在。"""
         return await asyncio.to_thread(_exists, key)
 
@@ -93,7 +94,7 @@ def create(options=None):
     }
 
 
-def _boto_config(addressing):
+def _boto_config(addressing: str) -> Any:
     """构造 botocore ``Config``（仅设置 S3 寻址风格：path / virtual）。"""
     from botocore.config import Config
 

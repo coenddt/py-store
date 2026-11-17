@@ -24,6 +24,7 @@
 
 import hashlib
 import time
+from typing import Any, Callable, cast
 
 from . import crud as _crud
 from . import ddl as _ddl
@@ -36,7 +37,9 @@ from .metadef import (
     _internal_ctx,
     stable_stringify,
 )
-from .schema import core as _core
+from .schema import (  # type: ignore[attr-defined]  # core 经 schema 模块统一收口（并行维护）
+    core as _core,
+)
 
 #: 白名单外变更的固定分步建议（契约逐字；MigrationUnsupported 消息必须原文携带）
 _UNSUPPORTED_HINT = (
@@ -53,24 +56,26 @@ _NUMBER_FAMILY = _NUMBERS | {"date", "datetime", "bool", "boolean"}
 class MigrationUnsupported(MetaDefError):
     """白名单外变更（diff errors 非空）：只给分步建议，不自动执行、不自动回滚"""
 
-    def __init__(self, message, skipped=None):
+    def __init__(
+        self, message: str, skipped: list[dict[str, Any]] | None = None
+    ) -> None:
         """构造不支持迁移错误：skipped 记录因不可支持而跳过的 schema 清单"""
         super().__init__(message)
         self.skipped = skipped or []
 
 
-def migration_id(tenant, env, backend, name, version):
+def migration_id(tenant: Any, env: Any, backend: str, name: str, version: Any) -> str:
     """版本行自然键：``def_id`` 惯例追加 backend 段（tenant␟env␟backend␟name␟version，US 分隔）"""
-    seg = lambda v: "" if v is None else str(v)  # noqa: E731
+    seg: Callable[[Any], str] = lambda v: "" if v is None else str(v)  # noqa: E731
     return f"{seg(tenant)}\u001f{seg(env)}\u001f{seg(backend)}\u001f{seg(name)}\u001f{seg(version)}"
 
 
-def _hash_of(defn):
+def _hash_of(defn: dict[str, Any]) -> str:
     """当前版 defn 的稳定 hash：stable_stringify（键序无关）→ SHA-1 hex"""
     return hashlib.sha1(stable_stringify(defn).encode("utf-8")).hexdigest()
 
 
-def _strip_builtin_fields(backend, old_defn, new_defn):
+def _strip_builtin_fields(backend: str, old_defn: Any, new_defn: dict[str, Any]) -> Any:
     """内建物理列剔除：introspect→schema_from_rows 的 defn 带 ``__present`` 哨兵与宿主自动
     补齐的 timestamps / 归属键物理列（snake_case；兼容 camelCase）——不剔则 diff 误报
     「删除字段不支持」。
@@ -102,13 +107,13 @@ _PROBE_SQL = {
 }
 
 
-async def _has_migration_table(backend, source):
+async def _has_migration_table(backend: str, source: str) -> bool:
     """只读探测迁移版本表是否存在：按后端执行 _PROBE_SQL，有行即存在"""
     out = await execute_raw(source, _PROBE_SQL[backend], None, False)
     return bool(out.get("rows"))
 
 
-def _physical_defn(backend, defn):
+def _physical_defn(backend: str, defn: dict[str, Any]) -> dict[str, Any]:
     """用户 defn → 物理命名空间拷贝（顶层 fields 键与 indexes keys 经 ``_pname`` 按后端翻译）。
 
     ``_pname`` 对 snake_case 输入幂等，``_id``/``__`` 保留名原样（generate_migration 内部
@@ -127,7 +132,9 @@ def _physical_defn(backend, defn):
     return {**defn, "fields": fields, "indexes": indexes}
 
 
-def _align_types(backend, old_defn, phys_new):
+def _align_types(
+    backend: str, old_defn: Any, phys_new: dict[str, Any]
+) -> dict[str, Any]:
     """反推粒度对齐：introspect 反推类型粒度可粗于用户声明（SQLite 动态类型 → ``number``，
     承载 int/long/float/double/date/datetime/bool 全域）——old 侧字段为 ``number`` 时把 new 侧
     同名同族字段归一为 ``number`` 比对（物理层确无差异；MySQL/PG 反推保真不受影响）。
@@ -144,8 +151,15 @@ def _align_types(backend, old_defn, phys_new):
 
 
 async def migrate(
-    *, backend, source, defs, old_defs=None, driver=None, tenant=None, env=None
-):
+    *,
+    backend: str,
+    source: str,
+    defs: dict[str, Any],
+    old_defs: dict[str, Any] | None = None,
+    driver: Any | None = None,
+    tenant: str | None = None,
+    env: str | None = None,
+) -> dict[str, Any]:
     """迁移编排（A4）。参数与返回对齐 node ``migrate``：
 
     :param backend: ``'sqlite' | 'mysql' | 'postgres'``
@@ -172,8 +186,8 @@ async def migrate(
     # 不同键——按 name 与 collection 双索引，查找时以 defs 侧 collection 兜底对齐
     old = _load_old_defs(old_defs, probe, backend)
     introspect_mode = probe is not None and old_defs is None
-    applied = []
-    skipped = []
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for name, defn in defs.items():
         item = await _migrate_one(
             backend,
@@ -193,7 +207,9 @@ async def migrate(
     return {"applied": applied, "skipped": skipped}
 
 
-async def _probe_schema_state(backend, source, driver):
+async def _probe_schema_state(
+    backend: str, source: str, driver: Any | None
+) -> tuple[dict[str, Any] | None, bool]:
     """探测物理状态：有 driver 一次完整 introspect（两用：版本表探测 + old_defs 转换）；
     否则只读探测版本表。返回 ``(probe, has_version_table)``。"""
     if driver is not None:
@@ -205,11 +221,11 @@ async def _probe_schema_state(backend, source, driver):
     return None, await _has_migration_table(backend, source)
 
 
-async def _ensure_migration_table(backend, source):
+async def _ensure_migration_table(backend: str, source: str) -> None:
     """建版本表：逐条执行 core 产出的 CREATE TABLE 语句（事务内；幂等由探测保证）"""
     stmts = _split_statements(_ddl.generate(backend, [_MIGRATION]))
 
-    async def _ensure():
+    async def _ensure() -> None:
         for sql in stmts:
             if sql.strip():
                 await execute_raw(source, sql, None, True)
@@ -217,7 +233,9 @@ async def _ensure_migration_table(backend, source):
     await run_in_transaction(source, _ensure)
 
 
-def _load_old_defs(old_defs, probe, backend):
+def _load_old_defs(
+    old_defs: dict[str, Any] | None, probe: dict[str, Any] | None, backend: str
+) -> dict[str, Any]:
     """旧版定义装载：显式传入优先；None → 探测行转 defn（name 与 collection 双索引兜底对齐）"""
     if old_defs is not None:
         return old_defs
@@ -234,22 +252,29 @@ def _load_old_defs(old_defs, probe, backend):
     return old
 
 
-async def _fix_builtin_columns(backend, source, probe, name, defn, skipped):
+async def _fix_builtin_columns(
+    backend: str,
+    source: str,
+    probe: dict[str, Any] | None,
+    name: str,
+    defn: dict[str, Any],
+    skipped: list[dict[str, Any]],
+) -> None:
     """⓪ 物理内建列完整性（仅 introspect 模式）：缺列按当前 DDL 自动补齐并告警（补列失败才
     中断，保留真报错）；归属键已存在但值为 NULL 时放行并告警（迁移层不猜业务归属）"""
     table = _ddl._pname(backend, defn.get("collection") or defn.get("name"))
-    if not any(t.get("name") == table for t in probe.get("tables") or []):
+    if not any(
+        t.get("name") == table
+        for t in cast("dict[str, Any]", probe).get("tables") or []
+    ):
         return
     have = {
         c.get("name")
-        for c in probe.get("columns") or []
+        for c in cast("dict[str, Any]", probe).get("columns") or []
         if c.get("table") == table
     }
     missing = sorted(
-        {
-            _ddl._pname(backend, n)
-            for n in _ddl.builtin_field_names(defn, backend)
-        }
+        {_ddl._pname(backend, n) for n in _ddl.builtin_field_names(defn, backend)}
         - have
     )
     if missing:
@@ -307,7 +332,9 @@ async def _fix_builtin_columns(backend, source, probe, name, defn, skipped):
             )
 
 
-def _archive_ddl_prefix(backend, probe, defn, stmts):
+def _archive_ddl_prefix(
+    backend: str, probe: dict[str, Any], defn: dict[str, Any], stmts: list[str]
+) -> list[str]:
     """⓪c 归档表补建（仅 introspect 模式）：主表已存在时 addTable 分支不触发，老库常缺
     ``<table>_deleted`` 附表 → remove 的归档写入报 no such table。按当前 def 补建；归档表在但
     缺内建列则补齐（声明字段差异由 generate_migration 主表分支同步处理，此处不重复 diff）。
@@ -331,13 +358,26 @@ def _archive_ddl_prefix(backend, probe, defn, stmts):
 
 
 async def _migrate_one(
-    backend, source, name, defn, old, probe, introspect_mode, tenant, env, skipped
-):
+    backend: str,
+    source: str,
+    name: str,
+    defn: dict[str, Any],
+    old: dict[str, Any],
+    probe: dict[str, Any] | None,
+    introspect_mode: bool,
+    tenant: str | None,
+    env: str | None,
+    skipped: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     """单 schema 迁移全程：幂等闸 → diff → 方言 SQL → 归档补建 → 事务落地；unchanged 返回 None"""
     old_defn = _strip_builtin_fields(
         backend,
         old.get(name)
-        or (old.get(defn.get("collection")) if defn.get("collection") else None),
+        or (
+            old.get(cast(str, defn.get("collection")))
+            if defn.get("collection")
+            else None
+        ),
         defn,
     )
     if introspect_mode:
@@ -384,7 +424,7 @@ async def _migrate_one(
     }
 
     # B023：默认参数显式绑定循环变量（_apply 当轮即被 await，绑定仅为过门禁与防延迟误用）
-    async def _apply(stmts=stmts, row=row):
+    async def _apply(stmts: list[str] = stmts, row: dict[str, Any] = row) -> None:
         """单 schema 的迁移落地：逐条执行迁移 SQL 后写版本行（同一事务，失败整体回滚）"""
         for sql in stmts:
             await execute_raw(source, sql, None, True)
@@ -400,6 +440,6 @@ async def _migrate_one(
     }
 
 
-def _split_statements(sql_text):
+def _split_statements(sql_text: Any) -> list[str]:
     """``ddl.generate`` 的语句串 → 语句列表（双端一致按块拆分；node 侧 ``split('\\n\\n')``）"""
     return sql_text.split("\n\n") if isinstance(sql_text, str) else list(sql_text)

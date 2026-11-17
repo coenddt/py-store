@@ -10,7 +10,9 @@
 """
 
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from . import permission as _permission
 from .schema import _to_core_defn
@@ -39,7 +41,7 @@ _REGISTRARS = {
 }
 
 
-def _kind_of(opts):
+def _kind_of(opts: dict[str, Any] | None) -> tuple[str, str]:
     """解析 kind → ``(kind, table)``；未知 kind 显式 Err（不兜底）"""
     kind = (opts or {}).get("kind") or "schema"
     table = _TABLES.get(kind)
@@ -48,7 +50,7 @@ def _kind_of(opts):
     return kind, table
 
 
-def _def_model(name, id_prefix):
+def _def_model(name: str, id_prefix: str) -> dict[str, Any]:
     """内建定义表 schema（write 显式空名单：普通角色禁写，防篡改定义审计）
 
     不声明 indexes：内建表随宿主注册表进入 `ddl.generate()`，而场景 harness 会对全部
@@ -123,7 +125,7 @@ _MIGRATION_MODEL = {
 }
 
 
-def ensure_builtins():
+def ensure_builtins() -> None:
     """注册内建 ``__schemaDef``/``__workflowDef``/``__feedback``/``__schemaMigration``
     （幂等；core 对重复三元组显式报错，故先 has 守卫）"""
     if not _schema_has(_SCHEMA_DEF):
@@ -143,7 +145,7 @@ class MetaDefError(ValueError):
 # ─── 纯逻辑（双端逐字节等价；parity 锚） ───────────────────────
 
 
-def _assert_serializable(value, path=""):
+def _assert_serializable(value: Any, path: str = "") -> None:
     """深度检查 defn 是否含函数值 —— 持久化定义 = 纯 JSON 契约（N3）。
 
     必须先于 ``_to_core_defn`` 调用：后者会把 ``fn/asyncFn`` 归一为 ``True`` 占位、把其余函数剔除，
@@ -170,7 +172,7 @@ def _assert_serializable(value, path=""):
 _MAX_SAFE_INT = 2**53 - 1
 
 
-def _shortest_digits(value):
+def _shortest_digits(value: float) -> tuple[str, int]:
     """正有限 float → ``(digits, n)``：``value == digits × 10^(n - len(digits))``。
 
     ``repr`` 给出最短往返十进制位（与 JS ``String`` 同源同长），此处只拆位并去掉尾零；
@@ -187,7 +189,7 @@ def _shortest_digits(value):
     return digits, e10 + 1 + exp
 
 
-def _format_digits(digits, n):
+def _format_digits(digits: str, n: int) -> str:
     """按 ECMAScript 排版规则输出（仅指数符号归一为无 ``+``、无补零）"""
     k = len(digits)
     if k <= n <= 21:
@@ -199,7 +201,7 @@ def _format_digits(digits, n):
     return digits[0] + ("." + digits[1:] if k > 1 else "") + "e" + str(n - 1)
 
 
-def _canonical_number(value):
+def _canonical_number(value: int | float) -> str:
     """数字 → 规范字面量（**本项目的规范格式，不是 JS 语义**）。
 
     两宿主逐字节一致是硬约束（同一定义跨端必须同 hash，否则 migrate 幂等闸失效）。规则：
@@ -227,7 +229,7 @@ def _canonical_number(value):
     return sign + _format_digits(*_shortest_digits(abs(value)))
 
 
-def _encode_json(value):
+def _encode_json(value: Any) -> str:
     """JSON 编码（键序无关 + 规范数字）——对齐 node ``_stableStringify`` 逐字节"""
     if value is None:
         return "null"
@@ -253,7 +255,7 @@ def _encode_json(value):
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def stable_stringify(value):
+def stable_stringify(value: Any) -> str:
     """稳定序列化（键序无关）：与 node ``_stableStringify`` 逐字节等价。
 
     数字走 :func:`_canonical_number`（项目规范格式，非 JS 语义），否则非整数浮点在
@@ -263,17 +265,19 @@ def stable_stringify(value):
     return _encode_json(value)
 
 
-def same_defn(a, b):
+def same_defn(a: Any, b: Any) -> bool:
     """两 defn 是否同形（深比较；键序无关）"""
     return stable_stringify(a) == stable_stringify(b)
 
 
-def next_version(rows):
+def next_version(rows: list[dict[str, Any]]) -> int:
     """由既有行推下一个版本号（无行 → 1）"""
     return (max(r["version"] for r in rows) + 1) if rows else 1
 
 
-def build_def_row(defn, opts, version):
+def build_def_row(
+    defn: dict[str, Any], opts: dict[str, Any] | None, version: int
+) -> dict[str, Any]:
     """构造待插入行（纯函数，便于双端对拍）。键序与 node ``buildDefRow`` 一致"""
     opts = opts or {}
     return {
@@ -287,7 +291,7 @@ def build_def_row(defn, opts, version):
     }
 
 
-def def_id(tenant, env, name, version):
+def def_id(tenant: str | None, env: str | None, name: str, version: int) -> str:
     """定义行自然键 ``_id`` = ``(tenant, env, name, version)``（D2；对齐 node ``defId``）。
 
     作为存储层主键，同 ``(tenant,env,name,version)`` 二次写入必触发唯一键冲突
@@ -301,7 +305,7 @@ def def_id(tenant, env, name, version):
 
 
 @contextmanager
-def _internal_ctx():
+def _internal_ctx() -> Iterator[None]:
     """干净 internal 上下文（{internal: True}，丢弃触发者 roles）
 
     内建表 write 显式空名单仅放行 internal/admin；写入身份与触发者权限解耦，
@@ -317,7 +321,7 @@ def _internal_ctx():
 # ─── IO（经传入的 store 面，避免包内循环依赖） ─────────────────
 
 
-async def list_defs(store, opts):
+async def list_defs(store: Any, opts: dict[str, Any] | None) -> Any:
     """列定义行（按 version desc；name 缺省列全部）"""
     opts = opts or {}
     _, table = _kind_of(opts)
@@ -328,7 +332,7 @@ async def list_defs(store, opts):
     return await store.query(gql, {"c0": condition, "s0": {"version": -1}})
 
 
-async def load_defs(store, opts):
+async def load_defs(store: Any, opts: dict[str, Any] | None) -> Any:
     """各 name 的**最新 active** 行（每 name 取 version 最大者；version desc 后首见即最新）"""
     opts = opts or {}
     _, table = _kind_of(opts)
@@ -354,7 +358,9 @@ async def load_defs(store, opts):
     return out
 
 
-async def persist_def(store, defn, opts):
+async def persist_def(
+    store: Any, defn: dict[str, Any], opts: dict[str, Any] | None
+) -> Any:
     """持久化定义：同名同形返回原行不插入；异形插入 version+1"""
     if not isinstance(defn, dict) or not defn.get("name"):
         raise MetaDefError("metadef: defn.name 必填")
@@ -384,10 +390,10 @@ async def persist_def(store, defn, opts):
 
 
 # 已重建进注册表的定义自然键（进程级；同名同版本只注册一次，避免每次 reload 全量覆盖）
-_applied: set = set()
+_applied: set[str] = set()
 
 
-async def restore_defs(store, opts):
+async def restore_defs(store: Any, opts: dict[str, Any] | None) -> dict[str, Any]:
     """从持久化定义重建注册表（D1 闭环桥）：``load_defs`` → 逐条 ``register(defn, internal)``。
 
     网关 reload 在重装配前调用本函数，使「控制面 publish（写库）」与「协议面可见（注册）」
@@ -409,7 +415,7 @@ async def restore_defs(store, opts):
     return {"total": len(rows), "applied": applied}
 
 
-async def rollback_to(store, opts):
+async def rollback_to(store: Any, opts: dict[str, Any] | None) -> Any:
     """回滚到历史版本（追加式）：取历史行 defn → 作为新版本再发布 → 本进程 register → 返回落库行。
 
     D21 跨进程闭环：回滚不再「原地重注册」，而是复用 ``persist_def`` 把历史 defn 落成一条

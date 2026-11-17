@@ -12,11 +12,13 @@
 对齐 ``nodejs-store/src/workflow.js``（双宿主输出逐字节一致由 parity 锚单测守护）。
 """
 
+import builtins
 import json
 import re
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import List
+from typing import Any, cast
 
 from . import permission as _permission
 from .crud.exec import _call, _sources_of, run_atomic
@@ -35,7 +37,7 @@ _LIST_TYPES = (list, tuple)
 
 
 # 列表插值统一 JSON 风格（与 node JSON.stringify 逐字节一致——parity 锚要求错误文案一致）
-def _json(x):
+def _json(x: Any) -> str:
     """JSON 序列化（无空格分隔符，与 node JSON.stringify 逐字节一致，错误文案 parity 锚）"""
     return json.dumps(x, ensure_ascii=False, separators=(",", ":"))
 
@@ -110,7 +112,7 @@ _RUN_SCHEMA = {
 }
 
 
-def ensure_builtin():
+def ensure_builtin() -> None:
     """注册内建 ``__workflowRun`` schema（幂等；core 对重复三元组显式报错，故先 has 守卫）"""
     if not _schema_has(_BUILTIN_NAME):
         _schema_register(_RUN_SCHEMA)
@@ -126,7 +128,7 @@ class WorkflowError(ValueError):
 class _StepFailure(Exception):
     """步骤失败内部信号：fail 步骤语义失败（message）或步骤执行 Err——fail-fast + 整体回滚"""
 
-    def __init__(self, message, index=None):
+    def __init__(self, message: str, index: int | None = None) -> None:
         """构造步骤失败信号：index 记失败步骤下标（回写 run 的 stepIndex）"""
         super().__init__(message)
         self.index = index
@@ -135,7 +137,7 @@ class _StepFailure(Exception):
 # ─── 权限：三级白名单判定（§0.6；core permission.rs::evaluate 同构，doc=Missing 语义） ──
 
 
-def _evaluate(role_list, ctx):
+def _evaluate(role_list: Any, ctx: Any) -> bool:
     """角色白名单评估（与 core permission.rs::evaluate 同构；doc=Missing 语义）
 
     - ctx 缺失 / internal：直通放行（与 core 一致，先于名单判定）；
@@ -160,7 +162,7 @@ def _evaluate(role_list, ctx):
     return "creator" in role_list
 
 
-def _run_whitelist(defn):
+def _run_whitelist(defn: dict[str, Any]) -> Any:
     """run 白名单：显式声明优先，否则回退 write（§0.6 旧语义：空名单按未配置处理）"""
     run = defn.get("run")
     return run if run else defn.get("write")
@@ -169,11 +171,11 @@ def _run_whitelist(defn):
 # ─── 校验器（注册即静态检查；纯函数，错误全量收集） ──────────────
 
 
-def _scan_placeholders(value):
+def _scan_placeholders(value: Any) -> builtins.list[tuple[str, str]]:
     """深扫结构中的全部占位符表达式（外层完整形态，dec 嵌套一并可见），返回 [(inner, whole)]"""
     out = []
 
-    def walk(v):
+    def walk(v: Any) -> None:
         """递归遍历结构：字符串值上逐个捕获外层占位符（内层内容 + 完整形态），容器递归"""
         if isinstance(v, str):
             for m in _OUTER_PH.finditer(v):
@@ -189,7 +191,9 @@ def _scan_placeholders(value):
     return out
 
 
-def _check_expr(inner, defined_as, errors, where):
+def _check_expr(
+    inner: str, defined_as: set[str], errors: builtins.list[str], where: str
+) -> None:
     """校验单个占位符表达式：input.<path> / dec:<a>,<b> / <as>.<path>（前向）"""
     if inner.startswith(_INPUT):
         path = inner[len(_INPUT) :]
@@ -236,7 +240,7 @@ def _check_expr(inner, defined_as, errors, where):
         )
 
 
-def _validate_defn_name(defn, errors):
+def _validate_defn_name(defn: dict[str, Any], errors: builtins.list[str]) -> None:
     """name 必填校验：非空字符串，且不得以 __ 开头（前缀保留给内建 schema）"""
     name = defn.get("name")
     if not name or not isinstance(name, str):
@@ -247,14 +251,14 @@ def _validate_defn_name(defn, errors):
         )
 
 
-def _validate_top_fields(defn, errors):
+def _validate_top_fields(defn: dict[str, Any], errors: builtins.list[str]) -> None:
     """顶层字段白名单校验（白名单外逐项报错）"""
     for k in defn:
         if k not in _TOP_FIELDS:
             errors.append(f'未知顶层字段 "{k}"（白名单: {_json(sorted(_TOP_FIELDS))}）')
 
 
-def _validate_access(defn, errors):
+def _validate_access(defn: dict[str, Any], errors: builtins.list[str]) -> None:
     """read/write/run 白名单（字符串数组）+ denyRead 类型检查"""
     for k in ("read", "write", "run"):
         v = defn.get(k)
@@ -281,7 +285,9 @@ def _validate_access(defn, errors):
             errors.append("denyRead 须为布尔值（显式拒绝读开关，口径以 core 为准）")
 
 
-def _validate_step_fields(where, step, op, errors):
+def _validate_step_fields(
+    where: str, step: dict[str, Any], op: str, errors: builtins.list[str]
+) -> None:
     """步骤字段白名单 + 必填字段校验"""
     for k in step:
         if k not in _STEP_FIELDS[op]:
@@ -293,7 +299,13 @@ def _validate_step_fields(where, step, op, errors):
             errors.append(f'{where}: {op} 步骤缺少必填字段 "{k}"')
 
 
-def _validate_step_refs(where, step, op, defined_as, errors):
+def _validate_step_refs(
+    where: str,
+    step: dict[str, Any],
+    op: str,
+    defined_as: set[str],
+    errors: builtins.list[str],
+) -> None:
     """步骤语义校验：upsert 必带 match、gql 禁占位符（注入面）、占位符前向引用、when 结构"""
     if op == "mutation" and step.get("upsert") and not step.get("match"):
         errors.append(f"{where}: upsert: true 须提供 match 条件")
@@ -315,7 +327,7 @@ def _validate_step_refs(where, step, op, defined_as, errors):
         _validate_when(when, errors, f"{where}.when")
 
 
-def _validate_steps(steps, errors):
+def _validate_steps(steps: builtins.list[Any], errors: builtins.list[str]) -> None:
     """steps 主循环：逐步骤白名单/必填/语义校验，并维护 as 引用集合。
 
     前向引用集合：不含当前步骤自身的 as（自引用在执行期必然悬空——结果尚不存在）。
@@ -343,14 +355,14 @@ def _validate_steps(steps, errors):
             defined_as.add(as_name)
 
 
-def validate_defn(defn):
+def validate_defn(defn: Any) -> builtins.list[str]:
     """Workflow defn 静态校验 → 错误列表（空 = 通过）。纯函数，白名单外全量收集。
 
     检查项：顶层/步骤字段白名单、op 白名单、必填字段、as 唯一、占位符前向引用、
     when 结构（恰一个白名单算子 + 合法参数键）、upsert 必带 match、gql 禁占位符
     （参数化走 params 绑定，防注入）。
     """
-    errors = []
+    errors: builtins.list[str] = []
     if not isinstance(defn, dict):
         return ["defn 须为 JSON 对象"]
     _validate_defn_name(defn, errors)
@@ -362,11 +374,12 @@ def validate_defn(defn):
         errors.append("steps 必填（非空数组，线性步骤序列）")
         return errors
 
-    _validate_steps(steps, errors)
+    # defn 校验后 steps 实为 JSON 数组（list）；isinstance 元组收窄为 list|tuple，此处仅类型收窄（运行时 no-op）
+    _validate_steps(cast("builtins.list[Any]", steps), errors)
     return errors
 
 
-def _collect_param_keys(ast_value, out=None):
+def _collect_param_keys(ast_value: Any, out: set[str] | None = None) -> set[str]:
     """递归收集 core 返回 ast 中所有 ``params`` 对象的字符串值（@key 名）。"""
     if out is None:
         out = set()
@@ -386,7 +399,7 @@ def _collect_param_keys(ast_value, out=None):
     return out
 
 
-def validate_planable(defn):
+def validate_planable(defn: Any) -> builtins.list[str]:
     """注册期「只校验不绑参」可规划性校验 → 错误列表（空 = 通过）。纯内存、无 IO、无参数值绑定。
 
     ① 结构性可规划：对每个 query 步骤的 gql 调 core 门面
@@ -397,7 +410,7 @@ def validate_planable(defn):
 
     与 ``validate_defn``（纯函数）分职：本函数需要 core 注册表，故独立、不入 validate_defn。
     """
-    errors: List[str] = []
+    errors: builtins.list[str] = []
     if not isinstance(defn, dict):
         return errors
     steps = defn.get("steps")
@@ -427,7 +440,7 @@ def validate_planable(defn):
     return errors
 
 
-def _split_when(when):
+def _split_when(when: dict[str, Any]) -> tuple[str | None, str | None]:
     """when → (op, param_key)；无歧义文法：含 exists 键即 op=exists（is 作参数键），
     其余算子的右值键统一 than（is 键已被 exists 参数占用；is/eq 算子同用 than）"""
     if "exists" in when:
@@ -436,7 +449,7 @@ def _split_when(when):
     return (op, _WHEN_PARAM[op]) if op else (None, None)
 
 
-def _validate_when(when, errors, where):
+def _validate_when(when: Any, errors: builtins.list[str], where: str) -> None:
     """when 守卫结构：恰一个白名单算子键；右操作数参数键按算子定（is/than）"""
     if not isinstance(when, dict):
         errors.append(f"{where}: 须为 JSON 对象")
@@ -460,10 +473,10 @@ def _validate_when(when, errors, where):
 
 # ─── 注册表 ──────────────────────────────────────────────────
 
-_workflows: dict = {}
+_workflows: dict[str, dict[str, Any]] = {}
 
 
-def register(defn, ctx=None):
+def register(defn: dict[str, Any], ctx: Any | None = None) -> dict[str, Any]:
     """注册工作流定义（注册即静态校验，白名单外显式 Err；name 全局唯一）。
 
     ``ctx``：可选定义层门禁上下文（``{'internal': True}`` / ``{'roles': [...]}``）。
@@ -495,7 +508,7 @@ def register(defn, ctx=None):
     return defn
 
 
-def get(name, ctx=None):
+def get(name: str, ctx: Any | None = None) -> dict[str, Any]:
     """按名取 defn（read 白名单过滤；不可见与不存在同形——防枚举）"""
     d = _workflows.get(name)
     if d is None:
@@ -506,7 +519,7 @@ def get(name, ctx=None):
     return d
 
 
-def list(ctx=None):
+def list(ctx: Any | None = None) -> builtins.list[str]:
     """全部可见工作流名（read 白名单过滤；``denyRead`` 显式拒绝优先）"""
     c = get_context() if ctx is None else ctx
     return [
@@ -516,7 +529,7 @@ def list(ctx=None):
     ]
 
 
-def clear_workflows():
+def clear_workflows() -> None:
     """清空工作流注册表（测试隔离 / 动态重建；对齐 ``schema.clear_schemas``）"""
     _workflows.clear()
 
@@ -524,7 +537,7 @@ def clear_workflows():
 # ─── 占位符解析（§4.3；执行期） ───────────────────────────────
 
 
-def _dig(root, path, strict, whole):
+def _dig(root: Any, path: str, strict: bool, whole: str) -> Any:
     """点路径取值；strict（参数位）取不到显式 Err，非 strict（when 取值位）→ None（三态）"""
     cur = root
     for seg in path.split("."):
@@ -537,7 +550,13 @@ def _dig(root, path, strict, whole):
     return cur
 
 
-def _resolve_expr(inner, input_map, ctx_map, strict, whole):
+def _resolve_expr(
+    inner: str,
+    input_map: dict[str, Any],
+    ctx_map: dict[str, Any],
+    strict: bool,
+    whole: str,
+) -> Any:
     """解析单个占位符表达式为值（dec 递减；类型不合法显式 Err，不猜）"""
     if inner.startswith(_INPUT):
         return _dig(input_map, inner[len(_INPUT) :], strict, whole)
@@ -570,7 +589,7 @@ def _resolve_expr(inner, input_map, ctx_map, strict, whole):
     return _dig(ctx_map[as_name], path, strict, whole)
 
 
-def _stringify(v):
+def _stringify(v: Any) -> str:
     """内嵌占位符值的字符串化（仅标量；None/复杂结构显式 Err，禁静默拼 'None'）"""
     if isinstance(v, str):
         return v
@@ -581,7 +600,9 @@ def _stringify(v):
     raise _StepFailure(f"内嵌占位符仅支持标量值，收到 {type(v).__name__}")
 
 
-def _resolve_str(s, input_map, ctx_map, strict):
+def _resolve_str(
+    s: str, input_map: dict[str, Any], ctx_map: dict[str, Any], strict: bool
+) -> Any:
     """字符串中的占位符：整值形态 → 保类型替换；内嵌形态 → 字符串化拼接"""
     if _FULL_PH.match(s):
         return _resolve_expr(s[2:-2].strip(), input_map, ctx_map, strict, s)
@@ -595,7 +616,9 @@ def _resolve_str(s, input_map, ctx_map, strict):
     return s
 
 
-def _resolve_tree(value, input_map, ctx_map, strict):
+def _resolve_tree(
+    value: Any, input_map: dict[str, Any], ctx_map: dict[str, Any], strict: bool
+) -> Any:
     """深度替换结构中的占位符（dict/list 递归；非字符串原样保留）"""
     if isinstance(value, str):
         return _resolve_str(value, input_map, ctx_map, strict)
@@ -608,24 +631,27 @@ def _resolve_tree(value, input_map, ctx_map, strict):
     return value
 
 
-def _json_eq(a, b):
+def _json_eq(a: Any, b: Any) -> bool:
     """JSON 语义相等：数值类（bool 除外）交叉互比，其余须同型（对齐 true≠1）"""
     if isinstance(a, bool) or isinstance(b, bool):
         return a is b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return a == b
     if type(a) is type(b):
-        return a == b
+        return cast(bool, a == b)
     return False
 
 
 # ─── when 守卫判定 ───────────────────────────────────────────
 
 
-def _eval_when(when, input_map, ctx_map):
+def _eval_when(
+    when: dict[str, Any], input_map: dict[str, Any], ctx_map: dict[str, Any]
+) -> bool:
     """when 判定（取值位非 strict：路径取不到 → null 三态，服务 exists/is null 断言）"""
     op, param_key = _split_when(when)
-    left = _resolve_tree(when[op], input_map, ctx_map, False)
+    # 注册期 _validate_when 已保证 op 非 None（恰一个白名单算子）；cast 仅类型收窄（运行时 no-op）
+    left = _resolve_tree(when[cast("str", op)], input_map, ctx_map, False)
     right = (
         _resolve_tree(when[param_key], input_map, ctx_map, False)
         if param_key in when
@@ -643,12 +669,12 @@ def _eval_when(when, input_map, ctx_map):
     # lt / lte / gt / gte：数值比较；类型不可比显式 Err（不猜）
     try:
         if op == "lt":
-            return left < right
+            return cast(bool, left < right)
         if op == "lte":
-            return left <= right
+            return cast(bool, left <= right)
         if op == "gt":
-            return left > right
-        return left >= right
+            return cast(bool, left > right)
+        return cast(bool, left >= right)
     except TypeError:
         raise _StepFailure(
             f"when 算子 {op} 的操作数类型不可比: {type(left).__name__} vs {type(right).__name__}"
@@ -658,7 +684,9 @@ def _eval_when(when, input_map, ctx_map):
 # ─── 执行器（线性步骤循环 + fail-fast；§2 生命线） ─────────────
 
 
-def _prescan_sources(defn, route_override, now, ctx):
+def _prescan_sources(
+    defn: dict[str, Any], route_override: Any, now: int, ctx: Any
+) -> set[str] | None:
     """预扫全部 mutation 步骤的数据源集合（run 级原子包络依据；plan 是纯函数不执行）。
 
     返回 None = 预扫失败 → 降级裸跑（单步骤内原子，emit 反馈事件，禁静默）。
@@ -671,8 +699,11 @@ def _prescan_sources(defn, route_override, now, ctx):
         try:
             pool = _new_id_pool(step["model"], step["data"])
             plan = _call(
-                lambda s=step, p=pool: get_core().plan_mutation(
-                    s["model"], s["data"], now, p, ctx, route_override
+                cast(
+                    "Callable[[], Any]",
+                    lambda s=step, p=pool: get_core().plan_mutation(
+                        s["model"], s["data"], now, p, ctx, route_override
+                    ),
                 )
             )
             sources |= _sources_of(plan)
@@ -691,7 +722,7 @@ def _prescan_sources(defn, route_override, now, ctx):
     return sources
 
 
-def _warn_non_atomic(sources):
+def _warn_non_atomic(sources: set[str]) -> None:
     """多源 run：无法原子 → 程序化声明（允许顺序执行，禁止静默；对齐 non_atomic_write 语义）"""
     listed = sorted(sources)
     _emit_feedback(
@@ -707,7 +738,13 @@ def _warn_non_atomic(sources):
     )
 
 
-async def _exec_step(step, input_map, ctx_map, route_override, index):
+async def _exec_step(
+    step: dict[str, Any],
+    input_map: dict[str, Any],
+    ctx_map: dict[str, Any],
+    route_override: Any,
+    index: int,
+) -> Any:
     """执行单步骤（when 已判定通过）：query / mutation / fail"""
     from . import crud  # 延迟导入避免环
 
@@ -732,7 +769,14 @@ async def _exec_step(step, input_map, ctx_map, route_override, index):
     raise _StepFailure(_resolve_str(step["message"], input_map, ctx_map, True), index)
 
 
-async def _run_steps(defn, input_map, ctx_map, trace, dry, route_override):
+async def _run_steps(
+    defn: dict[str, Any],
+    input_map: dict[str, Any],
+    ctx_map: dict[str, Any],
+    trace: builtins.list[dict[str, Any]],
+    dry: bool,
+    route_override: Any,
+) -> None:
     """线性步骤循环：迹与 defn.steps 一一对应（skipped/wouldRun/ran/failed 均留痕）。
 
     失败抛 _StepFailure（带步骤下标）——外层收尾统一落 failed 终态 + 整体回滚。
@@ -780,7 +824,7 @@ async def _run_steps(defn, input_map, ctx_map, trace, dry, route_override):
 
 
 @contextmanager
-def _internal_ctx():
+def _internal_ctx() -> Iterator[None]:
     """干净 internal 上下文（{internal: True}，丢弃触发者 roles）
 
     不用 permission.run_as_internal：它保留原 roles，而 core 对 guest **硬拒写**先于
@@ -794,10 +838,10 @@ def _internal_ctx():
         _permission._ctx.reset(token)
 
 
-async def _persist_write(doc):
+async def _persist_write(doc: dict[str, Any]) -> Any:
     """run 记录写入（internal 上下文——__workflowRun write 显式空名单仅放行 internal/admin）"""
 
-    def _do():
+    def _do() -> Any:
         """internal 上下文内对内建 __workflowRun 执行 mutation（写入 run 记录）"""
         from . import crud
 
@@ -807,10 +851,10 @@ async def _persist_write(doc):
         return await _do()
 
 
-async def _persist_update(rid, patch):
+async def _persist_update(rid: Any, patch: dict[str, Any]) -> Any:
     """run 记录收尾更新（事务外独立提交：业务事务回滚不影响失败 run 可查——铁律 B）"""
 
-    def _do():
+    def _do() -> Any:
         """internal 上下文内按 _id 更新 __workflowRun 记录"""
         from . import crud
 
@@ -820,7 +864,13 @@ async def _persist_update(rid, patch):
         return await _do()
 
 
-async def run(name, input_map=None, *, dry_run=False, route_override=None):
+async def run(
+    name: str,
+    input_map: dict[str, Any] | None = None,
+    *,
+    dry_run: bool = False,
+    route_override: Any = None,
+) -> dict[str, Any]:
     """触发工作流 → 完整 run 文档（§3）
 
     统一契约：执行期一切业务失败（步骤 Err / fail 步骤 / 权限拒绝）都表达为 run 终态
@@ -844,7 +894,7 @@ async def run(name, input_map=None, *, dry_run=False, route_override=None):
     now = int(time.time() * 1000)
     dry = bool(dry_run)
 
-    run_doc = {
+    run_doc: dict[str, Any] = {
         "workflow": name,
         "status": "running",
         "input": inp,
@@ -879,9 +929,9 @@ async def run(name, input_map=None, *, dry_run=False, route_override=None):
 
     # 3. 步骤循环（单源时整体原子；失败 _StepFailure 冒泡出事务 → 整体回滚）
     trace = run_doc["steps"]
-    ctx_map: dict = {}
+    ctx_map: dict[str, Any] = {}
 
-    async def _execute():
+    async def _execute() -> None:
         """步骤循环执行体：交给 _run_steps（供 run_atomic 包裹实现单源整体原子）"""
         await _run_steps(d, inp, ctx_map, trace, dry, route_override)
 
@@ -911,7 +961,7 @@ async def run(name, input_map=None, *, dry_run=False, route_override=None):
     return _with_meta(run_doc, saved)
 
 
-def _with_meta(run_doc, saved):
+def _with_meta(run_doc: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
     """内存 run 文档补落库元数据（_id / createdAt / updatedAt）"""
     return {
         **run_doc,
