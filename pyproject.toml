@@ -26,7 +26,7 @@ authors = [
 ]
 dependencies = [
   "pymongo>=4.9",
-  "rust-store-py>=6.0.0,<7.0.0",
+  "rust-store-py>=6.0.5,<7.0.0",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
